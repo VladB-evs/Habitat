@@ -1,9 +1,9 @@
 {
   "name": "habitat",
   "productName": "Habitat",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
-  "description": "Object-based personal knowledge base \u2014 Notion databases \u00d7 Capacities daily notes \u00d7 Anytype design.",
+  "description": "Object-based personal knowledge base — Notion databases × Capacities daily notes × Anytype design.",
   "main": "electron/main.js",
   "scripts": {
     "dev": "node scripts/dev-app-name.mjs && concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && HABITAT_DEV=1 electron .\"",
