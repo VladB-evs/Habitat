@@ -1,0 +1,112 @@
+{
+  "name": "habitat",
+  "productName": "Habitat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Object-based personal knowledge base — Notion databases × Capacities daily notes × Anytype design.",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && HABITAT_DEV=1 electron .\"",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "start": "npm run build && electron .",
+    "app": "electron .",
+    "mcp": "node mcp/server.mjs",
+    "dist": "npm run build && electron-builder --publish never",
+    "release": "npm run build && electron-builder --publish always"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@tiptap/extension-color": "^2.27.2",
+    "@tiptap/extension-highlight": "^2.27.2",
+    "@tiptap/extension-mention": "^2.27.2",
+    "@tiptap/extension-placeholder": "^2.27.2",
+    "@tiptap/extension-task-item": "^2.27.2",
+    "@tiptap/extension-task-list": "^2.27.2",
+    "@tiptap/extension-text-style": "^2.27.2",
+    "@tiptap/extension-underline": "^2.27.2",
+    "@tiptap/react": "^2.27.2",
+    "@tiptap/starter-kit": "^2.27.2",
+    "@tiptap/suggestion": "^2.27.2",
+    "motion": "^12.42.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-icons": "^5.7.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^6.0.4",
+    "concurrently": "^10.0.4",
+    "electron": "^43.2.0",
+    "electron-builder": "^26.15.3",
+    "emojibase-data": "^17.0.0",
+    "playwright-core": "^1.62.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "wait-on": "^9.1.0"
+  },
+  "bin": {
+    "habitat-mcp": "mcp/server.mjs"
+  },
+  "build": {
+    "appId": "com.habitat.app",
+    "productName": "Habitat",
+    "files": [
+      "electron/**/*",
+      "mcp/**/*",
+      "dist/**/*",
+      "index.html",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "REPLACE_ME",
+        "repo": "Habitat"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "identity": null,
+      "gatekeeperAssess": false
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

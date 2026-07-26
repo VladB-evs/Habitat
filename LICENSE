@@ -1,0 +1,25 @@
+Copyright © 2026 Vlad Bacila. All rights reserved.
+
+This software and its source code are proprietary and confidential.
+
+No permission is granted to any person to use, copy, modify, merge, publish,
+distribute, sublicense, sell, or create derivative works from this software or
+any part of it, in source or binary form, by any means, without the prior
+written permission of the copyright holder.
+
+Viewing this repository does not grant any licence. Making the source publicly
+readable is for transparency and does not place it in the public domain, nor
+does it grant any right to reuse it in whole or in part, including for training
+machine learning models.
+
+Any released binaries are provided for personal use by their recipient only and
+may not be redistributed.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Third-party dependencies remain under their own licences.

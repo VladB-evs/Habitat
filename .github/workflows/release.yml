@@ -1,0 +1,35 @@
+# Builds Habitat and publishes it to a GitHub Release.
+#
+# Tag a version to ship it:
+#   npm version patch && git push --follow-tags
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Build and publish
+        run: npm run release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Builds are deliberately unsigned; the app updates itself by swapping
+          # its own bundle rather than going through Squirrel.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
