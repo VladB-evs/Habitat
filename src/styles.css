@@ -2235,6 +2235,24 @@ tr:hover .row-del {
   font-size: 14px;
 }
 
+/* Sits on its own line under the primary button, centred with everything else. */
+.onboard-open {
+  display: block;
+  margin: 16px auto 0;
+  font-size: 13px;
+  color: var(--text-3);
+  text-decoration: none;
+}
+
+.onboard-open:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.onboard-inner .field-error {
+  margin-top: 8px;
+}
+
 .onboard-folder-hint {
   margin-top: 22px;
   font-size: 12.5px;

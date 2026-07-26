@@ -155,6 +155,16 @@ export function Sidebar({
             >
               <Icon name="plus" size={14} /> New habitat…
             </button>
+            <button
+              className="menu-item"
+              onClick={async () => {
+                setHabMenu(false);
+                const res = await api.habitats.open();
+                if (res && !('error' in res)) window.location.reload();
+              }}
+            >
+              <Icon name="folder" size={14} /> Open existing…
+            </button>
           </div>
         </>
       )}

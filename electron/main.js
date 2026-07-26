@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Notification, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell } = require('electron');
 const telegram = require('./telegram');
 const updater = require('./updater');
 const pkg = require('../package.json');
@@ -10,7 +10,10 @@ const {
   initDb, api, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePersonType, ensureTagType,
 } = require('./db');
 
+// Set before anything reads it: the menu bar, the About panel and ~/Library all
+// take their name from here. Without it an unpackaged run says "Electron".
 app.setName('Habitat');
+app.setAboutPanelOptions({ applicationName: 'Habitat', applicationVersion: app.getVersion() });
 if (process.env.HABITAT_USERDATA) app.setPath('userData', process.env.HABITAT_USERDATA);
 
 // One instance per profile — a second launch focuses the existing window
@@ -96,6 +99,65 @@ function removeVaultFiles(dbPath) {
   } catch {
     /* not empty, or already gone — leave it */
   }
+}
+
+// Set once the IPC handlers exist, so the File menu can reuse the same code path.
+let openExistingHabitat = null;
+
+/** The stock menu is labelled after the executable, so build our own. */
+function installMenu() {
+  const isMac = process.platform === 'darwin';
+  const template = [
+    ...(isMac
+      ? [
+          {
+            label: 'Habitat',
+            submenu: [
+              { role: 'about', label: 'About Habitat' },
+              { type: 'separator' },
+              { role: 'services' },
+              { type: 'separator' },
+              { role: 'hide', label: 'Hide Habitat' },
+              { role: 'hideOthers' },
+              { role: 'unhide' },
+              { type: 'separator' },
+              { role: 'quit', label: 'Quit Habitat' },
+            ],
+          },
+        ]
+      : []),
+    {
+      label: 'File',
+      submenu: [
+        {
+          label: 'Open Habitat…',
+          accelerator: 'CmdOrCtrl+O',
+          click: async () => {
+            const res = await openExistingHabitat?.();
+            if (res && !res.error) win?.reload();
+          },
+        },
+        { type: 'separator' },
+        isMac ? { role: 'close' } : { role: 'quit' },
+      ],
+    },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 function createWindow() {
@@ -523,6 +585,43 @@ function boot() {
     return { id, dbPath: file };
   });
 
+  /**
+   * Adopts a habitat that already exists on disk — the folder you point at, or
+   * any folder holding a single .db file. Used both from onboarding and from the
+   * habitat menu, so a synced or copied vault opens without being recreated.
+   */
+  openExistingHabitat = async () => {
+    const dir = await pickFolderDialog('Open a habitat', 'Choose the folder that holds the habitat’s .db file');
+    if (!dir) return null;
+
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.db'));
+    if (!files.length) return { error: 'no-db' };
+    // A folder with several databases is ambiguous — prefer one named after it.
+    const preferred = files.find((f) => f === `${path.basename(dir)}.db`) || files.find((f) => f === 'habitat.db') || files[0];
+    const file = path.join(dir, preferred);
+
+    const cfg = loadConfig();
+    const known = (cfg.habitats || []).find((h) => path.resolve(h.dbPath) === path.resolve(file));
+    const id = known?.id || randomUUID().replace(/-/g, '').slice(0, 10);
+    const name = known?.name || path.basename(file, '.db');
+
+    openVault(file);
+    // Older or hand-copied vaults may predate these; both are safe to call twice.
+    ensurePersonType();
+    ensureTagType();
+    currentDbPath = file;
+    if (!envMode) {
+      saveConfig({
+        habitats: known ? cfg.habitats : [...(cfg.habitats || []), { id, name, dbPath: file, flavor: 'existing' }],
+        activeId: id,
+        onboarded: true,
+      });
+    }
+    return { id, name, dbPath: file };
+  };
+
+  ipcMain.handle('habitats:open', () => openExistingHabitat());
+
   ipcMain.handle('habitats:switch', (_e, { id }) => {
     const { habitats } = habitatsState();
     const target = habitats.find((h) => h.id === id);
@@ -592,6 +691,7 @@ function boot() {
     return { ok: true, onboarding: true };
   });
 
+  installMenu();
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

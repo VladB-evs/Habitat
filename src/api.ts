@@ -160,6 +160,8 @@ export const api = {
       dir?: string;
     }): Promise<{ id: string; dbPath: string } | { error: string }> => inv('habitats:create', p),
     switchTo: (id: string): Promise<{ id: string; dbPath: string } | null> => inv('habitats:switch', { id }),
+    /** Adopts a habitat that already exists on disk, e.g. one synced from another machine. */
+    open: (): Promise<{ id: string; name: string; dbPath: string } | { error: string } | null> => inv('habitats:open'),
     onboard: (p: {
       name: string;
       flavor: string;

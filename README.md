@@ -3,11 +3,6 @@
 An object-based personal knowledge base for macOS. Local-first, no folders, no markdown files —
 everything is a typed object in a SQLite database, and objects connect to each other.
 
-Inspired by the best parts of three tools:
-
-- **Notion** — every type is a database with editable properties, plus a dashboard
-- **Capacities** — daily notes as a frictionless journal, object-based linking and graph
-- **Anytype** — calm, warm design language
 
 > **This is not open source.** The code is readable here, but all rights are reserved —
 > see [LICENSE](LICENSE).

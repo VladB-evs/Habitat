@@ -48,6 +48,25 @@ export function Onboarding() {
   const [busy, setBusy] = useState(false);
   const trimmedHabitatName = habitatName.trim();
 
+  const [openError, setOpenError] = useState('');
+
+  /** Points Habitat at a vault that already exists instead of making a new one. */
+  const openExisting = async () => {
+    setOpenError('');
+    setBusy(true);
+    try {
+      const res = await api.habitats.open();
+      if (!res) return;
+      if ('error' in res) {
+        setOpenError("That folder has no .db file in it. Pick the folder that holds the habitat's database.");
+        return;
+      }
+      window.location.reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const addPerson = () => setPeople((list) => [...list, { name: '', nickname: '' }]);
   const updatePerson = (i: number, patch: Partial<PersonDraft>) =>
     setPeople((list) => list.map((p, j) => (j === i ? { ...p, ...patch } : p)));
@@ -100,6 +119,12 @@ export function Onboarding() {
             >
               Continue
             </button>
+
+            {/* Already have a habitat — from another machine, a backup, or a sync folder. */}
+            <button className="link-btn onboard-open" disabled={busy} onClick={openExisting}>
+              I already have a habitat — open its folder
+            </button>
+            {openError && <div className="field-error">{openError}</div>}
           </>
         )}
 

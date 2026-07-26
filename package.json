@@ -3,17 +3,18 @@
   "productName": "Habitat",
   "version": "0.1.0",
   "private": true,
-  "description": "Object-based personal knowledge base — Notion databases × Capacities daily notes × Anytype design.",
+  "description": "Object-based personal knowledge base \u2014 Notion databases \u00d7 Capacities daily notes \u00d7 Anytype design.",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && HABITAT_DEV=1 electron .\"",
+    "dev": "node scripts/dev-app-name.mjs && concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && HABITAT_DEV=1 electron .\"",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "start": "npm run build && electron .",
-    "app": "electron .",
+    "start": "node scripts/dev-app-name.mjs && npm run build && electron .",
+    "app": "node scripts/dev-app-name.mjs && electron .",
     "mcp": "node mcp/server.mjs",
     "dist": "npm run build && electron-builder --publish never",
-    "release": "npm run build && electron-builder --publish always"
+    "release": "npm run build && electron-builder --publish always",
+    "icon": "node scripts/make-icon.mjs && iconutil -c icns build/icon.iconset -o build/icon.icns"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -76,37 +77,20 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         },
         {
           "target": "zip",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         }
       ],
-      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "artifactName": "${productName}-${version}.${ext}",
       "identity": null,
-      "gatekeeperAssess": false
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "category": "Office"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "gatekeeperAssess": false,
+      "icon": "build/icon.icns"
     }
   }
 }

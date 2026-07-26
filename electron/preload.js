@@ -11,7 +11,7 @@ const CHANNELS = new Set([
   'dashboard:get', 'dashboard:save', 'dashboard:reset',
   'settings:get', 'settings:chooseVault', 'settings:reveal',
   'profile:get', 'import:obsidianVault',
-  'habitats:create', 'habitats:switch', 'habitats:onboard', 'habitats:delete', 'habitats:pickFolder',
+  'habitats:create', 'habitats:open', 'habitats:switch', 'habitats:onboard', 'habitats:delete', 'habitats:pickFolder',
   'vars:list', 'vars:save',
   'automations:list', 'automations:save', 'automations:tick', 'automations:run', 'automations:appStart',
   'telegram:get', 'telegram:save', 'telegram:test', 'telegram:poll',
