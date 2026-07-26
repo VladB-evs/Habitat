@@ -95,7 +95,7 @@ deletes only with `HABITAT_EDIT=1`. Settings → API shows a ready-to-paste conf
 npm version patch && git push --follow-tags
 ```
 
-The [release workflow](.github/workflows/release.yml) builds on macOS and Windows and publishes to
+The [release workflow](.github/workflows/release.yml) builds for Apple Silicon and publishes to
 GitHub Releases, which is also the update feed.
 
 ## Stack
