@@ -132,7 +132,7 @@ export function Onboarding() {
           <>
             <h1>What should we call you?</h1>
             <p className="onboard-sub">
-              Personalizes your dashboard, and adds you to Person so you can @-mention yourself anywhere.
+              Personalizes your dashboard, and makes your own card in People so you can @-mention yourself anywhere.
             </p>
             <input
               className="field onboard-name"

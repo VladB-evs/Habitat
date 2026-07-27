@@ -4,6 +4,8 @@ import type {
   GraphData,
   Obj,
   ObjType,
+  Person,
+  PersonFieldGroup,
   PropDef,
   SettingsInfo,
   Stats,
@@ -131,6 +133,17 @@ export const api = {
   },
   profile: {
     get: (): Promise<{ name: string } | null> => inv('profile:get'),
+  },
+  people: {
+    list: (): Promise<Person[]> => inv('people:list'),
+    get: (id: string): Promise<Person | null> => inv('people:get', id),
+    create: (p: { title?: string; props?: Record<string, any>; self?: boolean }): Promise<Person> => inv('people:create', p),
+    /** The user's own card, or `null` if they haven't made one. */
+    self: (): Promise<Person | null> => inv('people:self'),
+    setSelf: (id: string | null): Promise<Person | null> => inv('people:setSelf', id),
+    birthdays: (within = 60): Promise<Person[]> => inv('people:birthdays', { within }),
+    /** The catalogue of optional details a person can be given. */
+    fields: (): Promise<PersonFieldGroup[]> => inv('people:fields'),
   },
   importObsidian: (
     mode: 'vault' | 'daily'

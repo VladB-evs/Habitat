@@ -12,9 +12,11 @@ import { ObjectPage } from './components/ObjectPage';
 import { TemplatePage } from './components/TemplatePage';
 const GraphView = lazy(() => import('./components/GraphView').then((m) => ({ default: m.GraphView })));
 import { TagsView } from './components/TagsView';
+import { People } from './components/People';
 import { SearchPalette } from './components/SearchPalette';
 import { Icon } from './components/Icons';
 import { pageIn, snap, softSpring, spring } from './motion';
+import { PEOPLE_TYPE } from './util';
 
 const viewKey = (v: View) =>
   v.kind === 'type' ? `type:${v.typeId}` : v.kind === 'object' ? `object:${v.id}` : v.kind === 'template' ? `tpl:${v.id}` : v.kind;
@@ -31,7 +33,10 @@ function PaneView({ view }: { view: View }) {
           </Suspense>
         )}
         {view.kind === 'tags' && <TagsView />}
-        {view.kind === 'type' && <TypeTable key={view.typeId} typeId={view.typeId} />}
+        {view.kind === 'people' && <People />}
+        {/* People has its own view rather than the generic table. */}
+        {view.kind === 'type' &&
+          (view.typeId === PEOPLE_TYPE ? <People /> : <TypeTable key={view.typeId} typeId={view.typeId} />)}
         {view.kind === 'object' && <ObjectPage key={view.id} id={view.id} />}
         {view.kind === 'template' && <TemplatePage key={view.id} id={view.id} />}
       </motion.div>

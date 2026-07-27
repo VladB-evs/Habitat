@@ -100,7 +100,42 @@ export interface MentionEntry extends Obj {
   subtitle?: string;
 }
 
-export type AutoTriggerKind = 'created' | 'updated' | 'propSet' | 'deleted' | 'daily' | 'weekly' | 'dueToday' | 'appStart';
+/** How far off someone's next birthday is, and what age it makes them. */
+export interface NextBirthday {
+  date: string;
+  month: number;
+  day: number;
+  /** Days from today — 0 means it's today. */
+  days: number;
+  /** The date of that next birthday, as a YYYY-MM-DD key. */
+  key: string;
+  /** Null when the stored year is a placeholder rather than a real birth year. */
+  turning: number | null;
+  age: number | null;
+}
+
+/** A People object with the bits the directory views derive. */
+export interface Person extends Obj {
+  isSelf: boolean;
+  nextBirthday: NextBirthday | null;
+}
+
+/** One group of optional person details, as offered by the "add detail" picker. */
+export interface PersonFieldGroup {
+  group: string;
+  fields: PropDef[];
+}
+
+export type AutoTriggerKind =
+  | 'created'
+  | 'updated'
+  | 'propSet'
+  | 'deleted'
+  | 'daily'
+  | 'weekly'
+  | 'dueToday'
+  | 'birthday'
+  | 'appStart';
 export type AutoActionKind =
   | 'setProp'
   | 'createObject'

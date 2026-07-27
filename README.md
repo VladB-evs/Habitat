@@ -43,6 +43,9 @@ up. Settings → General shows the exact path and the habitat's code.
 - **Link** — created from `@`-mentions in any editor and from relation properties. Backlinks sit at
   the bottom of every object page; the Graph view draws the whole web.
 - **Daily Note** — one object per day, keyed by date.
+- **People** — the address book, with its own view instead of a table: a card for you, upcoming
+  birthdays, and a person page with contact details. Still ordinary objects, so `@`-mentions,
+  relations and backlinks all work.
 - **Habitat** — a whole vault. Switch between them from the sidebar; each has its own file.
 
 ## Editor
@@ -69,11 +72,13 @@ Settings → Automations builds rules in plain language: *when* something happen
 conditions hold, *then* run a list of actions.
 
 - **Triggers** — object created/edited/deleted, a property changes to a value, a date property
-  comes up, every day or on chosen weekdays at a time, or when the app opens
+  comes up, someone's birthday comes up, every day or on chosen weekdays at a time, or when the
+  app opens
 - **Actions** — set a property, create an object, add a line to today's daily note, add a tag,
   link objects, pin, notify, or message you on Telegram
 - **Templates** — `{{link}}` (a real link, not just a name), `{{title}}`, `{{prop:id}}`,
-  `{{today}}`, `{{tomorrow}}`, `{{now}}`, `{{date+7}}`
+  `{{today}}`, `{{tomorrow}}`, `{{now}}`, `{{date+7}}`, and `{{turning}}`/`{{age}}` in birthday
+  rules
 
 ## Capture from your phone
 
@@ -90,7 +95,8 @@ curl -H "Authorization: Bearer YOUR_TOKEN" "http://127.0.0.1:37373/objects?type=
 ```
 
 Endpoints cover objects, search, backlinks, daily notes, tasks, tags, stats, automations and
-capture. [`mcp/server.mjs`](mcp/server.mjs) puts the same surface behind MCP, so Claude, Cursor or
+capture, plus the address book — `/people`, `/people/:id`, `/people/birthdays`, `/people/fields`
+and `/me`. [`mcp/server.mjs`](mcp/server.mjs) puts the same surface behind MCP, so Claude, Cursor or
 any MCP client can read and write the vault — reads plus create/capture by default, edits and
 deletes only with `HABITAT_EDIT=1`. Settings → API shows a ready-to-paste config.
 

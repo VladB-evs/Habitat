@@ -4659,3 +4659,585 @@ code.var-ref-name {
   margin-left: 0;
 }
 
+
+/* ============================================================
+   People — the address book: directory view, cards, person page
+   ============================================================ */
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  user-select: none;
+}
+
+/* ---------- directory ---------- */
+
+.people-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.people-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 10px;
+  height: 30px;
+  border: 1px solid var(--border-2);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--text-3);
+}
+
+.people-search:focus-within {
+  border-color: var(--text-3);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.people-search input {
+  width: 180px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.people-body {
+  padding: 0 40px 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.people-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-3);
+  margin-bottom: 12px;
+}
+
+/* ---------- the self card ---------- */
+
+.self-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  text-align: left;
+  padding: 18px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--border-2);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, var(--bg-2)), var(--bg-2) 62%);
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.self-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-2));
+}
+
+.self-card.empty {
+  background: var(--bg-2);
+  border-style: dashed;
+}
+
+.self-avatar-slot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px dashed var(--border-2);
+  color: var(--text-3);
+}
+
+.self-avatar-slot.small {
+  width: 32px;
+  height: 32px;
+}
+
+.self-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.self-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.self-badge {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--mention-fg);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  padding: 3px 9px;
+  border-radius: 20px;
+}
+
+.self-sub {
+  font-size: 12.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- birthdays ---------- */
+
+.bday-strip {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.bday-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  width: 128px;
+  padding: 14px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-2);
+  cursor: pointer;
+}
+
+.bday-card:hover {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+}
+
+.bday-card.today {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border-2));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-2));
+}
+
+.bday-name {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bday-when {
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.bday-card.today .bday-when {
+  color: var(--mention-fg);
+  font-weight: 600;
+}
+
+.bday-date {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.bday-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  color: var(--text-2);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.bday-pill.today {
+  color: var(--mention-fg);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* ---------- filters and adding ---------- */
+
+.people-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 4px 11px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+
+.filter-chip:hover {
+  border-color: var(--border-2);
+  color: var(--text);
+}
+
+.filter-chip.on {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+.filter-n {
+  font-size: 11px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.person-add {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px dashed var(--border-2);
+  border-radius: 12px;
+  background: var(--bg-2);
+}
+
+.person-add-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  outline: none;
+}
+
+/* ---------- cards ---------- */
+
+.people-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 10px;
+}
+
+.person-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-2);
+  cursor: pointer;
+}
+
+.person-card:hover {
+  background: var(--bg-3);
+  border-color: var(--border-2);
+}
+
+.person-card-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.person-card-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 14.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-card-name em {
+  font-style: normal;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.person-card-sub {
+  font-size: 12.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-card-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.rel-chip {
+  font-size: 11.5px;
+  color: var(--text-2);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  padding: 2px 9px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+/* ---------- list ---------- */
+
+.people-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.person-row {
+  display: grid;
+  grid-template-columns: 28px minmax(140px, 1.4fr) minmax(0, 1.4fr) minmax(0, 1fr) 132px 120px;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.person-row:hover {
+  background: var(--bg-2);
+}
+
+.person-row-name {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-row-name em {
+  font-style: normal;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-3);
+}
+
+.person-row-cell {
+  font-size: 12.5px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-row-cell.dim {
+  color: var(--text-3);
+}
+
+/* ---------- the person page ---------- */
+
+.person-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding-bottom: 4px;
+}
+
+.person-hero-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.person-name {
+  width: 100%;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  padding: 0;
+}
+
+.person-name::placeholder {
+  color: var(--text-3);
+}
+
+.person-hero-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.person-nick {
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.person-work {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.self-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  font-size: 12px;
+  color: var(--text-3);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 5px 11px;
+  border-radius: 20px;
+  cursor: pointer;
+}
+
+.self-toggle:hover {
+  color: var(--text-2);
+  border-color: var(--border-2);
+}
+
+.self-toggle.on {
+  color: var(--mention-fg);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.person-quick {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.quick-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--text-2);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 7px 14px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.quick-action:hover {
+  color: var(--text);
+  background: var(--bg-3);
+  border-color: var(--border-2);
+}
+
+.person-props {
+  margin-top: 20px;
+}
+
+.person-notes {
+  margin-top: 26px;
+}
+
+.person-notes h3 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+
+/* ---------- the detail picker ---------- */
+
+.field-picker .popover-list {
+  max-height: 280px;
+}
+
+.picker-group {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-3);
+  padding: 10px 10px 4px;
+}
+
+/* ---------- birthdays widget ---------- */
+
+.bday-widget {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bday-widget-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bday-widget-row:hover {
+  background: var(--bg-2);
+}
+
+.bday-widget-row .row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

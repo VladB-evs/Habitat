@@ -8,6 +8,7 @@ export type View =
   | { kind: 'daily' }
   | { kind: 'graph' }
   | { kind: 'tags' }
+  | { kind: 'people' }
   | { kind: 'type'; typeId: string }
   | { kind: 'object'; id: string }
   | { kind: 'template'; id: string };
@@ -48,6 +49,7 @@ function initialView(): View {
   if (h.startsWith('/daily')) return { kind: 'daily' };
   if (h.startsWith('/graph')) return { kind: 'graph' };
   if (h.startsWith('/tags')) return { kind: 'tags' };
+  if (h.startsWith('/people')) return { kind: 'people' };
   if (h.startsWith('/type/')) return { kind: 'type', typeId: h.slice(6) };
   if (h.startsWith('/object/')) return { kind: 'object', id: h.slice(8) };
   return { kind: 'dashboard' };

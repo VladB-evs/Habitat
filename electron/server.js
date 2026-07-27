@@ -109,6 +109,56 @@ const ROUTES = [
 
   ['GET', '/tasks', ({ api, query }) => api['tasks:forDay']({ dateKey: query.date || today() })],
 
+  // ---------- People ----------
+
+  [
+    'GET',
+    '/people',
+    ({ api, query }) => {
+      const list = api['people:list']();
+      const q = String(query.q || '').trim().toLowerCase();
+      const filtered = q
+        ? list.filter((p) =>
+            [p.title, p.props?.nickname, p.props?.company, p.props?.email, p.props?.phone]
+              .some((v) => String(v || '').toLowerCase().includes(q))
+          )
+        : list;
+      const limit = Number(query.limit) || 0;
+      return limit > 0 ? filtered.slice(0, limit) : filtered;
+    },
+  ],
+
+  /** Birthdays coming up, soonest first. `within` is days from today (default 60). */
+  ['GET', '/people/birthdays', ({ api, query }) => api['people:birthdays']({ within: Number(query.within) || 60 })],
+
+  /** Property ids come from the People type in /types, plus these optional extras. */
+  ['GET', '/people/fields', ({ api }) => api['people:fields']()],
+
+  /** The card that represents whoever owns this vault. */
+  ['GET', '/me', ({ api }) => api['people:self']()],
+
+  // Literal paths above win because routes are matched in order.
+  ['GET', '/people/:id', ({ api, params }) => api['people:get'](params.id)],
+
+  [
+    'POST',
+    '/people',
+    ({ api, body }) => {
+      if (!body.name && !body.title) throw new HttpError(400, 'name is required');
+      return api['people:create'](body);
+    },
+  ],
+
+  [
+    'PATCH',
+    '/people/:id',
+    ({ api, params, body }) => {
+      const saved = api['objects:update']({ id: params.id, patch: body });
+      // Read it back so the reply carries the birthday countdown like every other people route.
+      return saved && api['people:get'](params.id);
+    },
+  ],
+
   ['GET', '/tags', ({ api }) => api['tags:list']()],
 
   ['GET', '/stats', ({ api }) => api['stats:get']()],

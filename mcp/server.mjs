@@ -148,6 +148,133 @@ server.registerTool(
   async ({ date }) => text((await call('GET', `/tasks${q({ date })}`)).map(slim))
 );
 
+// ---------- people ----------
+
+/** People carry contact details and a birthday countdown; agents want those flattened. */
+const person = (p) =>
+  p && {
+    id: p.id,
+    name: p.title,
+    is_me: !!p.isSelf,
+    props: p.props,
+    birthday: p.nextBirthday && {
+      date: p.props?.birthday,
+      next: p.nextBirthday.key,
+      days_away: p.nextBirthday.days,
+      turning: p.nextBirthday.turning,
+      age: p.nextBirthday.age,
+    },
+    snippet: p.snippet,
+  };
+
+server.registerTool(
+  'list_people',
+  {
+    title: 'List people',
+    description:
+      'Everyone in the address book, with their contact details and birthdays. Optionally filtered by name, nickname, company, email or phone.',
+    inputSchema: { query: z.string().optional().describe('narrow the list by name or detail') },
+  },
+  async ({ query }) => text((await call('GET', `/people${q({ q: query })}`)).map(person))
+);
+
+server.registerTool(
+  'get_person',
+  {
+    title: 'Get person',
+    description: 'One person: every detail on their card plus whatever is written in their notes.',
+    inputSchema: { id: z.string() },
+  },
+  async ({ id }) => {
+    const p = await call('GET', `/people/${encodeURIComponent(id)}`);
+    if (!p) throw new Error('no person with that id');
+    return text({ ...person(p), extra_fields: p.extraProps, body: docText(p.content) });
+  }
+);
+
+server.registerTool(
+  'whoami',
+  {
+    title: 'About the user',
+    description: "The user's own card — their name, birthday and details, as they filled it in.",
+    inputSchema: {},
+  },
+  async () => {
+    const me = await call('GET', '/me');
+    return text(me ? { ...person(me), body: docText(me.content) } : 'The user has not filled in their own card yet.');
+  }
+);
+
+server.registerTool(
+  'upcoming_birthdays',
+  {
+    title: 'Upcoming birthdays',
+    description: 'Whose birthday is coming up, soonest first, with how many days away it is.',
+    inputSchema: { within_days: z.number().optional().describe('how far ahead to look (default 60)') },
+  },
+  async ({ within_days }) =>
+    text(
+      (await call('GET', `/people/birthdays${q({ within: within_days ?? 60 })}`)).map((p) => ({
+        name: p.title,
+        date: p.props?.birthday,
+        days_away: p.nextBirthday?.days,
+        turning: p.nextBirthday?.turning,
+      }))
+    )
+);
+
+server.registerTool(
+  'list_person_fields',
+  {
+    title: 'List person fields',
+    description:
+      'The optional details a person can be given (work, social, personal…), with the exact ids and kinds to use when adding one.',
+    inputSchema: {},
+  },
+  async () => text(await call('GET', '/people/fields'))
+);
+
+server.registerTool(
+  'add_person',
+  {
+    title: 'Add person',
+    description:
+      'Add someone to the address book. Core details are nickname, relationship, birthday (YYYY-MM-DD), phone, email, company and role.',
+    inputSchema: {
+      name: z.string(),
+      details: z.record(z.string(), z.any()).optional().describe('property ids from the People type'),
+      notes: z.string().optional().describe('free text about them, one paragraph per line'),
+    },
+  },
+  async ({ name, details, notes }) => {
+    const made = await call('POST', '/people', { name, props: details || {} });
+    if (notes) await call('PATCH', `/objects/${encodeURIComponent(made.id)}`, { content: doc(notes) });
+    return text(person(made));
+  }
+);
+
+server.registerTool(
+  'update_person',
+  {
+    title: 'Update person',
+    description: "Change someone's details. Properties are merged, so you only pass what changes.",
+    inputSchema: {
+      id: z.string(),
+      name: z.string().optional(),
+      details: z.record(z.string(), z.any()).optional().describe('property ids from the People type'),
+    },
+  },
+  async ({ id, name, details }) => {
+    guard();
+    const cur = await call('GET', `/people/${encodeURIComponent(id)}`);
+    if (!cur) throw new Error('no person with that id');
+    const patch = {};
+    if (name !== undefined) patch.title = name;
+    if (details) patch.props = { ...cur.props, ...details };
+    return text(person(await call('PATCH', `/people/${encodeURIComponent(id)}`, patch)));
+  }
+);
+
 server.registerTool(
   'get_stats',
   { title: 'Vault stats', description: 'Object counts per type, recently edited, and pinned items.', inputSchema: {} },

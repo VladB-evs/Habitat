@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
-import type { Obj } from '../types';
-import { ago, typeColor } from '../util';
+import type { Obj, PropDef } from '../types';
+import { ago, PEOPLE_TYPE, typeColor } from '../util';
 import { Editor } from './Editor';
 import { Icon, TypeIcon } from './Icons';
+import { PersonBody } from './PersonBody';
 import { PropsPanel } from './PropsPanel';
 
 export function ObjectPage({ id }: { id: string }) {
@@ -14,7 +15,10 @@ export function ObjectPage({ id }: { id: string }) {
   const [missing, setMissing] = useState(false);
   const [backlinks, setBacklinks] = useState<Obj[]>([]);
   const [title, setTitle] = useState('');
+  const [selfId, setSelfId] = useState<string | null>(null);
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadSelf = useCallback(() => api.people.self().then((me) => setSelfId(me?.id ?? null)), []);
 
   useEffect(() => {
     let alive = true;
@@ -23,6 +27,7 @@ export function ObjectPage({ id }: { id: string }) {
       if (!o) return setMissing(true);
       setObj(o);
       setTitle(o.title);
+      if (o.typeId === PEOPLE_TYPE) loadSelf();
     });
     api.backlinks(id).then((b) => alive && setBacklinks(b));
     // Someone editing this object elsewhere (the type table, a mention chip) shows up here.
@@ -36,7 +41,7 @@ export function ObjectPage({ id }: { id: string }) {
       alive = false;
       off();
     };
-  }, [id]);
+  }, [id, loadSelf]);
 
   if (missing) return <div className="empty">This object was deleted.</div>;
   if (!obj) return <div className="page" />;
@@ -64,6 +69,14 @@ export function ObjectPage({ id }: { id: string }) {
   };
 
   const isTag = obj.typeId === 'tag';
+  const isPerson = obj.typeId === PEOPLE_TYPE;
+
+  const saveExtraProps = (defs: PropDef[]) => {
+    setObj({ ...obj, extraProps: defs });
+    api.objects.update(id, { extraProps: defs }).then(() => objectChanged(id));
+  };
+
+  const saveContent = (json: any) => api.objects.update(id, { content: json }).then(() => objectChanged(id));
 
   const del = async () => {
     if (isTag) {
@@ -84,7 +97,9 @@ export function ObjectPage({ id }: { id: string }) {
 
   const goToType = () => {
     if (!type) return;
-    navigate(type.id === 'daily' ? { kind: 'daily' } : { kind: 'type', typeId: type.id });
+    if (type.id === 'daily') return navigate({ kind: 'daily' });
+    if (type.id === PEOPLE_TYPE) return navigate({ kind: 'people' });
+    navigate({ kind: 'type', typeId: type.id });
   };
 
   return (
@@ -115,6 +130,18 @@ export function ObjectPage({ id }: { id: string }) {
             <span className="tag-title-hash">#</span>
             {obj.title}
           </h1>
+        ) : isPerson ? (
+          <PersonBody
+            obj={obj}
+            typeDefs={type?.properties ?? []}
+            isSelf={selfId === obj.id}
+            onTitle={saveTitle}
+            onProp={saveProp}
+            onExtraChange={saveExtraProps}
+            onSelfChange={loadSelf}
+          >
+            <Editor key={obj.id} content={obj.content} onSave={saveContent} />
+          </PersonBody>
         ) : (
           <>
             <input
@@ -138,18 +165,11 @@ export function ObjectPage({ id }: { id: string }) {
               extraProps={obj.extraProps}
               values={obj.props}
               onValue={saveProp}
-              onExtraChange={(defs) => {
-                setObj({ ...obj, extraProps: defs });
-                api.objects.update(id, { extraProps: defs }).then(() => objectChanged(id));
-              }}
+              onExtraChange={saveExtraProps}
             />
 
             <div className="obj-editor">
-              <Editor
-                key={obj.id}
-                content={obj.content}
-                onSave={(json) => api.objects.update(id, { content: json }).then(() => objectChanged(id))}
-              />
+              <Editor key={obj.id} content={obj.content} onSave={saveContent} />
             </div>
           </>
         )}

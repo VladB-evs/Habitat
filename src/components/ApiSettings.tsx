@@ -16,6 +16,10 @@ const ROUTES: [string, string][] = [
   ['GET /daily?date=2026-07-26', "a day's note"],
   ['POST /daily/append', '{ text, date? }'],
   ['GET /tasks?date=2026-07-26', 'tasks due that day'],
+  ['GET /people?q=ana', 'the address book'],
+  ['GET /people/:id · POST /people', 'one person · { name, props }'],
+  ['GET /people/birthdays?within=60', 'whose birthday is coming up'],
+  ['GET /people/fields · /me', 'addable details · your own card'],
   ['GET /tags · /stats', 'tags with counts · vault stats'],
   ['GET /automations', 'your rules'],
   ['POST /automations/:id/run', 'run one now'],
@@ -148,7 +152,8 @@ export function ApiSettings() {
         <div className="s-label">AI agents (MCP)</div>
         <div className="s-hint">
           Point Claude Desktop, Claude Code, Cursor or any MCP client at the vault. It gets tools for searching,
-          reading, capturing and creating. Leave <code>HABITAT_EDIT</code> out to keep it read-and-add only; set it to{' '}
+          reading, capturing and creating, plus the address book — who someone is, whose birthday is next, and who
+          you are. Leave <code>HABITAT_EDIT</code> out to keep it read-and-add only; set it to{' '}
           <code>1</code> to also allow editing, deleting and running automations.
         </div>
       </div>

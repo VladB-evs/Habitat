@@ -148,6 +148,35 @@ export function ago(ts: number): string {
 
 export const clientUid = () => Math.random().toString(36).slice(2, 10);
 
+/** The People type id — its own view, its own page, hidden from the generic type list. */
+export const PEOPLE_TYPE = 'people';
+
+/** Up to two letters for an avatar: first letters of the first and last words. */
+export function initials(name: string): string {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  const first = [...words[0]][0] ?? '';
+  const last = words.length > 1 ? [...words[words.length - 1]][0] ?? '' : '';
+  return (first + last).toUpperCase();
+}
+
+/** A stable colour per person, so the same face keeps the same badge everywhere. */
+export const avatarColor = (name: string, theme: string) => optionColor(name || '?', theme);
+
+/** "Today", "Tomorrow", "in 12 days", "in 3 months" — how a countdown reads best. */
+export function birthdayCountdown(days: number): string {
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Tomorrow';
+  if (days < 21) return `in ${days} days`;
+  if (days < 45) return 'in a month';
+  return `in ${Math.round(days / 30)} months`;
+}
+
+/** "14 March" — a birthday without the year, which is rarely the interesting part. */
+export function fmtBirthday(month: number, day: number): string {
+  return new Date(2001, month - 1, day).toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
+}
+
 export function greeting(): string {
   const h = new Date().getHours();
   if (h < 5) return 'Up late';

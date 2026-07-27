@@ -24,6 +24,7 @@ const TRIGGERS: { kind: AutoTriggerKind; label: string; group: string }[] = [
   { kind: 'daily', label: 'every day at…', group: 'Time' },
   { kind: 'weekly', label: 'on chosen days at…', group: 'Time' },
   { kind: 'dueToday', label: 'a date property comes up', group: 'Time' },
+  { kind: 'birthday', label: 'someone’s birthday comes up', group: 'Time' },
   { kind: 'appStart', label: 'Habitat opens', group: 'Time' },
 ];
 
@@ -50,7 +51,8 @@ const OPS: { op: AutoOp; label: string }[] = [
 
 const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
-const TIMED = (k: AutoTriggerKind) => k === 'daily' || k === 'weekly' || k === 'dueToday' || k === 'appStart';
+const TIMED = (k: AutoTriggerKind) =>
+  k === 'daily' || k === 'weekly' || k === 'dueToday' || k === 'birthday' || k === 'appStart';
 const NEEDS_VALUE = (op: AutoOp) => op !== 'empty' && op !== 'notEmpty';
 
 const newAction = (kind: AutoActionKind = 'appendDaily'): AutoAction => ({ id: clientUid(), kind, text: '{{link}}' });
@@ -76,6 +78,8 @@ function describe(r: Automation, types: ObjType[]): string {
       ? `${(t.days ?? []).map((d) => DAYS[d]).join('') || 'no days'} at ${t.time || '09:00'}`
       : t.kind === 'dueToday'
       ? `a ${typeName(t.typeId)} date is ${!t.offset ? 'today' : t.offset > 0 ? `in ${t.offset}d` : `${-t.offset}d overdue`}`
+      : t.kind === 'birthday'
+      ? `a birthday is ${!t.offset ? 'today' : `${Math.abs(t.offset)}d away`}`
       : t.kind === 'appStart'
       ? 'Habitat opens'
       : t.kind === 'created'
@@ -291,6 +295,25 @@ export function Automations() {
                         </>
                       )}
 
+                      {r.trigger.kind === 'birthday' && (
+                        <>
+                          <span className="auto-word">when it’s</span>
+                          <select
+                            className="field"
+                            value={String(r.trigger.offset ?? 0)}
+                            onChange={(e) =>
+                              patch(r.id, (x) => ({ ...x, trigger: { ...x.trigger, offset: Number(e.target.value) } }))
+                            }
+                          >
+                            <option value="0">today</option>
+                            <option value="1">tomorrow</option>
+                            <option value="3">in 3 days</option>
+                            <option value="7">in a week</option>
+                            <option value="14">in two weeks</option>
+                          </select>
+                        </>
+                      )}
+
                       {r.trigger.kind === 'weekly' && (
                         <span className="auto-days">
                           {DAYS.map((d, i) => (
@@ -311,7 +334,10 @@ export function Automations() {
                         </span>
                       )}
 
-                      {(r.trigger.kind === 'daily' || r.trigger.kind === 'weekly' || r.trigger.kind === 'dueToday') && (
+                      {(r.trigger.kind === 'daily' ||
+                        r.trigger.kind === 'weekly' ||
+                        r.trigger.kind === 'dueToday' ||
+                        r.trigger.kind === 'birthday') && (
                         <input
                           type="time"
                           className="field auto-time"

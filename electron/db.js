@@ -288,6 +288,12 @@ function fillTemplate(text, obj) {
     if (key === 'title') return obj.title || 'Untitled';
     if (key === 'type') return obj.typeId || '';
     if (key === 'id') return obj.id || '';
+    // Handy in birthday rules: "{{title}} turns {{turning}} today".
+    if (key === 'turning' || key === 'age') {
+      const b = birthdayInfo(obj.props?.birthday);
+      const n = b ? b[key] : null;
+      return n == null ? '' : String(n);
+    }
     if (key.startsWith('prop:')) {
       const v = obj.props?.[key.slice(5)];
       return v == null ? '' : Array.isArray(v) ? v.join(', ') : String(v);
@@ -503,8 +509,20 @@ function runAutomations(event, obj, prevProps) {
   }
 }
 
-/** Timed rules: 'daily' at a time, 'weekly' on chosen days, 'dueToday' on a date property. */
+/** Timed rules: 'daily' at a time, 'weekly' on chosen days, 'dueToday' on a date property, 'birthday' on a person's. */
 function runTimedRule(rule) {
+  if (rule.trigger?.kind === 'birthday') {
+    // `offset` is how many days ahead to look, so 0 is the day itself and 7 is a week's notice.
+    const lead = Math.abs(Number(rule.trigger.offset) || 0);
+    let n = 0;
+    for (const p of listPeople()) {
+      if (!p.nextBirthday || p.nextBirthday.days !== lead) continue;
+      if (!conditionsPass(rule, p)) continue;
+      for (const action of rule.actions || []) runAction(action, p);
+      n++;
+    }
+    return n;
+  }
   if (rule.trigger?.kind !== 'dueToday') {
     for (const action of rule.actions || []) runAction(action, null);
     return 1;
@@ -654,6 +672,7 @@ const api = {
 
   'types:delete': (id) => {
     if (id === 'daily') throw new Error('The Daily Note type cannot be deleted');
+    if (id === PEOPLE_TYPE) throw new Error('The People type cannot be deleted');
     const objs = db.prepare('SELECT id FROM objects WHERE type_id = ?').all(id);
     for (const o of objs) deleteObject(o.id);
     db.prepare('DELETE FROM templates WHERE type_id = ?').run(id);
@@ -961,9 +980,62 @@ const api = {
     });
   },
 
+  /** The greeting name: the self card's, so renaming your card renames the greeting. */
   'profile:get': () => {
+    const me = api['people:self']();
+    if (me?.title) return { name: me.title, id: me.id };
     const r = db.prepare("SELECT value FROM kv WHERE key = 'profile'").get();
     return r ? JSON.parse(r.value) : null;
+  },
+
+  // ---------- People ----------
+
+  'people:list': () => listPeople(),
+
+  'people:get': (id) => {
+    const o = getObj(id, true);
+    return o && o.typeId === PEOPLE_TYPE ? decoratePerson(o) : null;
+  },
+
+  /** The catalogue of optional details, grouped for the "add detail" picker. */
+  'people:fields': () => PEOPLE_FIELDS,
+
+  'people:create': ({ title, name, props, extraProps, self } = {}) => {
+    ensurePeopleType();
+    const made = createObject({
+      typeId: PEOPLE_TYPE,
+      title: String(title ?? name ?? '').trim(),
+      props: props || {},
+      extraProps: extraProps || [],
+    });
+    if (made && self) setSelfPerson(made.id);
+    return decoratePerson(made);
+  },
+
+  /** The card that represents the user. `null` until one is chosen. */
+  'people:self': () => {
+    const id = selfId();
+    if (!id) return null;
+    const o = getObj(id, true);
+    if (!o || o.typeId !== PEOPLE_TYPE) {
+      setSelfPerson(null); // the card was deleted
+      return null;
+    }
+    return decoratePerson(o, id);
+  },
+
+  'people:setSelf': (id) => setSelfPerson(id || null),
+
+  /**
+   * Birthdays coming up, soonest first. `within` is a number of days from today;
+   * today's birthdays are always included.
+   */
+  'people:birthdays': ({ within = 60, limit = 0 } = {}) => {
+    const span = Number(within) || 60;
+    const list = listPeople()
+      .filter((p) => p.nextBirthday && p.nextBirthday.days <= span)
+      .sort((a, b) => a.nextBirthday.days - b.nextBirthday.days);
+    return limit > 0 ? list.slice(0, limit) : list;
   },
 
   'automations:list': () => loadAutomations(),
@@ -987,7 +1059,7 @@ const api = {
     for (const rule of rules) {
       const kind = rule.trigger?.kind;
       if (rule.enabled === false) continue;
-      if (kind !== 'daily' && kind !== 'weekly' && kind !== 'dueToday') continue;
+      if (kind !== 'daily' && kind !== 'weekly' && kind !== 'dueToday' && kind !== 'birthday') continue;
       if (kind === 'weekly' && !(rule.trigger.days || []).includes(d.getDay())) continue;
       const [h, m] = String(rule.trigger.time || '09:00').split(':').map(Number);
       if (minutes < (h || 0) * 60 + (m || 0)) continue;
@@ -1273,47 +1345,6 @@ function migrate() {
   const upd = db.prepare('UPDATE types SET emoji = ? WHERE emoji = ?');
   for (const [emoji, icon] of Object.entries(LEGACY)) upd.run(icon, emoji);
 
-  // Nickname used to be added per-person during onboarding; it's a Person type
-  // property now. Runs once only, so deleting the property later isn't undone
-  // on the next launch.
-  runOnce('person-nickname-prop', () => {
-    const person = getType('person');
-    if (person && !person.properties.some((p) => p.id === 'nickname')) {
-      db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(
-        JSON.stringify([PERSON_PROPS[0], ...person.properties]),
-        'person'
-      );
-    }
-    // Drop the old per-object copies so the field doesn't render twice.
-    const legacy = db
-      .prepare("SELECT id, extra_props FROM objects WHERE type_id = 'person' AND extra_props LIKE '%\"nickname\"%'")
-      .all();
-    const strip = db.prepare('UPDATE objects SET extra_props = ? WHERE id = ?');
-    for (const r of legacy) {
-      try {
-        strip.run(JSON.stringify(JSON.parse(r.extra_props || '[]').filter((p) => p.id !== 'nickname')), r.id);
-      } catch {
-        /* leave malformed rows alone */
-      }
-    }
-  });
-
-  // Email is no longer a Person default. Only drop it where it's unused, so
-  // nobody loses an address they'd already filled in.
-  runOnce('person-drop-email', () => {
-    const person = getType('person');
-    if (!person || !person.properties.some((p) => p.id === 'email')) return;
-    const inUse = db
-      .prepare("SELECT props FROM objects WHERE type_id = 'person'")
-      .all()
-      .some((r) => String(JSON.parse(r.props || '{}').email || '').trim() !== '');
-    if (inUse) return;
-    db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(
-      JSON.stringify(person.properties.filter((p) => p.id !== 'email')),
-      'person'
-    );
-  });
-
   // Backfill the search index for notes written before content search existed.
   runOnce('backfill-search-text', () => {
     const rows = db.prepare("SELECT id, content FROM objects WHERE content IS NOT NULL AND search_text = ''").all();
@@ -1321,14 +1352,33 @@ function migrate() {
     for (const r of rows) upd.run(plainText(r.content), r.id);
   });
 
-  runOnce('person-birthday-prop', () => {
-    const person = getType('person');
-    if (!person || person.properties.some((p) => p.id === 'birthday')) return;
-    const birthday = PERSON_PROPS.find((p) => p.id === 'birthday');
-    const nickAt = person.properties.findIndex((p) => p.id === 'nickname');
-    const props = [...person.properties];
-    props.splice(nickAt >= 0 ? nickAt + 1 : props.length, 0, birthday);
-    db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(JSON.stringify(props), 'person');
+  /**
+   * The old Person type is replaced by People — a standalone directory with its
+   * own properties and view. Person entries are dropped rather than carried
+   * over, and anything that pointed a relation at Person now points at People.
+   */
+  runOnce('people-v1', () => {
+    if (getType('person')) {
+      db.exec(
+        `DELETE FROM links WHERE from_id IN (SELECT id FROM objects WHERE type_id = 'person')
+            OR to_id IN (SELECT id FROM objects WHERE type_id = 'person');
+         DELETE FROM objects WHERE type_id = 'person';
+         DELETE FROM templates WHERE type_id = 'person';
+         DELETE FROM types WHERE id = 'person';`
+      );
+    }
+    ensurePeopleType();
+    const upd = db.prepare('UPDATE types SET properties = ? WHERE id = ?');
+    for (const t of db.prepare('SELECT id, properties FROM types').all()) {
+      let defs;
+      try {
+        defs = JSON.parse(t.properties || '[]');
+      } catch {
+        continue;
+      }
+      if (!defs.some((p) => p.targetTypeId === 'person')) continue;
+      upd.run(JSON.stringify(defs.map((p) => (p.targetTypeId === 'person' ? { ...p, targetTypeId: PEOPLE_TYPE } : p))), t.id);
+    }
   });
 }
 
@@ -1365,8 +1415,8 @@ const doc = (...content) => ({ type: 'doc', content });
 
 // Each flavor gets its own TYPES, not just templates on generic ones — a Work
 // habitat has Meeting/Project, School has Course, Personal has Book/Habit, and
-// so on. Person is deliberately excluded: it's seeded separately (see
-// ensurePersonType/seedPeople) so it's always available, in every flavor.
+// so on. People is deliberately excluded: it's seeded separately (see
+// ensurePeopleType/seedPeople) so it's always available, in every flavor.
 const FLAVOR_TYPES = {
   personal: [
     { id: 'note', name: 'Note', icon: 'file-text', color: '#2a78d6', properties: [] },
@@ -1415,7 +1465,7 @@ const FLAVOR_TYPES = {
       id: 'meeting', name: 'Meeting', icon: 'coffee', color: '#1baf7a',
       properties: [
         { id: 'date', name: 'Date', kind: 'date' },
-        { id: 'attendees', name: 'Attendees', kind: 'relation', targetTypeId: 'person' },
+        { id: 'attendees', name: 'Attendees', kind: 'relation', targetTypeId: 'people' },
       ],
     },
   ],
@@ -1534,19 +1584,150 @@ function seedFlavor(flavor) {
   return list.length;
 }
 
-const PERSON_PROPS = [
+// ---------- People ----------
+//
+// People is a type like any other — so @-mentions, relations, backlinks and the
+// graph all keep working — but it ships with a fixed set of properties and has
+// its own view instead of the generic table. PEOPLE_PROPS live on the type;
+// PEOPLE_FIELDS is a catalogue of extras any single person can be given.
+
+const PEOPLE_TYPE = 'people';
+
+const RELATIONSHIPS = [
+  'Family',
+  'Partner',
+  'Close friend',
+  'Friend',
+  'Colleague',
+  'Client',
+  'Mentor',
+  'Neighbour',
+  'Acquaintance',
+];
+
+const PEOPLE_PROPS = [
   { id: 'nickname', name: 'Nickname', kind: 'text' },
+  { id: 'relationship', name: 'Relationship', kind: 'select', options: RELATIONSHIPS },
   { id: 'birthday', name: 'Birthday', kind: 'date' },
+  { id: 'phone', name: 'Phone', kind: 'phone' },
+  { id: 'email', name: 'Email', kind: 'email' },
+  { id: 'company', name: 'Company', kind: 'text' },
   { id: 'role', name: 'Role', kind: 'text' },
 ];
 
-function ensurePersonType() {
-  const existing = getType('person');
+/** Optional details, added per person. Ids are stable so the same field means the same thing everywhere. */
+const PEOPLE_FIELDS = [
+  {
+    group: 'Contact',
+    fields: [
+      { id: 'phone2', name: 'Other phone', kind: 'phone' },
+      { id: 'email2', name: 'Other email', kind: 'email' },
+      { id: 'address', name: 'Address', kind: 'text' },
+      { id: 'location', name: 'Location', kind: 'text' },
+      { id: 'timezone', name: 'Timezone', kind: 'text' },
+    ],
+  },
+  {
+    group: 'Work',
+    fields: [
+      { id: 'workEmail', name: 'Work email', kind: 'email' },
+      { id: 'team', name: 'Team', kind: 'text' },
+      { id: 'website', name: 'Website', kind: 'url' },
+      { id: 'linkedin', name: 'LinkedIn', kind: 'url' },
+    ],
+  },
+  {
+    group: 'Social',
+    fields: [
+      { id: 'instagram', name: 'Instagram', kind: 'text' },
+      { id: 'telegram', name: 'Telegram', kind: 'text' },
+      { id: 'whatsapp', name: 'WhatsApp', kind: 'phone' },
+      { id: 'signal', name: 'Signal', kind: 'phone' },
+      { id: 'x', name: 'X', kind: 'text' },
+      { id: 'github', name: 'GitHub', kind: 'text' },
+    ],
+  },
+  {
+    group: 'Personal',
+    fields: [
+      { id: 'partner', name: 'Partner', kind: 'relation', targetTypeId: PEOPLE_TYPE },
+      { id: 'family', name: 'Family', kind: 'relation', targetTypeId: PEOPLE_TYPE },
+      { id: 'kids', name: 'Kids', kind: 'relation', targetTypeId: PEOPLE_TYPE },
+      { id: 'anniversary', name: 'Anniversary', kind: 'date' },
+      { id: 'metOn', name: 'Met on', kind: 'date' },
+      { id: 'howWeMet', name: 'How we met', kind: 'text' },
+      { id: 'interests', name: 'Interests', kind: 'text' },
+      { id: 'languages', name: 'Languages', kind: 'text' },
+      { id: 'foodDrink', name: 'Food & drink', kind: 'text' },
+      { id: 'allergies', name: 'Allergies', kind: 'text' },
+      { id: 'giftIdeas', name: 'Gift ideas', kind: 'longtext' },
+      { id: 'pets', name: 'Pets', kind: 'text' },
+    ],
+  },
+  {
+    group: 'Keeping in touch',
+    fields: [
+      { id: 'lastCaughtUp', name: 'Last caught up', kind: 'date' },
+      {
+        id: 'cadence',
+        name: 'Keep in touch',
+        kind: 'select',
+        options: ['Weekly', 'Monthly', 'Quarterly', 'Twice a year', 'Yearly'],
+      },
+    ],
+  },
+];
+
+function ensurePeopleType() {
+  const existing = getType(PEOPLE_TYPE);
   if (existing) return existing;
   db.prepare('INSERT INTO types (id, name, emoji, color, properties, builtin, starred, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
-    'person', 'Person', 'user', '#4a3aa7', JSON.stringify(PERSON_PROPS), 1, 0, now()
+    PEOPLE_TYPE, 'People', 'users', '#4a3aa7', JSON.stringify(PEOPLE_PROPS), 1, 0, now()
   );
-  return getType('person');
+  return getType(PEOPLE_TYPE);
+}
+
+/**
+ * Birthday maths, from a 'YYYY-MM-DD' value. The year is only used for ages, so
+ * a placeholder year still gives a correct countdown; ages are reported only
+ * when the year looks real.
+ */
+function birthdayInfo(value, from = new Date()) {
+  const m = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const today = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  let next = new Date(today.getFullYear(), month - 1, day);
+  if (next < today) next = new Date(today.getFullYear() + 1, month - 1, day);
+  const days = Math.round((next - today) / 86400000);
+  const knownYear = year >= 1900;
+  const turning = knownYear ? next.getFullYear() - year : null;
+  return {
+    date: value,
+    month,
+    day,
+    days,
+    key: todayKey(next),
+    turning,
+    age: turning == null ? null : days === 0 ? turning : turning - 1,
+  };
+}
+
+const selfId = () => db.prepare("SELECT value FROM kv WHERE key = 'selfPersonId'").get()?.value || null;
+
+/** One person, with the derived bits every view wants: are they me, when's the next birthday. */
+function decoratePerson(obj, self = selfId()) {
+  if (!obj) return null;
+  return { ...obj, isSelf: obj.id === self, nextBirthday: birthdayInfo(obj.props?.birthday) };
+}
+
+function listPeople() {
+  const self = selfId();
+  return db
+    .prepare(`SELECT * FROM objects WHERE type_id = ? ORDER BY title COLLATE NOCASE`)
+    .all(PEOPLE_TYPE)
+    .map((r) => decoratePerson(parseObj(r), self));
 }
 
 function ensureTagType() {
@@ -1560,25 +1741,39 @@ function ensureTagType() {
 
 /**
  * Onboarding: save the user's own name (used for the dashboard greeting) and
- * create a Person object for them plus anyone else they listed — every Person
- * is mentionable with @ anywhere, since mentions search across all objects.
+ * create their own card plus anyone else they listed — every person is
+ * mentionable with @ anywhere, since mentions search across all objects. The
+ * user's own card is marked as the self card.
  */
 function seedPeople(userName, people) {
-  ensurePersonType();
+  ensurePeopleType();
   const name = String(userName || '').trim();
   if (name) {
     db.prepare(
       "INSERT INTO kv (key, value) VALUES ('profile', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
     ).run(JSON.stringify({ name }));
-    createObject({ typeId: 'person', title: name });
+    const me = createObject({ typeId: PEOPLE_TYPE, title: name });
+    if (me) setSelfPerson(me.id);
   }
   for (const p of people || []) {
     const pname = String(p?.name || '').trim();
     if (!pname) continue;
-    // Nickname is a Person type property, so it needs no per-object extraProp.
+    // Nickname is a People type property, so it needs no per-object extraProp.
     const nickname = String(p?.nickname || '').trim();
-    createObject({ typeId: 'person', title: pname, props: nickname ? { nickname } : {} });
+    createObject({ typeId: PEOPLE_TYPE, title: pname, props: nickname ? { nickname } : {} });
   }
+}
+
+/** Mark which card is "me". Passing null clears it. */
+function setSelfPerson(id) {
+  if (!id) {
+    db.prepare("DELETE FROM kv WHERE key = 'selfPersonId'").run();
+    return null;
+  }
+  const obj = getObj(id);
+  if (!obj || obj.typeId !== PEOPLE_TYPE) return null;
+  db.prepare("INSERT INTO kv (key, value) VALUES ('selfPersonId', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(id);
+  return decoratePerson(obj, id);
 }
 
 /**
@@ -1597,4 +1792,4 @@ function switchVault(dir) {
   return { dbPath: target, changed: true, existed };
 }
 
-module.exports = { initDb, api, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePersonType, ensureTagType };
+module.exports = { initDb, api, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePeopleType, ensureTagType };

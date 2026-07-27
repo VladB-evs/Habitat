@@ -180,6 +180,17 @@ const UI: Record<string, IconType> = {
   smile: LuSmile,
   'circle-check': LuCircleCheck,
   'message-circle': LuMessageCircle,
+  people: LuUsers,
+  cake: LuCake,
+  gift: LuGift,
+  mail: LuMail,
+  phone: LuPhone,
+  user: LuUser,
+  briefcase: LuBriefcase,
+  'map-pin': LuMapPin,
+  globe: LuGlobe,
+  layout: LuLayoutGrid,
+  rows3: LuRows2,
 };
 
 export function Icon({ name, size = 16, className }: { name: string; size?: number; className?: string }) {

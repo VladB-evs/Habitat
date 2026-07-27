@@ -11,6 +11,7 @@ const CHANNELS = new Set([
   'dashboard:get', 'dashboard:save', 'dashboard:reset',
   'settings:get', 'settings:chooseVault', 'settings:reveal',
   'profile:get', 'import:obsidianVault',
+  'people:list', 'people:get', 'people:create', 'people:self', 'people:setSelf', 'people:birthdays', 'people:fields',
   'habitats:create', 'habitats:open', 'habitats:switch', 'habitats:onboard', 'habitats:delete', 'habitats:pickFolder',
   'vars:list', 'vars:save',
   'automations:list', 'automations:save', 'automations:tick', 'automations:run', 'automations:appStart',

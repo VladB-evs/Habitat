@@ -29,7 +29,7 @@ export function normalize(w: DashWidget): DashWidget {
 
 /** What a brand-new dashboard looks like — the layout Habitat shipped with, as widgets. */
 export function defaultLayout(): DashWidget[] {
-  return ['greeting', 'quick', 'tiles', 'pinned', 'tasks', 'recent']
+  return ['greeting', 'quick', 'tiles', 'pinned', 'tasks', 'birthdays', 'recent']
     .map((kind) => widgetDef(kind))
     .filter((d): d is WidgetDef => !!d)
     .map((d) => makeWidget(d));

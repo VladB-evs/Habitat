@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { DayTasks } from '../components/DayTasks';
 import { Icon, TypeIcon } from '../components/Icons';
+import { Avatar } from '../components/People';
 import { motion } from 'motion/react';
 import { dealtIn, stagger } from '../motion';
+import { onObjectChanged } from '../objects';
 import { useApp } from '../store';
-import { ago, greeting, todayKey, typeColor } from '../util';
+import type { Person } from '../types';
+import { ago, birthdayCountdown, fmtBirthday, greeting, PEOPLE_TYPE, todayKey, typeColor } from '../util';
 import type { WidgetDef, WidgetProps, WidgetSettingsProps } from './kit';
 import { useAutoHide, useDash } from './kit';
 
@@ -224,6 +227,59 @@ function RecentSettings({ config, set }: WidgetSettingsProps) {
   );
 }
 
+/* ---------- birthdays ---------- */
+
+function BirthdaysBody({ config }: WidgetProps) {
+  const { openFrom, theme } = useApp();
+  const [people, setPeople] = useState<Person[]>([]);
+  const within = Number(config.within) || 60;
+
+  useEffect(() => {
+    api.people.birthdays(within).then(setPeople);
+    return onObjectChanged(() => api.people.birthdays(within).then(setPeople));
+  }, [within]);
+
+  const rows = people.slice(0, 6);
+  useAutoHide(rows.length === 0);
+  if (!rows.length) return <div className="w-empty">No birthdays coming up.</div>;
+
+  return (
+    <motion.div className="bday-widget" variants={stagger} initial="hidden" animate="shown">
+      {rows.map((p) => (
+        <motion.button
+          key={p.id}
+          className={'bday-widget-row' + (p.nextBirthday!.days === 0 ? ' today' : '')}
+          variants={dealtIn}
+          whileHover={{ x: 3 }}
+          onClick={(e) => openFrom(e, p.id)}
+        >
+          <Avatar name={p.title} theme={theme} size={26} />
+          <span className="row-title">{p.title || 'Unnamed'}</span>
+          <span className="row-meta">{fmtBirthday(p.nextBirthday!.month, p.nextBirthday!.day)}</span>
+          <span className={'bday-pill' + (p.nextBirthday!.days === 0 ? ' today' : '')}>
+            <Icon name="cake" size={11} /> {birthdayCountdown(p.nextBirthday!.days)}
+          </span>
+        </motion.button>
+      ))}
+    </motion.div>
+  );
+}
+
+function BirthdaysSettings({ config, set }: WidgetSettingsProps) {
+  return (
+    <label className="w-field">
+      <span>Look ahead</span>
+      <select className="field" value={config.within || 60} onChange={(e) => set({ within: Number(e.target.value) })}>
+        {[14, 30, 60, 90, 365].map((n) => (
+          <option key={n} value={n}>
+            {n === 365 ? 'A year' : `${n} days`}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 /* ---------- definitions ---------- */
 
 export const BUILTIN_WIDGETS: WidgetDef[] = [
@@ -291,6 +347,22 @@ export const BUILTIN_WIDGETS: WidgetDef[] = [
     title: () => "Today's tasks",
     requires: (types) => types.some((t) => t.id === 'task'),
     Body: TasksBody,
+  },
+  {
+    kind: 'birthdays',
+    name: 'Birthdays',
+    desc: 'Who’s got one coming up, and how soon.',
+    icon: 'cake',
+    group: 'Habitat',
+    singleton: true,
+    defaultW: 3,
+    defaultH: 3,
+    minW: 2,
+    title: () => 'Birthdays',
+    defaultConfig: { within: 60 },
+    requires: (types) => types.some((t) => t.id === PEOPLE_TYPE),
+    Body: BirthdaysBody,
+    Settings: BirthdaysSettings,
   },
   {
     kind: 'recent',

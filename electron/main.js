@@ -6,7 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
 const {
-  initDb, api, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePersonType, ensureTagType,
+  initDb, api, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePeopleType, ensureTagType,
 } = require('./db');
 
 // Set before anything reads it: the menu bar, the About panel and ~/Library all
@@ -572,8 +572,8 @@ function boot() {
     openVault(file);
     if (flavor === 'blank') resetToBlank();
     else seedFlavor(flavor);
-    // Person and Tag exist in every habitat so @-mentions and #-tags always work.
-    ensurePersonType();
+    // People and Tag exist in every habitat so @-mentions and #-tags always work.
+    ensurePeopleType();
     ensureTagType();
     currentDbPath = file;
     if (!envMode) {
@@ -609,7 +609,7 @@ function boot() {
 
     openVault(file);
     // Older or hand-copied vaults may predate these; both are safe to call twice.
-    ensurePersonType();
+    ensurePeopleType();
     ensureTagType();
     currentDbPath = file;
     if (!envMode) {
@@ -643,7 +643,7 @@ function boot() {
     openVault(file);
     if (flavor === 'blank') resetToBlank();
     else seedFlavor(flavor);
-    seedPeople(userName, people); // also ensures the Person type
+    seedPeople(userName, people); // also ensures the People type and the self card
     ensureTagType();
     currentDbPath = file;
     if (!envMode) {
