@@ -9,8 +9,13 @@ everything is a typed object in a SQLite database, and objects connect to each o
 
 ## Install
 
-Grab the latest `.dmg` from [Releases](../../releases). Builds aren't code-signed, so the first
-launch needs a right-click → **Open** (or `xattr -dr com.apple.quarantine /Applications/Habitat.app`).
+Grab the latest `.dmg` from [Releases](../../releases). Builds are ad-hoc signed rather than
+notarised, so macOS quarantines the download — clear it once after dragging the app to
+Applications:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Habitat.app
+```
 After that the app updates itself: it checks GitHub for new releases, downloads them in the
 background, and swaps its own bundle when you press **Restart & install** in Settings → General.
 
