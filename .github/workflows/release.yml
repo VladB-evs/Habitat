@@ -2,6 +2,10 @@
 #
 # Tag a version to ship it:
 #   npm version patch && git push --follow-tags
+#
+# electron-builder only builds here — publishing is one explicit step, because
+# its own publisher uploads artifacts in parallel and each upload races to create
+# the release, which ends up making two of them for the same tag.
 name: release
 
 on:
@@ -24,10 +28,23 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
-      - name: Build and publish
-        run: npm run release
+
+      - name: Build
+        run: npm run dist
+        env:
+          # Ad-hoc signed by scripts/adhoc-sign.cjs; no Developer ID involved.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Builds are deliberately unsigned; the app updates itself by swapping
-          # its own bundle rather than going through Squirrel.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Just the installer and the zip the self-updater downloads.
+          FILES=(release/Habitat-*.dmg release/Habitat-*.zip)
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${FILES[@]}" --clobber
+          else
+            gh release create "$TAG" "${FILES[@]}" --title "$TAG" --generate-notes
+          fi
