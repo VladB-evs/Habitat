@@ -1,7 +1,6 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell } = require('electron');
 const telegram = require('./telegram');
 const updater = require('./updater');
-const pkg = require('../package.json');
 const server = require('./server');
 const path = require('path');
 const fs = require('fs');
@@ -353,7 +352,10 @@ function boot() {
   //
   // Unsigned builds can't use Squirrel, so the app fetches the newest GitHub
   // release itself and swaps its own bundle. See electron/updater.js.
-  const REPO = (pkg.build?.publish?.[0] && `${pkg.build.publish[0].owner}/${pkg.build.publish[0].repo}`) || '';
+  // electron-builder strips `build` from the packaged package.json, so the
+  // update feed can't be read from there at runtime. Keep it in step with
+  // build.publish in package.json by hand.
+  const REPO = 'VladB-evs/Habitat';
   let updateState = { status: app.isPackaged ? 'idle' : 'dev', version: app.getVersion() };
 
   const pushUpdate = (patch) => {
