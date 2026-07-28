@@ -2,6 +2,7 @@ import type {
   DailyMeta,
   DashLayout,
   GraphData,
+  FileRef,
   Obj,
   ObjType,
   Person,
@@ -90,6 +91,21 @@ export const api = {
     /** macOS only: hide the close/minimise/zoom buttons while the sidebar is collapsed. */
     trafficLights: (visible: boolean): Promise<boolean> => inv('window:trafficLights', visible),
   },
+  files: {
+    /** Takes bytes into the vault's store and returns the reference to embed. */
+    add: (f: { name: string; mime: string; data: Uint8Array; width?: number | null; height?: number | null }): Promise<FileRef> =>
+      inv('files:add', f),
+    get: (hash: string): Promise<FileRef | null> => inv('files:get', hash),
+    /** Native picker; the chosen files are stored and returned as references. */
+    pick: (opts?: { images?: boolean }): Promise<FileRef[]> => inv('files:pick', opts ?? {}),
+    stats: (): Promise<{ count: number; bytes: number; unusedCount: number; unusedBytes: number; dir: string }> =>
+      inv('files:stats'),
+    /** Deletes every stored file nothing points at any more. */
+    gc: (): Promise<{ removed: number; freed: number }> => inv('files:gc'),
+    reveal: (hash: string): Promise<boolean> => inv('files:reveal', hash),
+    open: (hash: string): Promise<boolean> => inv('files:open', hash),
+    saveAs: (hash: string): Promise<boolean> => inv('files:saveAs', hash),
+  },
   kv: {
     get: (key: string): Promise<string | null> => inv('kv:get', key),
     set: (key: string, value: string | null): Promise<boolean> => inv('kv:set', { key, value }),
@@ -99,6 +115,9 @@ export const api = {
     save: (list: Automation[]): Promise<boolean> => inv('automations:save', list),
     /** Runs a rule immediately, ignoring its schedule; returns how many objects it touched. */
     run: (id: string): Promise<{ ran: number }> => inv('automations:run', id),
+    /** What a scheduled rule would act on right now — used for the live preview, changes nothing. */
+    preview: (rule: Automation): Promise<{ scoped: boolean; count: number; titles: string[] }> =>
+      inv('automations:preview', rule),
   },
   habitat: {
     code: (): Promise<string> => inv('habitat:code'),
@@ -126,6 +145,9 @@ export const api = {
     /** Verifies the token and sends a hello; also learns the bot's username. */
     test: (): Promise<{ ok: boolean; bot?: string; error?: string }> => inv('telegram:test'),
     poll: (): Promise<void> => inv('telegram:poll'),
+    /** Mints a pairing code and clears the current link until that code is sent to the bot. */
+    pair: (): Promise<TelegramConfig> => inv('telegram:pair'),
+    unpair: (): Promise<TelegramConfig> => inv('telegram:unpair'),
   },
   vars: {
     list: (): Promise<UserVar[]> => inv('vars:list'),
@@ -137,10 +159,10 @@ export const api = {
   people: {
     list: (): Promise<Person[]> => inv('people:list'),
     get: (id: string): Promise<Person | null> => inv('people:get', id),
+    /** `self: true` claims the user's own card, and only when there isn't one yet. */
     create: (p: { title?: string; props?: Record<string, any>; self?: boolean }): Promise<Person> => inv('people:create', p),
     /** The user's own card, or `null` if they haven't made one. */
     self: (): Promise<Person | null> => inv('people:self'),
-    setSelf: (id: string | null): Promise<Person | null> => inv('people:setSelf', id),
     birthdays: (within = 60): Promise<Person[]> => inv('people:birthdays', { within }),
     /** The catalogue of optional details a person can be given. */
     fields: (): Promise<PersonFieldGroup[]> => inv('people:fields'),

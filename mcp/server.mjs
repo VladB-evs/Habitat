@@ -78,7 +78,10 @@ server.registerTool(
   'search',
   {
     title: 'Search',
-    description: 'Search objects by title and note text. Use this to find something before reading or updating it.',
+    description:
+      'Search objects by title and note text. Use this to find something before reading or updating it. ' +
+      'The query also understands filters mixed in with the words: type:task, tag:habitat, is:pinned, ' +
+      'due:today|tomorrow|week|overdue, created:today|yesterday|week|month, edited:… — e.g. "type:task due:week invoice".',
     inputSchema: {
       query: z.string().describe('what to look for'),
       include_note_text: z.boolean().optional().describe('also search inside note bodies (default true)'),
@@ -196,7 +199,8 @@ server.registerTool(
   'whoami',
   {
     title: 'About the user',
-    description: "The user's own card — their name, birthday and details, as they filled it in.",
+    description:
+      "The user's own card — their name, birthday and details, as they filled it in. It is its own entity, not one of the contacts.",
     inputSchema: {},
   },
   async () => {
@@ -239,7 +243,8 @@ server.registerTool(
   {
     title: 'Add person',
     description:
-      'Add someone to the address book. Core details are nickname, relationship, birthday (YYYY-MM-DD), phone, email, company and role.',
+      'Add someone to the address book. Core details are nickname, relationship (a list — someone can be a colleague and a friend), ' +
+      'birthday (YYYY-MM-DD), phone, email, company and role.',
     inputSchema: {
       name: z.string(),
       details: z.record(z.string(), z.any()).optional().describe('property ids from the People type'),
@@ -257,7 +262,9 @@ server.registerTool(
   'update_person',
   {
     title: 'Update person',
-    description: "Change someone's details. Properties are merged, so you only pass what changes.",
+    description:
+      "Change someone's details. Properties are merged, so you only pass what changes. The user's own card is its own entity: " +
+      'properties that describe a link to someone else, like relationship, are not kept on it.',
     inputSchema: {
       id: z.string(),
       name: z.string().optional(),
@@ -409,6 +416,7 @@ function docText(node) {
   if (!node) return '';
   let out = typeof node.text === 'string' ? node.text : '';
   if (node.type === 'mention') out += `@${node.attrs?.label ?? ''}`;
+  if (node.type === 'media') out += `[attached: ${node.attrs?.name ?? 'file'}]${node.attrs?.caption ? ` ${node.attrs.caption}` : ''}\n`;
   if (Array.isArray(node.content)) {
     for (const c of node.content) out += docText(c);
     if (node.type === 'paragraph' || node.type?.startsWith('heading')) out += '\n';

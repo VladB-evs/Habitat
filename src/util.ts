@@ -91,6 +91,15 @@ export function fmtMonthYear(key: string): string {
   return new Date(key + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 }
 
+/** "Jul 30", or "Jul 30, 2027" when it isn't this year — short enough for a chip. */
+export function fmtChipDate(value: string): string {
+  const key = String(value).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return String(value);
+  const d = new Date(key + 'T12:00:00');
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', ...(sameYear ? {} : { year: 'numeric' }) });
+}
+
 export function fmtShort(key: string): string {
   return new Date(key + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
@@ -150,6 +159,23 @@ export const clientUid = () => Math.random().toString(36).slice(2, 10);
 
 /** The People type id — its own view, its own page, hidden from the generic type list. */
 export const PEOPLE_TYPE = 'people';
+
+/**
+ * Properties that describe a link to someone else, so they never appear on the
+ * user's own card — there is no relationship between me and me. The main
+ * process strips them on write; this is the same list for the editor.
+ */
+export const SELF_HIDDEN_PROPS = ['relationship'];
+
+/** The properties a person's page shows: the self card is its own, shorter, entity. */
+export const personProps = <T extends { id: string }>(defs: T[], isSelf: boolean): T[] =>
+  isSelf ? defs.filter((p) => !SELF_HIDDEN_PROPS.includes(p.id)) : defs;
+
+/** Relationship is a multi-select — one person can be a colleague and a friend. */
+export function relationships(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((v) => String(v)).filter(Boolean);
+  return value ? [String(value)] : [];
+}
 
 /** Up to two letters for an avatar: first letters of the first and last words. */
 export function initials(name: string): string {

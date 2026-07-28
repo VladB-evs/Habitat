@@ -45,11 +45,35 @@ export function TelegramSettings() {
       await api.telegram.poll();
       const fresh = await api.telegram.get();
       setCfg(fresh);
-      setResult(fresh.chatId ? 'Checked for new messages.' : 'No messages yet — send one to your bot first.');
+      setResult(
+        fresh.chatId
+          ? fresh.userName
+            ? `Paired with @${fresh.userName}.`
+            : 'Paired.'
+          : 'Not paired yet — send the code to your bot, then press Check now.'
+      );
     } finally {
       setBusy(false);
     }
   };
+
+  const startPairing = async () => {
+    setBusy(true);
+    setResult('');
+    try {
+      setCfg(await api.telegram.pair());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unpair = async () => {
+    if (!confirm('Unpair this chat? Nothing will be accepted until you pair again.')) return;
+    setCfg(await api.telegram.unpair());
+    setResult('Unpaired.');
+  };
+
+  const codeLive = !!cfg.pairCode && (!cfg.pairExpires || Date.now() < cfg.pairExpires);
 
   return (
     <div className="settings-row col">
@@ -67,8 +91,12 @@ export function TelegramSettings() {
           <li>
             In Telegram, message <code>@BotFather</code> → <code>/newbot</code>, and copy the token it gives you.
           </li>
-          <li>Paste it below and press Connect.</li>
-          <li>Send your new bot any message so it learns which chat is yours.</li>
+          <li>
+            Still in BotFather, run <code>/setjoingroups</code> for your bot and choose <b>Disable</b>, so nobody can
+            pull it into a group.
+          </li>
+          <li>Paste the token below and press Connect &amp; test.</li>
+          <li>Press Pair, then send the code it shows you to your bot.</li>
         </ol>
       </div>
 
@@ -95,17 +123,32 @@ export function TelegramSettings() {
       </div>
 
       <div className="tg-row">
-        <span className="s-sub">Chat</span>
+        <span className="s-sub">Paired with</span>
         <span className="tg-state">
           {cfg.chatId ? (
             <>
-              <Icon name="check" size={13} /> linked{cfg.botName ? ` to @${cfg.botName}` : ''}
+              <Icon name="check" size={13} />
+              {cfg.userName ? `@${cfg.userName}` : 'your chat'}
+              {cfg.botName ? ` on @${cfg.botName}` : ''}
             </>
+          ) : codeLive ? (
+            'waiting for the code…'
           ) : (
-            'not linked yet — send your bot a message, then press Check now'
+            'nobody yet'
           )}
         </span>
       </div>
+
+      {!cfg.chatId && codeLive && (
+        <div className="tg-pair">
+          <div className="tg-code">{cfg.pairCode}</div>
+          <div className="s-hint">
+            Send exactly this to {cfg.botName ? <>@{cfg.botName}</> : 'your bot'} from the Telegram account that should
+            own this vault, then press <b>Check now</b>. The code stops working in 15 minutes, and messages from anyone
+            else are ignored.
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <button
@@ -122,17 +165,24 @@ export function TelegramSettings() {
         <button className="btn subtle" disabled={busy || !cfg.token} onClick={collect}>
           Check now
         </button>
+        {!cfg.chatId && (
+          <button className="btn" disabled={busy || !cfg.token} onClick={startPairing}>
+            {codeLive ? 'New code' : 'Pair'}
+          </button>
+        )}
         {cfg.chatId && (
-          <button className="btn subtle" onClick={() => save({ chatId: '' })}>
-            Forget chat
+          <button className="btn subtle" onClick={unpair}>
+            Unpair
           </button>
         )}
       </div>
 
       {result && <div className="s-notice">{result}</div>}
       <div className="s-hint">
-        The token is stored in your vault file. Anyone with it can post as your bot, so treat it like a password — and
-        revoke it in BotFather if it leaks.
+        A Telegram bot is reachable by anyone who finds it, so Habitat only accepts messages from the one account that
+        paired — everything else is ignored without a reply, and group chats are refused outright. The token is stored
+        in your vault file; anyone holding it can post as your bot, so treat it like a password and revoke it in
+        BotFather if it leaks.
       </div>
     </div>
   );

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../store';
-import type { Obj, PropDef } from '../types';
+import type { FileRef, Obj, PropDef } from '../types';
+import { fileUrl, isImage } from '../media';
 import { optionColor } from '../util';
 import { Icon } from './Icons';
 
@@ -342,6 +343,47 @@ export function RelationCell({ def, value, onChange }: { def: PropDef; value: st
   );
 }
 
+/**
+ * Attachments on a property: thumbnails for images, a chip for anything else.
+ * The same store as the editor, so a file attached here and pasted into a note
+ * is one copy on disk.
+ */
+function FileCell({ value, onChange }: { value: any; onChange: (v: any) => void }) {
+  const refs: FileRef[] = Array.isArray(value) ? value : value ? [value] : [];
+
+  const attach = async () => {
+    const picked = await api.files.pick();
+    if (picked.length) onChange([...refs, ...picked]);
+  };
+
+  return (
+    <div className="file-cell">
+      {refs.map((f) => (
+        <span key={f.hash} className="file-chip" title={f.name}>
+          {isImage(f.mime) ? (
+            <img className="file-thumb" src={fileUrl(f)} alt="" onClick={() => api.files.open(f.hash)} />
+          ) : (
+            <button className="file-chip-open" onClick={() => api.files.open(f.hash)}>
+              <Icon name="paperclip" size={11} />
+              <span className="file-chip-name">{f.name}</span>
+            </button>
+          )}
+          <button
+            className="file-chip-x"
+            aria-label={`Remove ${f.name}`}
+            onClick={() => onChange(refs.filter((x) => x.hash !== f.hash))}
+          >
+            <Icon name="x" size={10} />
+          </button>
+        </span>
+      ))}
+      <button className="chip-add" onClick={attach} aria-label="Attach a file">
+        <Icon name="plus" size={13} />
+      </button>
+    </div>
+  );
+}
+
 export function Cell({ def, value, onChange }: { def: PropDef; value: any; onChange: (v: any) => void }) {
   switch (def.kind) {
     case 'text':
@@ -390,6 +432,8 @@ export function Cell({ def, value, onChange }: { def: PropDef; value: any; onCha
           <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
         </div>
       );
+    case 'file':
+      return <FileCell value={value} onChange={onChange} />;
     case 'relation':
       return <RelationCell def={def} value={Array.isArray(value) ? value : []} onChange={onChange} />;
     default:

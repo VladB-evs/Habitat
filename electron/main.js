@@ -1,7 +1,8 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, Notification, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, protocol, shell } = require('electron');
 const telegram = require('./telegram');
 const updater = require('./updater');
 const server = require('./server');
+const filesStore = require('./files');
 const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
@@ -99,6 +100,16 @@ function removeVaultFiles(dbPath) {
     /* not empty, or already gone — leave it */
   }
 }
+
+const MIME = {
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.avif': 'image/avif', '.svg': 'image/svg+xml', '.heic': 'image/heic',
+  '.pdf': 'application/pdf', '.txt': 'text/plain', '.md': 'text/markdown', '.csv': 'text/csv',
+  '.json': 'application/json', '.zip': 'application/zip', '.mp3': 'audio/mpeg', '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4', '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm',
+};
+
+const mimeOf = (name) => MIME[path.extname(String(name || '')).toLowerCase()] || 'application/octet-stream';
 
 // Set once the IPC handlers exist, so the File menu can reuse the same code path.
 let openExistingHabitat = null;
@@ -220,6 +231,13 @@ function habitatsState() {
   return { habitats: cfg.habitats || [], activeId: cfg.activeId, onboarded: cfg.onboarded !== false };
 }
 
+// Attachments are served over their own scheme rather than file://, so the same
+// URL works in dev (served from vite) and in the packaged app, and the renderer
+// never has to hold a whole image in memory to show it.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'habitat', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+]);
+
 app.whenReady().then(() => {
   try {
     boot();
@@ -271,6 +289,72 @@ function boot() {
     ipcMain.handle(channel, (_e, payload) => fn(payload));
   }
 
+  // habitat://file/<sha256><ext> — streamed straight off disk. The hash shape is
+  // checked in files.resolve(), so a crafted URL can't walk out of the store.
+  protocol.handle('habitat', async (request) => {
+    const url = new URL(request.url);
+    if (url.hostname !== 'file') return new Response('not found', { status: 404 });
+    const name = decodeURIComponent(url.pathname.replace(/^\//, ''));
+    const hash = name.replace(/\.[^.]*$/, '');
+    const row = api['files:get'](hash);
+    const onDisk = filesStore.resolve(hash, row?.ext ?? path.extname(name));
+    if (!onDisk) return new Response('not found', { status: 404 });
+    const res = await net.fetch('file://' + encodeURI(onDisk));
+    if (row?.mime) {
+      const headers = new Headers(res.headers);
+      headers.set('content-type', row.mime);
+      return new Response(res.body, { status: res.status, headers });
+    }
+    return res;
+  });
+
+  /** Pick files from disk and take them into the store in one step. */
+  ipcMain.handle('files:pick', async (_e, { images } = {}) => {
+    const res = await dialog.showOpenDialog(win, {
+      title: images ? 'Add images' : 'Add files',
+      properties: ['openFile', 'multiSelections'],
+      filters: images ? [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'svg', 'heic'] }] : [],
+    });
+    if (res.canceled) return [];
+    return res.filePaths.map((file) => {
+      const stored = filesStore.storeFromPath(file);
+      return api['files:add']({
+        name: stored.name,
+        mime: mimeOf(stored.name),
+        // Already on disk under its hash; add() rewrites the same bytes, which is
+        // cheap next to the clarity of one path in.
+        data: fs.readFileSync(file),
+      });
+    });
+  });
+
+  /** Show an attachment where it lives, or hand it to whatever opens that kind. */
+  ipcMain.handle('files:reveal', (_e, hash) => {
+    const row = api['files:get'](hash);
+    const onDisk = row && filesStore.resolve(row.hash, row.ext);
+    if (onDisk) shell.showItemInFolder(onDisk);
+    return !!onDisk;
+  });
+
+  ipcMain.handle('files:open', async (_e, hash) => {
+    const row = api['files:get'](hash);
+    const onDisk = row && filesStore.resolve(row.hash, row.ext);
+    if (!onDisk) return false;
+    await shell.openPath(onDisk);
+    return true;
+  });
+
+  /** Save a copy somewhere the user chooses, under its original name. */
+  ipcMain.handle('files:saveAs', async (_e, hash) => {
+    const row = api['files:get'](hash);
+    const onDisk = row && filesStore.resolve(row.hash, row.ext);
+    if (!onDisk) return false;
+    const res = await dialog.showSaveDialog(win, { defaultPath: row.name || 'file' + row.ext });
+    if (res.canceled || !res.filePath) return false;
+    fs.copyFileSync(onDisk, res.filePath);
+    return true;
+  });
+
   // Automations can raise a system notification…
   setNotifier((title, body) => {
     if (!Notification.isSupported()) {
@@ -305,26 +389,35 @@ function boot() {
     }
     if (!updates.length) return;
     let offset = cfg.offset || 0;
-    let chatId = cfg.chatId;
+    let link = { chatId: cfg.chatId, userId: cfg.userId, userName: cfg.userName, pairCode: cfg.pairCode, pairExpires: cfg.pairExpires };
+    const reply = (id, text) =>
+      telegram.sendMessage({ ...cfg, chatId: id }, text).catch((err) => console.error('telegram reply failed', err.message));
+
     for (const u of updates) {
+      // Offset always advances, so ignored messages aren't re-examined next tick.
       offset = Math.max(offset, u.update_id);
-      const msg = u.message;
-      if (!msg) continue;
-      // First message also teaches us which chat to reply to.
-      if (!chatId) chatId = String(msg.chat?.id ?? '');
-      if (chatId && String(msg.chat?.id) !== String(chatId)) continue;
-      const text = msg.text || msg.caption || '';
-      if (!text.trim()) continue;
-      const made = api['telegram:ingest']({ text, typeId: cfg.typeId });
+      if (!u.message) continue;
+
+      const verdict = telegram.gate({ ...cfg, ...link }, u.message);
+      if (verdict.action === 'ignore') continue;
+
+      if (verdict.action === 'pair') {
+        link = { chatId: verdict.chatId, userId: verdict.userId, userName: verdict.userName, pairCode: '', pairExpires: 0 };
+        reply(verdict.chatId, 'Paired with Habitat ✓ — anything you send me now lands in your vault.');
+        continue;
+      }
+
+      link.userId = verdict.userId;
+      const made = api['telegram:ingest']({ text: verdict.text, typeId: cfg.typeId });
       if (made) {
         const receipt =
           made.kind === 'daily'
             ? `Added to today’s note: “${made.title}”`
             : `Saved “${made.title}” as ${made.typeName}`;
-        telegram.sendMessage({ ...cfg, chatId }, receipt).catch((err) => console.error('telegram reply failed', err.message));
+        reply(link.chatId, receipt);
       }
     }
-    api['telegram:save']({ offset, chatId });
+    api['telegram:save']({ offset, ...link });
   }
 
   /** The local HTTP API follows the vault: restarted whenever its settings change. */

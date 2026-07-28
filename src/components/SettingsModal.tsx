@@ -127,6 +127,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
+        <Attachments />
+
         <div className="settings-row col">
           <div>
             <div className="s-label">Vault location</div>
@@ -257,4 +259,69 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       </div>
     </div>
   );
+}
+
+/**
+ * What attachments are taking up, and a way to sweep what nothing points at.
+ * Deliberately manual: walking every note to prove a file is unused is not
+ * something to do on a timer.
+ */
+function Attachments() {
+  const [stats, setStats] = useState<Awaited<ReturnType<typeof api.files.stats>> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+
+  const load = () => api.files.stats().then(setStats);
+  useEffect(() => {
+    load();
+  }, []);
+
+  if (!stats) return null;
+
+  const sweep = async () => {
+    setBusy(true);
+    try {
+      const { removed, freed } = await api.files.gc();
+      setNote(removed ? `Removed ${removed} unused ${removed === 1 ? 'file' : 'files'}, freeing ${size(freed)}.` : 'Nothing to clean up.');
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="settings-row col">
+      <div>
+        <div className="s-label">Attachments</div>
+        <div className="s-hint">
+          Images and files you paste, drop or attach live in a <code>files</code> folder next to the vault, named by
+          their contents — so the same picture used twice is stored once, and copying the vault folder takes everything
+          with it.
+        </div>
+      </div>
+      <code className="vault-path">{stats.dir}</code>
+      <div className="s-hint">
+        {stats.count} {stats.count === 1 ? 'file' : 'files'} · {size(stats.bytes)}
+        {stats.unusedCount > 0 && ` · ${stats.unusedCount} no longer referenced (${size(stats.unusedBytes)})`}
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button className="btn" disabled={busy || stats.unusedCount === 0} onClick={sweep}>
+          {busy ? 'Cleaning…' : 'Clean up unused'}
+        </button>
+      </div>
+      {note && <div className="s-notice">{note}</div>}
+    </div>
+  );
+}
+
+function size(bytes: number): string {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let n = bytes;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n < 10 && i > 0 ? n.toFixed(1) : Math.round(n)} ${units[i]}`;
 }

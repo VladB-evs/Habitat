@@ -70,8 +70,13 @@ import {
   LuWallet,
   LuWaves,
   LuWrench,
+  LuArrowUpDown,
   LuArrowUpRight,
+  LuGripVertical,
+  LuImage,
+  LuPaperclip,
   LuBookOpen,
+  LuListFilter,
   LuBold,
   LuBookmark,
   LuBox,
@@ -191,6 +196,11 @@ const UI: Record<string, IconType> = {
   globe: LuGlobe,
   layout: LuLayoutGrid,
   rows3: LuRows2,
+  filter: LuListFilter,
+  sort: LuArrowUpDown,
+  grip: LuGripVertical,
+  image: LuImage,
+  paperclip: LuPaperclip,
 };
 
 export function Icon({ name, size = 16, className }: { name: string; size?: number; className?: string }) {

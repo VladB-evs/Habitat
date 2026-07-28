@@ -138,7 +138,6 @@ export function ObjectPage({ id }: { id: string }) {
             onTitle={saveTitle}
             onProp={saveProp}
             onExtraChange={saveExtraProps}
-            onSelfChange={loadSelf}
           >
             <Editor key={obj.id} content={obj.content} onSave={saveContent} />
           </PersonBody>

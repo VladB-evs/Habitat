@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../store';
 import type { Obj } from '../types';
@@ -6,6 +6,25 @@ import { typeColor } from '../util';
 import { motion } from 'motion/react';
 import { dialogIn, snap } from '../motion';
 import { Icon, TypeIcon } from './Icons';
+
+/** The operators the search understands, offered as one-click starting points. */
+const OPERATORS: [string, string][] = [
+  ['type:', 'one kind of object'],
+  ['tag:', 'carrying a tag'],
+  ['is:pinned', 'pinned only'],
+  ['due:week', 'dated in the next 7 days'],
+  ['edited:today', 'touched today'],
+];
+
+const OPERATOR_RE = /^(type|tag|is|due|created|edited):/i;
+
+/** The words left once the operators are taken out — what actually got matched. */
+const plainWords = (q: string) =>
+  q
+    .split(/\s+/)
+    .filter((w) => w && !OPERATOR_RE.test(w))
+    .join(' ')
+    .trim();
 
 /** Wrap each occurrence of the query so you can see what matched. */
 function highlight(text: string, query: string) {
@@ -22,6 +41,7 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<Obj[]>([]);
   const [index, setIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let alive = true;
@@ -36,11 +56,13 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
     };
   }, [q]);
 
-  const canCreate = q.trim().length > 0 && types.some((t) => t.id === 'note');
+  const words = plainWords(q);
+  // Operators alone aren't a note title, so "create" follows the words, not the query.
+  const canCreate = words.length > 0 && types.some((t) => t.id === 'note');
   const total = results.length + (canCreate ? 1 : 0);
 
   const createNote = async () => {
-    const o = await api.objects.create({ typeId: 'note', title: q.trim() });
+    const o = await api.objects.create({ typeId: 'note', title: words });
     onClose();
     openObject(o.id);
   };
@@ -79,6 +101,7 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
     >
       <motion.div className="palette" variants={dialogIn} initial="hidden" animate="shown">
         <input
+          ref={inputRef}
           className="palette-input"
           placeholder="Search your Habitat…"
           value={q}
@@ -99,7 +122,7 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
               </span>
               <span className="result-main">
                 <span className="result-title">{o.title || 'Untitled'}</span>
-                {o.match && <span className="result-sub">{highlight(o.match, q)}</span>}
+                {o.match && <span className="result-sub">{highlight(o.match, words)}</span>}
               </span>
               <span className="result-type">{typeOf(o)?.name}</span>
             </button>
@@ -113,10 +136,25 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
               <span className="result-emoji">
                 <Icon name="plus" size={14} />
               </span>
-              <span className="result-title">Create note “{q.trim()}”</span>
+              <span className="result-title">Create note “{words}”</span>
             </button>
           )}
           {!canCreate && results.length === 0 && <div className="empty">Nothing found</div>}
+        </div>
+        <div className="palette-ops">
+          {OPERATORS.map(([op, what]) => (
+            <button
+              key={op}
+              className="palette-op"
+              title={what}
+              onClick={() => {
+                setQ((cur) => (cur.trim() ? `${cur.trim()} ${op}` : op));
+                inputRef.current?.focus();
+              }}
+            >
+              {op}
+            </button>
+          ))}
         </div>
         <div className="palette-hint">
           <span>↑↓ navigate</span>

@@ -34,4 +34,46 @@ async function whoAmI(token) {
   return call(token, 'getMe', {});
 }
 
-module.exports = { sendMessage, fetchUpdates, whoAmI };
+/**
+ * What a single incoming message is allowed to do.
+ *
+ * A bot is reachable by anyone who finds it, so this is the only thing standing
+ * between a stranger and the vault. Kept pure, and out of the poll loop, so the
+ * rules can be read in one place:
+ *
+ *  - private chats only — never a group, channel or supergroup
+ *  - while unpaired, nothing counts except the live pairing code
+ *  - once paired, both the chat *and* the sender have to match
+ *  - anything else is ignored without a reply, which is what stops the bot
+ *    confirming to a stranger that it's listening
+ */
+function gate(cfg, msg, nowMs = Date.now()) {
+  const text = (msg?.text || msg?.caption || '').trim();
+  if (!text) return { action: 'ignore', reason: 'empty' };
+  if (msg.chat?.type !== 'private') return { action: 'ignore', reason: 'not a private chat' };
+
+  const chat = String(msg.chat?.id ?? '');
+  const from = String(msg.from?.id ?? '');
+  if (!chat || !from) return { action: 'ignore', reason: 'no sender' };
+
+  if (!cfg?.chatId) {
+    const live = cfg?.pairCode && (!cfg.pairExpires || nowMs < cfg.pairExpires);
+    if (!live) return { action: 'ignore', reason: 'not paired' };
+    if (text.toUpperCase() !== String(cfg.pairCode).toUpperCase())
+      return { action: 'ignore', reason: 'wrong code' };
+    return {
+      action: 'pair',
+      chatId: chat,
+      userId: from,
+      userName: msg.from?.username || msg.from?.first_name || '',
+    };
+  }
+
+  if (chat !== String(cfg.chatId)) return { action: 'ignore', reason: 'other chat' };
+  // Links made before pairing existed know the chat but not the sender. In a
+  // private chat that's necessarily the same person, so adopt it and tighten.
+  if (cfg.userId && from !== String(cfg.userId)) return { action: 'ignore', reason: 'other sender' };
+  return { action: 'ingest', text, userId: String(cfg.userId || from) };
+}
+
+module.exports = { sendMessage, fetchUpdates, whoAmI, gate };

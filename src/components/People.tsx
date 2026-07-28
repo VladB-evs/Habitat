@@ -5,7 +5,7 @@ import { dealtIn, spring, stagger } from '../motion';
 import { onObjectChanged } from '../objects';
 import { useApp } from '../store';
 import type { NextBirthday, Person } from '../types';
-import { avatarColor, birthdayCountdown, fmtBirthday, initials } from '../util';
+import { avatarColor, birthdayCountdown, fmtBirthday, initials, relationships } from '../util';
 import { Icon } from './Icons';
 
 /** Initials on a colour that stays the same for a given name, everywhere in the app. */
@@ -37,6 +37,28 @@ export function birthdayLine(b: NextBirthday | null): string | null {
   return parts.join(' · ');
 }
 
+/**
+ * How someone relates to you — several hats at once, since relationship is a
+ * multi-select. Past the first couple the rest become a count, so a row stays a
+ * row; the full list is in the tooltip and on their page.
+ */
+export function RelChips({ value, max = 2 }: { value: unknown; max?: number }) {
+  const rels = relationships(value);
+  if (!rels.length) return null;
+  const head = rels.slice(0, max);
+  const rest = rels.length - head.length;
+  return (
+    <span className="rel-chips" title={rels.join(' · ')}>
+      {head.map((r) => (
+        <span className="rel-chip" key={r}>
+          {r}
+        </span>
+      ))}
+      {rest > 0 && <span className="rel-chip more">+{rest}</span>}
+    </span>
+  );
+}
+
 const workLine = (p: Person): string => [p.props.role, p.props.company].filter(Boolean).join(' · ');
 
 /** One line under a name on a card: what they do, or failing that a way to reach them. */
@@ -59,7 +81,7 @@ function PersonCard({ p, theme, onOpen }: { p: Person; theme: string; onOpen: (e
         {line && <span className="person-card-sub">{line}</span>}
       </span>
       <span className="person-card-side">
-        {p.props.relationship && <span className="rel-chip">{p.props.relationship}</span>}
+        <RelChips value={p.props.relationship} />
         {b && b.days <= 30 && (
           <span className={'bday-pill' + (b.days === 0 ? ' today' : '')}>
             <Icon name="cake" size={11} /> {birthdayCountdown(b.days)}
@@ -89,7 +111,9 @@ function PersonRow({ p, theme, onOpen }: { p: Person; theme: string; onOpen: (e:
           </span>
         ) : null}
       </span>
-      <span className="person-row-cell">{p.props.relationship ? <span className="rel-chip">{p.props.relationship}</span> : null}</span>
+      <span className="person-row-cell">
+        <RelChips value={p.props.relationship} />
+      </span>
     </motion.button>
   );
 }
@@ -173,21 +197,33 @@ export function People() {
     [people]
   );
 
-  const relationships = useMemo(() => {
+  // One filter chip per relationship in use, commonest first. Someone who is
+  // both a colleague and a friend counts towards — and shows under — both.
+  const relFacets = useMemo(() => {
     const seen = new Map<string, number>();
-    for (const p of others) {
-      const r = String(p.props.relationship || '').trim();
-      if (r) seen.set(r, (seen.get(r) ?? 0) + 1);
-    }
-    return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([r]) => r);
+    for (const p of others)
+      for (const r of relationships(p.props.relationship)) {
+        const key = r.trim();
+        if (key) seen.set(key, (seen.get(key) ?? 0) + 1);
+      }
+    return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   }, [others]);
 
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return others.filter((p) => {
-      if (rel !== 'All' && String(p.props.relationship || '') !== rel) return false;
+      if (rel !== 'All' && !relationships(p.props.relationship).some((r) => r.trim() === rel)) return false;
       if (!needle) return true;
-      const hay = [p.title, p.props.nickname, p.props.company, p.props.role, p.props.email, p.props.phone, p.snippet]
+      const hay = [
+        p.title,
+        p.props.nickname,
+        p.props.company,
+        p.props.role,
+        p.props.email,
+        p.props.phone,
+        ...relationships(p.props.relationship),
+        p.snippet,
+      ]
         .map((v) => String(v || '').toLowerCase())
         .join(' ');
       return hay.includes(needle);
@@ -279,9 +315,9 @@ export function People() {
             <button className={'filter-chip' + (rel === 'All' ? ' on' : '')} onClick={() => setRel('All')}>
               Everyone <span className="filter-n">{others.length}</span>
             </button>
-            {relationships.map((r) => (
+            {relFacets.map(([r, n]) => (
               <button key={r} className={'filter-chip' + (rel === r ? ' on' : '')} onClick={() => setRel(r)}>
-                {r}
+                {r} <span className="filter-n">{n}</span>
               </button>
             ))}
           </div>

@@ -12,6 +12,7 @@ const ROUTES: [string, string][] = [
   ['PATCH /objects/:id', '{ title, props, pinned, content }'],
   ['DELETE /objects/:id', 'remove an object'],
   ['GET /search?q=coffee', 'search titles and note text'],
+  ['GET /search?q=type:task+due:week', '…with filters mixed in'],
   ['GET /backlinks/:id', 'what links here'],
   ['GET /daily?date=2026-07-26', "a day's note"],
   ['POST /daily/append', '{ text, date? }'],

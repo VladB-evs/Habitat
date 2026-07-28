@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import { api } from '../api';
 import { useApp } from '../store';
 import type { NextBirthday, Obj, PersonFieldGroup, PropDef } from '../types';
-import { Avatar, birthdayLine } from './People';
+import { personProps } from '../util';
+import { Avatar, birthdayLine, RelChips } from './People';
 import { Cell, popPos } from './cells';
 import { Icon } from './Icons';
 import { PropEditor } from './PropEditor';
@@ -75,7 +76,8 @@ function FieldPicker({
 /**
  * A person's page: a header that reads like a contact card, then their details,
  * then anything written about them. Core details come from the People type;
- * the rest are this person's own, added from the catalogue.
+ * the rest are this person's own, added from the catalogue. The user's own card
+ * is the same page minus what can only be true of someone else.
  */
 export function PersonBody({
   obj,
@@ -84,7 +86,6 @@ export function PersonBody({
   onTitle,
   onProp,
   onExtraChange,
-  onSelfChange,
   children,
 }: {
   obj: Obj;
@@ -93,7 +94,6 @@ export function PersonBody({
   onTitle: (v: string) => void;
   onProp: (propId: string, value: any) => void;
   onExtraChange: (defs: PropDef[]) => void;
-  onSelfChange: () => void;
   /** The note editor, kept in the page shell so every object type saves it the same way. */
   children: ReactNode;
 }) {
@@ -104,6 +104,9 @@ export function PersonBody({
 
   useEffect(() => setTitle(obj.title), [obj.id]);
 
+  // Shown: what this card actually has. Taken: every id that is spoken for,
+  // hidden ones included, so the picker can't offer one back.
+  const shown = useMemo(() => personProps(typeDefs, isSelf), [typeDefs, isSelf]);
   const taken = useMemo(
     () => new Set([...typeDefs.map((p) => p.id), ...obj.extraProps.map((p) => p.id)]),
     [typeDefs, obj.extraProps]
@@ -118,11 +121,6 @@ export function PersonBody({
   };
 
   const bday = birthdayLine(localBirthday(String(obj.props.birthday ?? '')));
-
-  const toggleSelf = async () => {
-    await api.people.setSelf(isSelf ? null : obj.id);
-    onSelfChange();
-  };
 
   const quick: { icon: string; label: string; href: string }[] = [];
   if (obj.props.phone) quick.push({ icon: 'phone', label: 'Call', href: 'tel:' + String(obj.props.phone).replace(/\s+/g, '') });
@@ -145,7 +143,8 @@ export function PersonBody({
           />
           <div className="person-hero-meta">
             {obj.props.nickname ? <span className="person-nick">“{obj.props.nickname}”</span> : null}
-            {obj.props.relationship ? <span className="rel-chip">{obj.props.relationship}</span> : null}
+            {/* Their whole list here — this is the page about them. */}
+            {!isSelf && <RelChips value={obj.props.relationship} max={Infinity} />}
             {[obj.props.role, obj.props.company].filter(Boolean).length > 0 && (
               <span className="person-work">
                 <Icon name="briefcase" size={12} /> {[obj.props.role, obj.props.company].filter(Boolean).join(' · ')}
@@ -158,9 +157,12 @@ export function PersonBody({
             )}
           </div>
         </div>
-        <button className={'self-toggle' + (isSelf ? ' on' : '')} onClick={toggleSelf} title="Mark this card as you">
-          <Icon name={isSelf ? 'check' : 'user'} size={13} /> {isSelf ? 'This is you' : 'Set as me'}
-        </button>
+        {/* Whose card this is isn't a setting: the self card is made once, as its own thing. */}
+        {isSelf && (
+          <span className="self-mark" title="Your own card">
+            <Icon name="user" size={13} /> This is you
+          </span>
+        )}
       </div>
 
       {quick.length > 0 && (
@@ -174,7 +176,7 @@ export function PersonBody({
       )}
 
       <div className="obj-props person-props">
-        {typeDefs.map((p) => (
+        {shown.map((p) => (
           <div className="obj-prop" key={p.id}>
             <label>{p.name}</label>
             <div className="prop-control">

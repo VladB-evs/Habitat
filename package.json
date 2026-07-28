@@ -9,6 +9,7 @@
     "dev": "node scripts/dev-app-name.mjs && concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && HABITAT_DEV=1 electron .\"",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
+    "test": "node --test electron/*.test.mjs",
     "start": "node scripts/dev-app-name.mjs && npm run build && electron .",
     "app": "node scripts/dev-app-name.mjs && electron .",
     "mcp": "node mcp/server.mjs",

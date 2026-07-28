@@ -101,6 +101,26 @@ export const BUILT_IN_VARS: { id: string; label: string; icon: string; group: st
   { id: 'uuid', label: 'UUID', icon: 'hash', group: 'Identifiers', value: () => crypto.randomUUID() },
 ];
 
+/** Attachments come in through the same store whether picked, pasted or dropped. */
+function mediaItems(): SlashItem[] {
+  const add = (id: string, label: string, icon: string, hint: string, images: boolean): SlashItem => ({
+    id,
+    label,
+    icon,
+    hint,
+    group: 'Insert',
+    run: async (editor, range) => {
+      editor.chain().focus().deleteRange(range).run();
+      const refs = await api.files.pick({ images });
+      if (refs.length) editor.chain().focus().insertMedia(refs).run();
+    },
+  });
+  return [
+    add('image', 'Image', 'image', 'Pick from your computer', true),
+    add('file', 'File', 'paperclip', 'Attach anything', false),
+  ];
+}
+
 function insertItems(): SlashItem[] {
   return BUILT_IN_VARS.map((v) => ({
     id: v.id,
@@ -191,7 +211,7 @@ const suggestionConfig = {
       },
     }));
     const q = query.trim().toLowerCase();
-    const all = [...blockItems(), ...triggerItems(), ...insertItems(), ...custom];
+    const all = [...blockItems(), ...mediaItems(), ...triggerItems(), ...insertItems(), ...custom];
     if (!q) return all;
     // Match the name, the group, or the preview value, so "/uuid", "/identifier"
     // and "/date" all reach the right row. Nothing is truncated — the menu scrolls.

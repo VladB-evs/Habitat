@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { randomBytes, randomUUID } = require('crypto');
 const { DatabaseSync } = require('node:sqlite');
+const files = require('./files');
 
 let db;
 
@@ -53,6 +54,16 @@ CREATE TABLE IF NOT EXISTS links (
   prop_id TEXT,
   UNIQUE(from_id, to_id, kind)
 );
+CREATE TABLE IF NOT EXISTS files (
+  hash TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  mime TEXT NOT NULL DEFAULT '',
+  ext TEXT NOT NULL DEFAULT '',
+  size INTEGER NOT NULL DEFAULT 0,
+  width INTEGER,
+  height INTEGER,
+  created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS kv (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -79,6 +90,11 @@ function parseType(r) {
 function docText(node, acc) {
   if (!node) return acc;
   if (typeof node.text === 'string') acc.push(node.text);
+  // An attachment's filename and caption are the only text it has — index both.
+  if (node.type === 'media' && node.attrs) {
+    if (node.attrs.name) acc.push(String(node.attrs.name));
+    if (node.attrs.caption) acc.push(String(node.attrs.caption));
+  }
   if (node.type === 'mention' && node.attrs && node.attrs.label) acc.push(node.attrs.label);
   if (node.type === 'tagMention' && node.attrs && node.attrs.label) acc.push('#' + node.attrs.label);
   if (Array.isArray(node.content)) node.content.forEach((c) => docText(c, acc));
@@ -208,19 +224,315 @@ function syncRelationLinks(id, typeId, props, extraProps = []) {
   }
 }
 
+// ---------- search index ----------
+//
+// An FTS5 index over the text worth searching, kept in step by triggers rather
+// than by every write site remembering to update it. Three columns so the
+// ranking can care more about a name than a passing mention in a note body,
+// and so a person still turns up by nickname.
+
+const FTS_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS objects_fts USING fts5(
+  title, body, alias,
+  tokenize = 'unicode61 remove_diacritics 2'
+);
+CREATE TRIGGER IF NOT EXISTS objects_fts_insert AFTER INSERT ON objects BEGIN
+  INSERT INTO objects_fts (rowid, title, body, alias)
+  VALUES (
+    new.rowid, new.title, new.search_text,
+    CASE WHEN json_valid(new.props) THEN COALESCE(json_extract(new.props, '$.nickname'), '') ELSE '' END
+  );
+END;
+CREATE TRIGGER IF NOT EXISTS objects_fts_delete AFTER DELETE ON objects BEGIN
+  DELETE FROM objects_fts WHERE rowid = old.rowid;
+END;
+CREATE TRIGGER IF NOT EXISTS objects_fts_update AFTER UPDATE OF title, search_text, props ON objects BEGIN
+  DELETE FROM objects_fts WHERE rowid = old.rowid;
+  INSERT INTO objects_fts (rowid, title, body, alias)
+  VALUES (
+    new.rowid, new.title, new.search_text,
+    CASE WHEN json_valid(new.props) THEN COALESCE(json_extract(new.props, '$.nickname'), '') ELSE '' END
+  );
+END;
+`;
+
+/**
+ * Create the index if it's missing, and rebuild it whenever it doesn't line up
+ * with the objects table — which covers both the first run on an existing vault
+ * and any drift from a file edited outside the app.
+ */
+function ensureSearchIndex() {
+  db.exec(FTS_SCHEMA);
+  const indexed = db.prepare('SELECT COUNT(*) AS c FROM objects_fts').get().c;
+  const total = db.prepare('SELECT COUNT(*) AS c FROM objects').get().c;
+  if (indexed !== total) rebuildSearchIndex();
+}
+
+function rebuildSearchIndex() {
+  db.exec(`
+    DELETE FROM objects_fts;
+    INSERT INTO objects_fts (rowid, title, body, alias)
+    SELECT rowid, title, search_text,
+      CASE WHEN json_valid(props) THEN COALESCE(json_extract(props, '$.nickname'), '') ELSE '' END
+    FROM objects;
+  `);
+  return db.prepare('SELECT COUNT(*) AS c FROM objects_fts').get().c;
+}
+
+/** Operators the query bar understands, e.g. `type:task tag:habitat due:week`. */
+const OPERATORS = new Set(['type', 'tag', 'is', 'due', 'created', 'edited']);
+
+/** Splits `type:task coffee shop` into its operators and the words left over. */
+function parseQuery(raw) {
+  const filters = {};
+  const words = [];
+  for (const part of String(raw || '').trim().split(/\s+/)) {
+    if (!part) continue;
+    const m = part.match(/^(\w+):(.+)$/);
+    if (m && OPERATORS.has(m[1].toLowerCase())) filters[m[1].toLowerCase()] = m[2].toLowerCase();
+    else words.push(part);
+  }
+  return { words, filters };
+}
+
+/**
+ * A MATCH expression from free text. Every word is quoted so punctuation can't
+ * be read as FTS syntax, and the last one matches as a prefix so results narrow
+ * while you're still typing.
+ */
+function ftsExpr(words, titleOnly) {
+  const terms = words
+    .join(' ')
+    .split(/[^\p{L}\p{N}_]+/u)
+    .filter(Boolean);
+  if (!terms.length) return null;
+  const expr = terms.map((t, i) => `"${t}"${i === terms.length - 1 ? '*' : ''}`).join(' ');
+  return titleOnly ? `{title alias} : (${expr})` : expr;
+}
+
+/**
+ * Result rows never select `content`. The preview a result needs is already
+ * flattened into search_text, so there's no reason to parse a whole document
+ * per hit — that, not the matching, was the slow part of the old search.
+ */
+const SEARCH_COLUMNS = `o.id, o.type_id, o.title, o.props, o.extra_props, o.date_key, o.pinned,
+  o.created_at, o.updated_at, substr(o.search_text, 1, 160) AS preview`;
+
+function parseSearchRow(r) {
+  const preview = (r.preview || '').trim();
+  return {
+    id: r.id,
+    typeId: r.type_id,
+    title: r.title ?? '',
+    props: JSON.parse(r.props || '{}'),
+    extraProps: JSON.parse(r.extra_props || '[]'),
+    dateKey: r.date_key || null,
+    pinned: !!r.pinned,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    snippet: preview.length > 140 ? preview.slice(0, 140) + '…' : preview,
+  };
+}
+
+const dayStart = (key) => new Date(key + 'T00:00:00').getTime();
+const dayEnd = (key) => new Date(key + 'T23:59:59.999').getTime();
+
+/** `created:`/`edited:` look backwards from today. */
+function pastWindow(v) {
+  const t = todayKey();
+  if (v === 'today') return [t, t];
+  if (v === 'yesterday') return [shiftDay(t, -1), shiftDay(t, -1)];
+  if (v === 'week') return [shiftDay(t, -7), t];
+  if (v === 'month') return [shiftDay(t, -30), t];
+  return null;
+}
+
+/** `due:` looks forwards, except `overdue`. */
+function dueWindow(v) {
+  const t = todayKey();
+  if (v === 'today') return [t, t];
+  if (v === 'tomorrow') return [shiftDay(t, 1), shiftDay(t, 1)];
+  if (v === 'week') return [t, shiftDay(t, 7)];
+  if (v === 'month') return [t, shiftDay(t, 30)];
+  if (v === 'overdue') return ['0001-01-01', shiftDay(t, -1)];
+  return null;
+}
+
+const singular = (v) => String(v).replace(/s$/, '');
+
+function resolveType(value) {
+  const types = db.prepare('SELECT id, name FROM types').all();
+  const want = String(value).toLowerCase();
+  return (
+    types.find((t) => t.id.toLowerCase() === want) ||
+    types.find((t) => t.name.toLowerCase() === want) ||
+    types.find((t) => singular(t.name.toLowerCase()) === singular(want))
+  );
+}
+
+function resolveTag(value) {
+  const want = String(value).replace(/^#/, '').toLowerCase();
+  return db
+    .prepare("SELECT id, title FROM objects WHERE type_id = 'tag'")
+    .all()
+    .find((t) => String(t.title).toLowerCase() === want);
+}
+
+/**
+ * Search, as one indexed query. Operators become SQL filters; the free text
+ * goes to FTS5, which ranks by bm25 with the title weighted well above the
+ * body, and hands back the snippet around the hit.
+ */
+function searchObjects({ q, content = false, limit = 0 }) {
+  const { words, filters } = parseQuery(q);
+  const cap = limit > 0 ? limit : content ? 40 : 20;
+  const where = [];
+  const params = [];
+
+  if (filters.type) {
+    const type = resolveType(filters.type);
+    if (!type) return [];
+    where.push('o.type_id = ?');
+    params.push(type.id);
+  }
+  if (filters.tag) {
+    const tag = resolveTag(filters.tag);
+    if (!tag) return [];
+    where.push('o.id IN (SELECT from_id FROM links WHERE to_id = ?)');
+    params.push(tag.id);
+  }
+  if (filters.is === 'pinned') where.push('o.pinned = 1');
+  for (const [key, column] of [
+    ['created', 'created_at'],
+    ['edited', 'updated_at'],
+  ]) {
+    if (!filters[key]) continue;
+    const win = pastWindow(filters[key]);
+    if (!win) return [];
+    where.push(`o.${column} BETWEEN ? AND ?`);
+    params.push(dayStart(win[0]), dayEnd(win[1]));
+  }
+  if (filters.due) {
+    const win = dueWindow(filters.due);
+    if (!win) return [];
+    // Date values live inside the props JSON under a per-type property id, so
+    // match against whichever of them looks like the date being asked about.
+    const dateProps = db
+      .prepare('SELECT properties FROM types')
+      .all()
+      .flatMap((t) => {
+        try {
+          return JSON.parse(t.properties || '[]');
+        } catch {
+          return [];
+        }
+      })
+      .filter((p) => p.kind === 'date' || p.kind === 'datetime')
+      .map((p) => p.id);
+    if (!dateProps.length) return [];
+    where.push(
+      `EXISTS (SELECT 1 FROM json_each(o.props) WHERE json_each.key IN (${dateProps.map(() => '?').join(',')})
+         AND json_each.value >= ? AND json_each.value <= ?)`
+    );
+    params.push(...dateProps, win[0], win[1]);
+  }
+
+  const expr = ftsExpr(words, !content);
+  const clause = where.length ? ' AND ' + where.join(' AND ') : '';
+
+  // Operators on their own still need an answer, and there's nothing to rank by.
+  if (!expr) {
+    const sql = `SELECT ${SEARCH_COLUMNS} FROM objects o ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+                 ORDER BY o.updated_at DESC LIMIT ?`;
+    return db
+      .prepare(sql)
+      .all(...params, cap)
+      .map(parseSearchRow);
+  }
+
+  // Two things this query is fussy about, both worth a comment because getting
+  // either wrong is quiet rather than loud:
+  //  - MATCH and the auxiliary functions want the table's own name, not an alias.
+  //  - CROSS JOIN pins the index as the outer loop. With a plain JOIN and any
+  //    filter, SQLite drives from `objects` instead and re-runs the match per
+  //    row — same results, roughly three hundred times slower.
+  const rows = db
+    .prepare(
+      `SELECT ${SEARCH_COLUMNS}, snippet(objects_fts, 1, '', '', '…', 12) AS hit
+         FROM objects_fts CROSS JOIN objects o ON o.rowid = objects_fts.rowid
+        WHERE objects_fts MATCH ?${clause}
+        ORDER BY bm25(objects_fts, 12.0, 1.0, 8.0)
+        LIMIT ?`
+    )
+    .all(expr, ...params, cap);
+
+  return rows.map((r) => {
+    const o = parseSearchRow(r);
+    // Only content searches promised the surrounding text; a body-less hit has none.
+    if (content && r.hit && !String(r.title || '').toLowerCase().includes(String(words.join(' ')).toLowerCase())) o.match = r.hit;
+    return o;
+  });
+}
+
+/** Every attachment hash still pointed at, from note bodies and from properties alike. */
+function referencedHashes() {
+  const used = new Set();
+  const walk = (node) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'media' && node.attrs?.hash) used.add(String(node.attrs.hash));
+    if (Array.isArray(node.content)) node.content.forEach(walk);
+  };
+  for (const r of db.prepare('SELECT content, props FROM objects').all()) {
+    if (r.content) {
+      try {
+        walk(JSON.parse(r.content));
+      } catch {
+        /* unreadable content can't be proved to reference anything */
+      }
+    }
+    if (!r.props || !r.props.includes('hash')) continue;
+    try {
+      // File properties hold a list of refs; anything shaped like one counts.
+      for (const value of Object.values(JSON.parse(r.props))) {
+        for (const ref of Array.isArray(value) ? value : [value]) {
+          if (ref && typeof ref === 'object' && ref.hash) used.add(String(ref.hash));
+        }
+      }
+    } catch {
+      /* same */
+    }
+  }
+  // Templates can carry attachments too, and outlive the objects made from them.
+  for (const r of db.prepare('SELECT content FROM templates WHERE content IS NOT NULL').all()) {
+    try {
+      walk(JSON.parse(r.content));
+    } catch {
+      /* ignore */
+    }
+  }
+  return used;
+}
+
 // ---------- core operations ----------
 
 
 // ---------- habitat code ----------
 
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+
+const pickChars = (n) =>
+  Array.from(randomBytes(n))
+    .map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length])
+    .join('');
+
 /** HAB-XXXX-XXXX — a stable id for this file, unambiguous enough to read aloud. */
 function makeHabitatCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  const pick = (n) =>
-    Array.from(randomBytes(n))
-      .map((b) => alphabet[b % alphabet.length])
-      .join('');
-  return `HAB-${pick(4)}-${pick(4)}`;
+  return `HAB-${pickChars(4)}-${pickChars(4)}`;
+}
+
+/** Six characters, no lookalikes — short enough to thumb into Telegram. */
+function makePairCode() {
+  return pickChars(6);
 }
 
 // ---------- automations ----------
@@ -276,10 +588,24 @@ function shiftDay(key, days) {
   return todayKey(d);
 }
 
-/** Tokens usable in any action text: object fields plus a few dates. */
-function fillTemplate(text, obj) {
+/** A readable bullet list of what a scoped rule matched, for notification text. */
+function listText(matches, limit = 10) {
+  const shown = matches.slice(0, limit).map((o) => '• ' + (o.title || 'Untitled'));
+  const rest = matches.length - shown.length;
+  return shown.concat(rest > 0 ? [`• …and ${rest} more`] : []).join('\n');
+}
+
+/**
+ * Tokens usable in any action text: object fields plus a few dates. `ctx.matches`
+ * is present for rules that look at a whole set of objects at once, and is what
+ * makes {{count}} and {{list}} work.
+ */
+function fillTemplate(text, obj, ctx) {
   return String(text ?? '').replace(/{{\s*([\w:+-]+)\s*}}/g, (_m, key) => {
     if (key === 'date' || key === 'today') return todayKey();
+    if (key === 'count') return String(ctx?.matches?.length ?? 0);
+    if (key === 'list') return listText(ctx?.matches ?? []);
+    if (key.startsWith('list:')) return listText(ctx?.matches ?? [], Number(key.slice(5)) || 10);
     if (key === 'tomorrow') return shiftDay(todayKey(), 1);
     if (key === 'yesterday') return shiftDay(todayKey(), -1);
     if (key === 'now') return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -302,12 +628,35 @@ function fillTemplate(text, obj) {
   });
 }
 
+/** Dates reach us as 'YYYY-MM-DD' from properties and as epoch millis from timestamps. */
+function asDayKey(v) {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number') return todayKey(new Date(v));
+  return String(v).slice(0, 10);
+}
+
 /** Values arrive as strings from the UI; coerce for the comparison being asked for. */
 function compare(op, actual, expected) {
   const a = Array.isArray(actual) ? actual.join(', ') : actual;
   const empty = a == null || a === '' || (Array.isArray(actual) && actual.length === 0);
   if (op === 'empty') return empty;
   if (op === 'notEmpty') return !empty;
+
+  // Relative-date comparisons — "edited in the last 7 days", and its negation,
+  // which is the only way to say "nobody has touched this in a while".
+  if (op === 'inLast' || op === 'notInLast') {
+    const key = asDayKey(actual);
+    const days = Math.abs(Number(expected) || 0);
+    const within = !!key && key >= shiftDay(todayKey(), -days) && key <= todayKey();
+    return op === 'inLast' ? within : !within;
+  }
+  if (op === 'before' || op === 'after') {
+    const key = asDayKey(actual);
+    const want = asDayKey(fillTemplate(expected, null));
+    if (!key || !want) return false;
+    return op === 'before' ? key < want : key > want;
+  }
+
   const want = fillTemplate(expected, null);
   const as = String(a ?? '').toLowerCase();
   const ws = String(want ?? '').toLowerCase();
@@ -323,12 +672,31 @@ function compare(op, actual, expected) {
   return false;
 }
 
+/** Conditions read a property, or one of the three fields every object has. */
+function conditionValue(obj, propId) {
+  if (propId === '__title') return obj.title;
+  if (propId === '__created') return obj.createdAt;
+  if (propId === '__updated') return obj.updatedAt;
+  return obj.props?.[propId];
+}
+
 function conditionsPass(rule, obj) {
   const list = rule.conditions || [];
   if (!list.length) return true;
   if (!obj) return false;
-  const check = (c) => compare(c.op || 'eq', c.propId === '__title' ? obj.title : obj.props?.[c.propId], c.value);
+  const check = (c) => compare(c.op || 'eq', conditionValue(obj, c.propId), c.value);
   return rule.match === 'any' ? list.some(check) : list.every(check);
+}
+
+/** The objects a scheduled rule is about: everything of its type that its conditions accept. */
+function matchesForRule(rule) {
+  const typeId = rule.trigger?.typeId;
+  if (!typeId) return [];
+  return db
+    .prepare('SELECT * FROM objects WHERE type_id = ? ORDER BY updated_at')
+    .all(typeId)
+    .map((r) => parseObj(r))
+    .filter((o) => conditionsPass(rule, o));
 }
 
 /**
@@ -336,11 +704,11 @@ function conditionsPass(rule, obj) {
  * object that set the rule off, so the daily note links to it (and backlinks
  * work) instead of just naming it.
  */
-function renderInline(text, obj) {
+function renderInline(text, obj, ctx) {
   const raw = String(text ?? '');
   const nodes = [];
   const push = (t) => {
-    const filled = fillTemplate(t, obj);
+    const filled = fillTemplate(t, obj, ctx);
     if (filled) nodes.push({ type: 'text', text: filled });
   };
   let rest = raw;
@@ -355,16 +723,39 @@ function renderInline(text, obj) {
   return nodes;
 }
 
-/** Appends one paragraph to a daily note (today's by default), creating it if needed. */
-function appendToDaily(nodes, dateKey) {
+/** Appends blocks to a daily note (today's by default), creating it if needed. */
+function appendBlocksToDaily(blocks, dateKey) {
   const key = dateKey || todayKey();
-  const para = { type: 'paragraph', content: nodes.length ? nodes : [] };
   const row = db.prepare("SELECT * FROM objects WHERE type_id = 'daily' AND date_key = ?").get(key);
   if (!row)
-    return createObject({ typeId: 'daily', title: formatDateKey(key), dateKey: key, content: { type: 'doc', content: [para] } });
+    return createObject({ typeId: 'daily', title: formatDateKey(key), dateKey: key, content: { type: 'doc', content: blocks } });
   const doc = row.content ? JSON.parse(row.content) : { type: 'doc', content: [] };
-  doc.content = [...(doc.content || []), para];
+  doc.content = [...(doc.content || []), ...blocks];
   return updateObject({ id: row.id, patch: { content: doc } });
+}
+
+/** Appends one paragraph to a daily note. */
+function appendToDaily(nodes, dateKey) {
+  return appendBlocksToDaily([{ type: 'paragraph', content: nodes.length ? nodes : [] }], dateKey);
+}
+
+/**
+ * A line followed by a real bullet list of the objects a rule matched — mentions,
+ * not bare names, so the daily note links to each one and backlinks work.
+ */
+function appendListToDaily(nodes, matches, dateKey) {
+  const blocks = [{ type: 'paragraph', content: nodes.length ? nodes : [] }];
+  if (matches.length)
+    blocks.push({
+      type: 'bulletList',
+      content: matches.map((o) => ({
+        type: 'listItem',
+        content: [
+          { type: 'paragraph', content: [{ type: 'mention', attrs: { id: o.id, label: o.title || 'Untitled' } }] },
+        ],
+      })),
+    });
+  return appendBlocksToDaily(blocks, dateKey);
 }
 
 function ensureTag(name) {
@@ -379,12 +770,12 @@ function ensureTag(name) {
   return existing || createObject({ typeId: 'tag', title });
 }
 
-function runAction(action, obj) {
+function runAction(action, obj, ctx) {
   if (!action || !action.kind) return;
 
   if (action.kind === 'setProp') {
     if (!obj || !action.propId) return;
-    const raw = fillTemplate(action.value, obj);
+    const raw = fillTemplate(action.value, obj, ctx);
     const value = raw === '' ? null : raw === 'true' ? true : raw === 'false' ? false : raw;
     updateObject({ id: obj.id, patch: { props: { ...obj.props, [action.propId]: value } } });
     return;
@@ -396,11 +787,11 @@ function runAction(action, obj) {
     const props = {};
     for (const p of action.props || []) {
       if (!p.propId) continue;
-      const value = fillTemplate(p.value, obj);
+      const value = fillTemplate(p.value, obj, ctx);
       // Relations hold a list of ids — '{{id}}' points the new object back at this one.
       props[p.propId] = defs.find((d) => d.id === p.propId)?.kind === 'relation' ? (value ? [value] : []) : value;
     }
-    const made = createObject({ typeId: action.typeId, title: fillTemplate(action.text || '{{title}}', obj), props });
+    const made = createObject({ typeId: action.typeId, title: fillTemplate(action.text || '{{title}}', obj, ctx), props });
     // A note-shaped type gets the source mentioned in its body, so it links both ways.
     if (made && obj && action.mention) {
       updateObject({
@@ -412,12 +803,15 @@ function runAction(action, obj) {
   }
 
   if (action.kind === 'appendDaily') {
-    appendToDaily(renderInline(action.text || '{{link}}', obj));
+    const nodes = renderInline(action.text || '{{link}}', obj, ctx);
+    // A rule about a whole set writes the set out as links underneath the line.
+    if (ctx?.matches) appendListToDaily(nodes, ctx.matches);
+    else appendToDaily(nodes);
     return;
   }
 
   if (action.kind === 'addTag') {
-    const tag = ensureTag(fillTemplate(action.text, obj));
+    const tag = ensureTag(fillTemplate(action.text, obj, ctx));
     if (!tag || !obj) return;
     db.prepare('INSERT OR IGNORE INTO links (id, from_id, to_id, kind) VALUES (?, ?, ?, ?)').run(
       uid(), obj.id, tag.id, 'mention'
@@ -428,7 +822,7 @@ function runAction(action, obj) {
   if (action.kind === 'link') {
     // Point a relation property at whatever object the rule names, by title.
     if (!obj || !action.propId) return;
-    const wanted = fillTemplate(action.text, obj).toLowerCase();
+    const wanted = fillTemplate(action.text, obj, ctx).toLowerCase();
     const target = db
       .prepare('SELECT * FROM objects WHERE type_id = ?')
       .all(action.typeId || obj.typeId)
@@ -447,12 +841,12 @@ function runAction(action, obj) {
   }
 
   if (action.kind === 'notify' && notifier) {
-    notifier(fillTemplate(action.text || '{{title}}', obj), fillTemplate(action.value || '', obj));
+    notifier(fillTemplate(action.text || '{{title}}', obj, ctx), fillTemplate(action.value || '', obj, ctx));
     return;
   }
 
   if (action.kind === 'telegram' && telegramSender) {
-    telegramSender([fillTemplate(action.text || '{{title}}', obj), fillTemplate(action.value || '', obj)]
+    telegramSender([fillTemplate(action.text || '{{title}}', obj, ctx), fillTemplate(action.value || '', obj, ctx)]
       .filter(Boolean)
       .join('\n'));
   }
@@ -509,9 +903,30 @@ function runAutomations(event, obj, prevProps) {
   }
 }
 
-/** Timed rules: 'daily' at a time, 'weekly' on chosen days, 'dueToday' on a date property, 'birthday' on a person's. */
+/**
+ * Timed rules: 'daily' at a time, 'weekly' on chosen days, 'dueToday' on a date
+ * property, 'birthday' on a person's.
+ *
+ * A scheduled rule can also be pointed at a type ("look at Tasks where…"). It
+ * then either runs its actions once with the whole matching set in hand — that's
+ * what {{count}} and {{list}} report on — or once per matching object. With
+ * nothing matching it stays quiet rather than announcing an empty list.
+ */
 function runTimedRule(rule) {
-  if (rule.trigger?.kind === 'birthday') {
+  const kind = rule.trigger?.kind;
+
+  if ((kind === 'daily' || kind === 'weekly' || kind === 'appStart') && rule.trigger.typeId) {
+    const matches = matchesForRule(rule);
+    if (!matches.length) return 0;
+    if (rule.trigger.each) {
+      for (const obj of matches) for (const action of rule.actions || []) runAction(action, obj);
+      return matches.length;
+    }
+    for (const action of rule.actions || []) runAction(action, null, { matches });
+    return matches.length;
+  }
+
+  if (kind === 'birthday') {
     // `offset` is how many days ahead to look, so 0 is the day itself and 7 is a week's notice.
     const lead = Math.abs(Number(rule.trigger.offset) || 0);
     let n = 0;
@@ -568,6 +983,11 @@ function updateObject({ id, patch }) {
     const prev = JSON.parse(cur.props || '{}');
     if (patch.props.status === 'Done' && prev.status !== 'Done') patch.props.completedAt = now();
     else if (patch.props.status !== 'Done') delete patch.props.completedAt;
+  }
+  if (patch.props !== undefined && cur.type_id === PEOPLE_TYPE && id === selfId()) {
+    // The self card is its own entity: nothing that describes a link to someone
+    // else sticks to it, whoever writes it — the app, the HTTP API or an agent.
+    for (const p of SELF_HIDDEN_PROPS) delete patch.props[p];
   }
   if (patch.props !== undefined) db.prepare('UPDATE objects SET props = ? WHERE id = ?').run(JSON.stringify(patch.props), id);
   if (patch.extraProps !== undefined)
@@ -715,39 +1135,21 @@ const api = {
 
   /**
    * Matches title or nickname always; with `content: true` it also searches the
-   * text of every note, including daily entries. Title hits rank above body hits.
-   */
-  /**
-   * Matching happens in memory so title hits can be ranked above body hits and
-   * the surrounding snippet returned with each result.
+   * text of every note, including daily entries. Goes through the FTS5 index, so
+   * it stays an index lookup however big the vault gets, and understands
+   * operators — `type:task`, `tag:habitat`, `is:pinned`, `due:week`,
+   * `created:today`, `edited:month` — mixed in with the words.
    */
   'objects:search': (payload) => {
-    const { q, content } = typeof payload === 'string' ? { q: payload, content: false } : payload || {};
-    const query = String(q || '').trim().toLowerCase();
-    if (!query) return db.prepare('SELECT * FROM objects ORDER BY updated_at DESC LIMIT 20').all().map((r) => parseObj(r));
-
-    const rows = db.prepare('SELECT * FROM objects ORDER BY updated_at DESC').all();
-    const hits = [];
-    for (const r of rows) {
-      const title = String(r.title || '').toLowerCase();
-      const nickname = String(JSON.parse(r.props || '{}').nickname || '').toLowerCase();
-      const date = String(r.date_key || '').toLowerCase();
-      const inTitle = title.includes(query);
-      let match = null;
-      if (!inTitle && content) {
-        const text = r.search_text || '';
-        const at = text.toLowerCase().indexOf(query);
-        if (at >= 0) match = text.slice(Math.max(0, at - 40), at + query.length + 60).trim();
-      }
-      if (!inTitle && !match && !nickname.includes(query) && !date.includes(query)) continue;
-      const o = parseObj(r);
-      if (match) o.match = match;
-      hits.push({ o, inTitle });
-      if (hits.length >= (content ? 40 : 20) * 4) break;
-    }
-    hits.sort((a, b) => Number(b.inTitle) - Number(a.inTitle));
-    return hits.slice(0, content ? 40 : 20).map((h) => h.o);
+    const { q, content, limit } = typeof payload === 'string' ? { q: payload, content: false } : payload || {};
+    if (!String(q || '').trim())
+      return db
+        .prepare(`SELECT ${SEARCH_COLUMNS} FROM objects o ORDER BY o.updated_at DESC LIMIT 20`)
+        .all()
+        .map(parseSearchRow);
+    return searchObjects({ q, content: !!content, limit: Number(limit) || 0 });
   },
+
 
   'tags:list': () => {
     if (!getType('tag')) return [];
@@ -1000,19 +1402,26 @@ const api = {
   /** The catalogue of optional details, grouped for the "add detail" picker. */
   'people:fields': () => PEOPLE_FIELDS,
 
+  /**
+   * `self: true` makes the user's own card, and only when there isn't one — the
+   * self card is claimed at creation, never taken from an existing contact.
+   */
   'people:create': ({ title, name, props, extraProps, self } = {}) => {
     ensurePeopleType();
+    const mine = self && !selfId();
+    const clean = { ...(props || {}) };
+    if (mine) for (const p of SELF_HIDDEN_PROPS) delete clean[p];
     const made = createObject({
       typeId: PEOPLE_TYPE,
       title: String(title ?? name ?? '').trim(),
-      props: props || {},
+      props: clean,
       extraProps: extraProps || [],
     });
-    if (made && self) setSelfPerson(made.id);
+    if (made && mine) setSelfPerson(made.id);
     return decoratePerson(made);
   },
 
-  /** The card that represents the user. `null` until one is chosen. */
+  /** The card that represents the user. `null` until they make one. */
   'people:self': () => {
     const id = selfId();
     if (!id) return null;
@@ -1024,7 +1433,6 @@ const api = {
     return decoratePerson(o, id);
   },
 
-  'people:setSelf': (id) => setSelfPerson(id || null),
 
   /**
    * Birthdays coming up, soonest first. `within` is a number of days from today;
@@ -1036,6 +1444,68 @@ const api = {
       .filter((p) => p.nextBirthday && p.nextBirthday.days <= span)
       .sort((a, b) => a.nextBirthday.days - b.nextBirthday.days);
     return limit > 0 ? list.slice(0, limit) : list;
+  },
+
+  // ---------- attachments ----------
+
+  /**
+   * Take bytes into the store and remember what they are. Returns the reference
+   * that gets embedded in a note or a property — everything a view needs to draw
+   * the thing without another lookup.
+   */
+  'files:add': ({ name, mime, data, width, height } = {}) => {
+    const buffer = Buffer.from(data);
+    if (!buffer.length) throw new Error('that file is empty');
+    const { hash, ext, size } = files.store(buffer, name);
+    db.prepare(
+      `INSERT INTO files (hash, name, mime, ext, size, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(hash) DO UPDATE SET width = COALESCE(excluded.width, files.width), height = COALESCE(excluded.height, files.height)`
+    ).run(hash, String(name || 'file'), String(mime || ''), ext, size, width ?? null, height ?? null, now());
+    return { hash, name: String(name || 'file'), mime: String(mime || ''), ext, size, width: width ?? null, height: height ?? null };
+  },
+
+  'files:get': (hash) => db.prepare('SELECT * FROM files WHERE hash = ?').get(String(hash)) ?? null,
+
+  /** How much room attachments take, and how much of it nothing points at any more. */
+  'files:stats': () => {
+    const kept = db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS bytes FROM files').get();
+    const used = referencedHashes();
+    const unused = db
+      .prepare('SELECT hash, size FROM files')
+      .all()
+      .filter((f) => !used.has(f.hash));
+    return {
+      count: kept.n,
+      bytes: kept.bytes,
+      unusedCount: unused.length,
+      unusedBytes: unused.reduce((a, f) => a + f.size, 0),
+      dir: files.dir(),
+    };
+  },
+
+  /**
+   * Delete every stored file nothing refers to any more. Reference counting would
+   * drift; walking what's actually there is slower but always right.
+   */
+  'files:gc': () => {
+    const used = referencedHashes();
+    let removed = 0;
+    let freed = 0;
+    const drop = db.prepare('DELETE FROM files WHERE hash = ?');
+    for (const f of db.prepare('SELECT hash, ext, size FROM files').all()) {
+      if (used.has(f.hash)) continue;
+      freed += files.remove(f.hash, f.ext) || f.size;
+      drop.run(f.hash);
+      removed++;
+    }
+    // Blobs the database never knew about — a crash between write and insert.
+    const known = new Set(db.prepare('SELECT hash FROM files').all().map((r) => r.hash));
+    for (const stored of files.listStored()) {
+      if (known.has(stored.hash)) continue;
+      freed += files.remove(stored.hash, stored.ext) || stored.size;
+      removed++;
+    }
+    return { removed, freed };
   },
 
   'automations:list': () => loadAutomations(),
@@ -1084,14 +1554,27 @@ const api = {
     for (const rule of loadAutomations()) {
       if (rule.enabled === false || rule.trigger?.kind !== 'appStart') continue;
       try {
-        for (const action of rule.actions || []) runAction(action, null);
+        ran += runTimedRule(rule);
         markRun(rule.id);
-        ran++;
       } catch (err) {
         console.error('automation failed', rule.name, err);
       }
     }
     return { ran };
+  },
+
+  /**
+   * What a scheduled rule would act on right now, without acting. The builder
+   * shows this live, so a rule can be checked before it's ever left to run.
+   */
+  'automations:preview': (rule) => {
+    if (!rule?.trigger?.typeId) return { scoped: false, count: 0, titles: [] };
+    try {
+      const matches = matchesForRule(rule);
+      return { scoped: true, count: matches.length, titles: matches.slice(0, 6).map((o) => o.title || 'Untitled') };
+    } catch {
+      return { scoped: true, count: 0, titles: [] };
+    }
   },
 
   /** "Run now" from the builder — same path, ignoring the schedule. */
@@ -1158,14 +1641,35 @@ const api = {
   },
 
   'telegram:get': () => {
+    const blank = { enabled: false, token: '', chatId: '', userId: '', userName: '', typeId: 'note' };
     const r = db.prepare("SELECT value FROM kv WHERE key = 'telegram'").get();
-    if (!r) return { enabled: false, token: '', chatId: '', typeId: 'note' };
+    if (!r) return blank;
     try {
-      return JSON.parse(r.value);
+      return { ...blank, ...JSON.parse(r.value) };
     } catch {
-      return { enabled: false, token: '', chatId: '', typeId: 'note' };
+      return blank;
     }
   },
+
+  /**
+   * Start pairing: mint a short code and forget any current link. A bot is
+   * reachable by anyone who finds it, so the code — not "whoever writes first" —
+   * is what decides whose chat this vault belongs to. It expires quickly.
+   */
+  'telegram:pair': () => {
+    const code = makePairCode();
+    return api['telegram:save']({
+      pairCode: code,
+      pairExpires: now() + 15 * 60 * 1000,
+      chatId: '',
+      userId: '',
+      userName: '',
+    });
+  },
+
+  /** Drop the link without opening the door: nothing is accepted until a new code is used. */
+  'telegram:unpair': () =>
+    api['telegram:save']({ chatId: '', userId: '', userName: '', pairCode: '', pairExpires: 0 }),
 
   'telegram:save': (cfg) => {
     const cur = api['telegram:get']();
@@ -1282,6 +1786,7 @@ let currentFile = null;
 function initDb(file) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   currentFile = file;
+  files.useVault(file);
   db = new DatabaseSync(file);
   try {
     db.exec('PRAGMA journal_mode = WAL;');
@@ -1295,6 +1800,8 @@ function initDb(file) {
   if (starredAdded) db.exec("UPDATE types SET starred = 1 WHERE id IN ('note', 'task', 'project')");
   seed();
   migrate();
+  // After migrations, so the index is built from settled search_text.
+  ensureSearchIndex();
   rolloverTasks();
 }
 
@@ -1378,6 +1885,41 @@ function migrate() {
       }
       if (!defs.some((p) => p.targetTypeId === 'person')) continue;
       upd.run(JSON.stringify(defs.map((p) => (p.targetTypeId === 'person' ? { ...p, targetTypeId: PEOPLE_TYPE } : p))), t.id);
+    }
+  });
+
+  /**
+   * Relationship becomes a multi-select — someone can be a colleague and a
+   * friend — over a longer list of kinds. Single values become one-item lists,
+   * any option a user added by hand is kept, and the self card loses the
+   * property altogether: there is no relationship between me and me.
+   */
+  runOnce('people-relationships-v2', () => {
+    const type = getType(PEOPLE_TYPE);
+    if (!type) return;
+    const defs = (type.properties || []).map((p) => {
+      if (p.id !== 'relationship') return p;
+      const extra = (p.options || []).filter((o) => !RELATIONSHIPS.includes(o));
+      return { ...p, kind: 'multiselect', options: [...RELATIONSHIPS, ...extra] };
+    });
+    db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(JSON.stringify(defs), PEOPLE_TYPE);
+
+    const self = selfId();
+    const upd = db.prepare('UPDATE objects SET props = ? WHERE id = ?');
+    for (const r of db.prepare('SELECT id, props FROM objects WHERE type_id = ?').all(PEOPLE_TYPE)) {
+      let props;
+      try {
+        props = JSON.parse(r.props || '{}');
+      } catch {
+        continue;
+      }
+      const was = props.relationship;
+      if (r.id === self) {
+        if (was === undefined) continue;
+        delete props.relationship;
+      } else if (was == null || was === '' || Array.isArray(was)) continue;
+      else props.relationship = [String(was)];
+      upd.run(JSON.stringify(props), r.id);
     }
   });
 }
@@ -1589,31 +2131,55 @@ function seedFlavor(flavor) {
 // People is a type like any other — so @-mentions, relations, backlinks and the
 // graph all keep working — but it ships with a fixed set of properties and has
 // its own view instead of the generic table. PEOPLE_PROPS live on the type;
-// PEOPLE_FIELDS is a catalogue of extras any single person can be given.
+// PEOPLE_FIELDS is a catalogue of extras any single person can be given. The
+// user's own card is the exception: it is its own entity, fixed once made and
+// without the properties that only describe someone else (SELF_HIDDEN_PROPS).
 
 const PEOPLE_TYPE = 'people';
 
+/** People wear more than one hat — relationship is a multi-select, so a friend can also be a colleague. */
 const RELATIONSHIPS = [
-  'Family',
   'Partner',
+  'Spouse',
+  'Family',
+  'Parent',
+  'Sibling',
+  'Child',
+  'Relative',
   'Close friend',
   'Friend',
-  'Colleague',
-  'Client',
-  'Mentor',
-  'Neighbour',
   'Acquaintance',
+  'Neighbour',
+  'Flatmate',
+  'Colleague',
+  'Manager',
+  'Direct report',
+  'Teammate',
+  'Client',
+  'Business partner',
+  'Collaborator',
+  'Mentor',
+  'Mentee',
+  'Classmate',
 ];
 
 const PEOPLE_PROPS = [
   { id: 'nickname', name: 'Nickname', kind: 'text' },
-  { id: 'relationship', name: 'Relationship', kind: 'select', options: RELATIONSHIPS },
+  { id: 'relationship', name: 'Relationship', kind: 'multiselect', options: RELATIONSHIPS },
   { id: 'birthday', name: 'Birthday', kind: 'date' },
   { id: 'phone', name: 'Phone', kind: 'phone' },
   { id: 'email', name: 'Email', kind: 'email' },
   { id: 'company', name: 'Company', kind: 'text' },
   { id: 'role', name: 'Role', kind: 'text' },
 ];
+
+/**
+ * The self card is its own entity, not one of the contacts: properties that
+ * describe a link between you and someone else make no sense on it — there is
+ * no relationship between me and me. Kept out of the editor and stripped on
+ * write. Mirrored in src/util.ts, which hides them in the person page.
+ */
+const SELF_HIDDEN_PROPS = ['relationship'];
 
 /** Optional details, added per person. Ids are stable so the same field means the same thing everywhere. */
 const PEOPLE_FIELDS = [
@@ -1764,7 +2330,11 @@ function seedPeople(userName, people) {
   }
 }
 
-/** Mark which card is "me". Passing null clears it. */
+/**
+ * Point at the card that is "me". Internal on purpose: the self card is claimed
+ * when it is created and never handed over to another person; passing null only
+ * clears a pointer whose card is gone.
+ */
 function setSelfPerson(id) {
   if (!id) {
     db.prepare("DELETE FROM kv WHERE key = 'selfPersonId'").run();

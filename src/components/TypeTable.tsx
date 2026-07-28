@@ -5,14 +5,25 @@ import { dialogIn, snap, spring } from '../motion';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
 import type { Obj, PropDef, Template } from '../types';
-import { fmtMonthYear, monthCells, monthStartKey, openStatusOf, taskProp, todayKey, typeColor } from '../util';
+import { clientUid, fmtMonthYear, keyOf, monthCells, monthStartKey, openStatusOf, taskProp, todayKey, typeColor } from '../util';
+import type { TypeView, ViewMode } from '../viewModel';
+import {
+  CREATED_FIELD,
+  TITLE_FIELD,
+  UPDATED_FIELD,
+  applyFilters,
+  availableModes,
+  emptyView,
+  opsFor,
+  sortObjs,
+  viewFields,
+} from '../viewModel';
 import { Cell, TextCell, popPos } from './cells';
 import { Icon, TypeIcon } from './Icons';
 import { PropEditor } from './PropEditor';
+import { BoardView, GalleryView } from './typeViews';
 import { TypeEditor } from './TypeEditor';
-
-type SortState = { key: string; dir: 1 | -1 } | null;
-type ViewMode = 'checklist' | 'calendar' | 'table';
+import { ViewBar } from './ViewBar';
 
 /**
  * Defined at module scope on purpose: nesting these inside TypeTable made React
@@ -134,7 +145,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
   const { types, reloadTypes, openObject, openFrom, openBeside, navigate, theme } = useApp();
   const type = types.find((t) => t.id === typeId);
   const [objs, setObjs] = useState<Obj[]>([]);
-  const [sort, setSort] = useState<SortState>(null);
+  const [view, setView] = useState<TypeView>(emptyView);
   const [menu, setMenu] = useState<{ prop: PropDef | null; pos: { left: number; top: number } } | null>(null);
   const [editor, setEditor] = useState<{ initial?: PropDef; pos: { left: number; top: number } } | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -148,9 +159,6 @@ export function TypeTable({ typeId }: { typeId: string }) {
   const [selectMode, setSelectMode] = useState(false);
   /** null means "show them all"; otherwise the property names picked for the inline row. */
   const [inlineFields, setInlineFields] = useState<string[] | null>(null);
-  const [mode, setMode] = useState<ViewMode>(
-    () => (localStorage.getItem('habitat:view:' + typeId) as ViewMode) || 'checklist'
-  );
   const [newItem, setNewItem] = useState('');
   const [newScheduled, setNewScheduled] = useState('');
   const [calMonth, setCalMonth] = useState(todayKey());
@@ -164,6 +172,20 @@ export function TypeTable({ typeId }: { typeId: string }) {
     api.templates.list(typeId).then(setTemplates);
     api.kv.get('default-template:' + typeId).then(setDefaultTpl);
     api.kv.get('inline-fields:' + typeId).then((v) => setInlineFields(v ? JSON.parse(v) : null));
+    // The view config lives with the vault; older builds kept only the mode in
+    // localStorage, so fall back to that the first time.
+    api.kv.get('view:' + typeId).then((v) => {
+      const legacy = localStorage.getItem('habitat:view:' + typeId) as ViewMode | null;
+      let saved: Partial<TypeView> = {};
+      if (v) {
+        try {
+          saved = JSON.parse(v);
+        } catch {
+          saved = {};
+        }
+      }
+      setView({ ...emptyView(), ...(legacy ? { mode: legacy } : {}), ...saved, filters: saved.filters ?? [] });
+    });
     setSelectMode(false);
     setSelected(new Set());
     lastPicked.current = null;
@@ -171,24 +193,19 @@ export function TypeTable({ typeId }: { typeId: string }) {
     return onObjectChanged(load);
   }, [typeId]);
 
-  const chooseMode = (m: ViewMode) => {
-    setMode(m);
-    localStorage.setItem('habitat:view:' + typeId, m);
+  const changeView = (patch: Partial<TypeView>) => {
+    setView((cur) => {
+      const next = { ...cur, ...patch };
+      api.kv.set('view:' + typeId, JSON.stringify(next));
+      return next;
+    });
   };
 
-  const sorted = useMemo(() => {
-    if (!sort) return objs;
-    const val = (o: Obj) => (sort.key === 'title' ? o.title : o.props[sort.key]);
-    return [...objs].sort((a, b) => {
-      const av = val(a);
-      const bv = val(b);
-      if (av == null && bv == null) return 0;
-      if (av == null) return 1;
-      if (bv == null) return -1;
-      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * sort.dir;
-      return String(av).localeCompare(String(bv), undefined, { sensitivity: 'base' }) * sort.dir;
-    });
-  }, [objs, sort]);
+  const fields = useMemo(() => viewFields(type, objs), [type, objs]);
+
+  /** Filters apply to every view; sorting orders the ones that show a flat list. */
+  const filtered = useMemo(() => applyFilters(objs, view.filters, fields), [objs, view.filters, fields]);
+  const sorted = useMemo(() => sortObjs(filtered, view.sort, fields), [filtered, view.sort, fields]);
 
   if (!type) return <div className="empty">This type no longer exists.</div>;
 
@@ -202,12 +219,37 @@ export function TypeTable({ typeId }: { typeId: string }) {
   ];
   const isDone = (o: Obj) => doneProp && o.props[doneProp.id] === 'Done';
 
+  // "Hide done" sits outside the filter list because it's the one people flick on
+  // and off constantly — it applies to every view, including the checklist.
+  const hidingDone = !!view.hideDone && !!doneProp;
+  const open = (list: Obj[]) => (hidingDone ? list.filter((o) => !isDone(o)) : list);
+  const visible = open(sorted);
+
+  const modes = availableModes(type, fields, doneProp);
+  // Until one is picked the type's shape decides: anything task-shaped opens as a
+  // checklist. A saved mode can also stop being available, if its property went away.
+  const mode: ViewMode = view.mode && modes.includes(view.mode) ? view.mode : doneProp ? 'checklist' : 'table';
+
+  const selectProps = type.properties.filter((p) => p.kind === 'select');
+  const groupProp = selectProps.find((p) => p.id === view.groupBy) ?? selectProps[0];
+
+  const dateFields = fields.filter((f) => f.kind === 'date' || f.kind === 'datetime');
+  const calField = dateFields.find((f) => f.key === view.dateField) ?? dateFields[0];
+  /** The day an object sits on in the calendar, from whichever date field drives it. */
+  const dayKey = (o: Obj): string => {
+    if (!calField) return '';
+    if (calField.key === CREATED_FIELD) return keyOf(new Date(o.createdAt));
+    if (calField.key === UPDATED_FIELD) return keyOf(new Date(o.updatedAt));
+    return String(o.props[calField.key] ?? '').slice(0, 10);
+  };
+
   const byDoneThenDate = (a: Obj, b: Obj) =>
     Number(!!isDone(a)) - Number(!!isDone(b)) ||
     String(dueProp ? a.props[dueProp.id] ?? '' : '').localeCompare(String(dueProp ? b.props[dueProp.id] ?? '' : '')) ||
     a.createdAt - b.createdAt;
 
-  const checklist = doneProp ? [...objs].sort(byDoneThenDate) : [];
+  // The checklist keeps its own order (done last, then by date) unless a sort is set.
+  const checklist = doneProp ? (view.sort ? visible : open([...filtered].sort(byDoneThenDate))) : [];
   const hasDue = (o: Obj) => !!(dueProp && o.props[dueProp.id]);
   const scheduled = checklist.filter(hasDue);
   const unscheduled = checklist.filter((o) => !hasDue(o));
@@ -238,19 +280,24 @@ export function TypeTable({ typeId }: { typeId: string }) {
     api.objects.update(o.id, { title }).then(() => objectChanged(o.id));
   };
 
-  /** "New" uses the type's default template when one is set, and opens it beside the list. */
-  const addRow = async () => {
+  /**
+   * "New" uses the type's default template when one is set, and opens it beside
+   * the list. `preset` is how the board adds straight into a column.
+   */
+  const addRow = async (preset?: Record<string, any>) => {
     const def = defaultTpl;
     if (def && templates.some((t) => t.id === def)) {
       const o = await api.objects.createFromTemplate(def);
       if (o) {
-        setObjs((list) => [...list, o]);
+        if (preset) await api.objects.update(o.id, { props: { ...o.props, ...preset } });
+        setObjs(await api.objects.list(typeId));
         openBeside(o.id);
         return;
       }
     }
-    const o = await api.objects.create({ typeId });
+    const o = await api.objects.create({ typeId, props: preset ?? {} });
     setObjs((list) => [...list, o]);
+    if (preset) openBeside(o.id);
   };
 
   /**
@@ -309,9 +356,9 @@ export function TypeTable({ typeId }: { typeId: string }) {
 
   // ---- bulk selection ----
 
-  const allSelected = sorted.length > 0 && sorted.every((o) => selected.has(o.id));
+  const allSelected = visible.length > 0 && visible.every((o) => selected.has(o.id));
 
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(sorted.map((o) => o.id)));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(visible.map((o) => o.id)));
 
   /** Shift-click extends from the last row picked, like a file list. */
   const toggleRow = (index: number, shift: boolean) => {
@@ -319,9 +366,9 @@ export function TypeTable({ typeId }: { typeId: string }) {
       const next = new Set(prev);
       const from = shift && lastPicked.current !== null ? lastPicked.current : index;
       const [lo, hi] = from <= index ? [from, index] : [index, from];
-      const turningOn = !prev.has(sorted[index].id);
+      const turningOn = !prev.has(visible[index].id);
       for (let i = lo; i <= hi; i++) {
-        const id = sorted[i].id;
+        const id = visible[i].id;
         if (turningOn) next.add(id);
         else next.delete(id);
       }
@@ -373,7 +420,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
     setMenu({ prop, pos: popPos(e.currentTarget, 230, 260) });
   };
 
-  const sortKey = (prop: PropDef | null) => (prop ? prop.id : 'title');
+  const sortKey = (prop: PropDef | null) => (prop ? prop.id : TITLE_FIELD);
 
   const saveType = async (patch: { name: string; icon: string; color: string }) => {
     await api.types.update(type.id, patch);
@@ -391,21 +438,6 @@ export function TypeTable({ typeId }: { typeId: string }) {
           <span className="count-badge">{objs.length}</span>
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          {doneProp && (
-            <div className="seg mini">
-              <button className={mode === 'checklist' ? 'on' : ''} onClick={() => chooseMode('checklist')}>
-                Checklist
-              </button>
-              {dueProp && (
-                <button className={mode === 'calendar' ? 'on' : ''} onClick={() => chooseMode('calendar')}>
-                  Calendar
-                </button>
-              )}
-              <button className={mode === 'table' ? 'on' : ''} onClick={() => chooseMode('table')}>
-                Table
-              </button>
-            </div>
-          )}
           <button
             className={'icon-btn' + (selectMode ? ' active' : '')}
             title="Select items"
@@ -452,7 +484,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
             </button>
           )}
           <div className="split-btn">
-            <button className="btn primary" onClick={addRow}>
+            <button className="btn primary" onClick={() => addRow()}>
               <Icon name="plus" size={14} /> New
             </button>
             <button
@@ -466,7 +498,18 @@ export function TypeTable({ typeId }: { typeId: string }) {
         </div>
       </header>
 
-      {doneProp && mode === 'checklist' ? (
+      <ViewBar
+        type={type}
+        view={{ ...view, mode }}
+        fields={fields}
+        modes={modes}
+        shown={mode === 'checklist' ? checklist.length : visible.length}
+        total={objs.length}
+        doneName={doneProp?.name}
+        onChange={changeView}
+      />
+
+      {mode === 'checklist' && doneProp ? (
         <div className={'checklist-page' + (dueProp ? ' split' : '')}>
           {dueProp ? (
             <>
@@ -572,7 +615,19 @@ export function TypeTable({ typeId }: { typeId: string }) {
             </section>
           )}
         </div>
-      ) : doneProp && dueProp && mode === 'calendar' ? (
+      ) : mode === 'gallery' ? (
+        <GalleryView objs={visible} type={type} theme={theme} onOpen={(e, id) => openFrom(e, id)} onAdd={() => addRow()} />
+      ) : mode === 'board' && groupProp ? (
+        <BoardView
+          objs={visible}
+          type={type}
+          prop={groupProp}
+          theme={theme}
+          onOpen={(e, id) => openFrom(e, id)}
+          onSet={(o, value) => updateCell(o, groupProp.id, value)}
+          onAdd={(value) => addRow(value ? { [groupProp.id]: value } : {})}
+        />
+      ) : mode === 'calendar' && calField ? (
         <div className="checklist-page">
           <div className="daily-head">
             <span className="month-label">{fmtMonthYear(calMonth)}</span>
@@ -595,7 +650,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
               </div>
             ))}
             {monthCells(calMonth).map((c) => {
-              const onDay = scheduled.filter((o) => o.props[dueProp.id] === c.key);
+              const onDay = visible.filter((o) => dayKey(o) === c.key);
               // Up to 3 fit; beyond that show two and roll the rest into a counter,
               // so a busy day can't stretch the row.
               const expanded = expandedDay === c.key;
@@ -648,14 +703,14 @@ export function TypeTable({ typeId }: { typeId: string }) {
               <th className="td-name">
                 <button className="th-btn" onClick={(e) => openHeaderMenu(e, null)}>
                   Name
-                  {sort?.key === 'title' && <span className="sort-ind">{sort.dir === 1 ? '▲' : '▼'}</span>}
+                  {view.sort?.key === TITLE_FIELD && <span className="sort-ind">{view.sort.dir === 1 ? '▲' : '▼'}</span>}
                 </button>
               </th>
               {type.properties.map((p) => (
                 <th key={p.id}>
                   <button className="th-btn" onClick={(e) => openHeaderMenu(e, p)}>
                     {p.name}
-                    {sort?.key === p.id && <span className="sort-ind">{sort.dir === 1 ? '▲' : '▼'}</span>}
+                    {view.sort?.key === p.id && <span className="sort-ind">{view.sort.dir === 1 ? '▲' : '▼'}</span>}
                   </button>
                 </th>
               ))}
@@ -671,7 +726,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((o, rowIndex) => (
+            {visible.map((o, rowIndex) => (
               <tr key={o.id} className={selected.has(o.id) ? 'picked' : ''}>
                 <td className={'td-pick' + (selectMode ? '' : ' off')}>
                   <input
@@ -782,7 +837,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
             <button
               className="menu-item"
               onClick={() => {
-                setSort({ key: sortKey(menu.prop), dir: 1 });
+                changeView({ sort: { key: sortKey(menu.prop), dir: 1 } });
                 setMenu(null);
               }}
             >
@@ -791,7 +846,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
             <button
               className="menu-item"
               onClick={() => {
-                setSort({ key: sortKey(menu.prop), dir: -1 });
+                changeView({ sort: { key: sortKey(menu.prop), dir: -1 } });
                 setMenu(null);
               }}
             >
@@ -800,11 +855,28 @@ export function TypeTable({ typeId }: { typeId: string }) {
             <button
               className="menu-item"
               onClick={() => {
-                setSort(null);
+                changeView({ sort: null });
                 setMenu(null);
               }}
             >
               <span className="check-slot" /> Clear sort
+            </button>
+            <div className="menu-sep" />
+            <button
+              className="menu-item"
+              onClick={() => {
+                const key = sortKey(menu.prop);
+                const kind = fields.find((f) => f.key === key)?.kind ?? 'text';
+                changeView({
+                  filters: [...view.filters, { id: clientUid(), field: key, op: opsFor(kind)[0] }],
+                });
+                setMenu(null);
+              }}
+            >
+              <span className="check-slot">
+                <Icon name="filter" size={12} />
+              </span>
+              Filter by this
             </button>
             {menu.prop && (
               <>

@@ -13,7 +13,19 @@ export type PropKind =
   | 'rating'
   | 'progress'
   | 'color'
+  | 'file'
   | 'relation';
+
+/** A stored attachment, as embedded in a note or held by a file property. */
+export interface FileRef {
+  hash: string;
+  name: string;
+  mime: string;
+  ext: string;
+  size: number;
+  width?: number | null;
+  height?: number | null;
+}
 
 export interface PropDef {
   id: string;
@@ -164,16 +176,35 @@ export interface HttpApiConfig {
 export interface TelegramConfig {
   enabled: boolean;
   token: string;
+  /** The one private chat this vault talks to. Empty until a pairing code is used. */
   chatId: string;
+  /** The one Telegram account allowed to write here — checked on every message. */
+  userId?: string;
+  userName?: string;
   /** Type that captured messages become. */
   typeId: string;
   botName?: string;
   offset?: number;
+  /** Live only while pairing: the code to send, and when it stops being accepted. */
+  pairCode?: string;
+  pairExpires?: number;
 }
-export type AutoOp = 'eq' | 'ne' | 'contains' | 'empty' | 'notEmpty' | 'gt' | 'lt';
+export type AutoOp =
+  | 'eq'
+  | 'ne'
+  | 'contains'
+  | 'empty'
+  | 'notEmpty'
+  | 'gt'
+  | 'lt'
+  | 'before'
+  | 'after'
+  /** Relative to today, in days — `notInLast` is how "untouched for a week" is said. */
+  | 'inLast'
+  | 'notInLast';
 
 export interface AutoCondition {
-  /** A property id, or `__title` for the object's name. */
+  /** A property id, or `__title` / `__created` / `__updated` for the fields every object has. */
   propId: string;
   op: AutoOp;
   value?: string;
@@ -208,6 +239,11 @@ export interface Automation {
     days?: number[];
     /** dueToday: days from today, so -1 is "the day before". */
     offset?: number;
+    /**
+     * Scheduled rules pointed at a type: run the actions once per matching object
+     * instead of once for the whole set. Summary is the default.
+     */
+    each?: boolean;
   };
   /** All conditions must hold, or any of them when `match` is 'any'. */
   match?: 'all' | 'any';

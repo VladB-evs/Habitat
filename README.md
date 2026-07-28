@@ -26,6 +26,7 @@ npm install
 npm run dev        # dev mode with hot reload
 npm start          # build + run the real app
 npm run typecheck  # tsc --noEmit
+npm test           # node:test
 npm run dist       # build installers into release/
 ```
 
@@ -57,14 +58,74 @@ up. Settings → General shows the exact path and the habitat's code.
 | `/` | commands, blocks, date/time variables, your own scripts |
 | `/task` | turn the line into a real unscheduled task and link to it |
 | `:` | emoji picker — the full CLDR set, searchable |
-| `⌘K` | search everything |
+| `/image` `/file` | attach from your computer — or just paste or drag one in |
+| `⌘K` | search everything — see below |
 | `⌘\` | show/hide the sidebar |
 
-## Views
+## Images and files
 
-Types render as a **table**, a **checklist** (drag between Scheduled and Unscheduled to set or
-clear a date), or a **calendar**. The dashboard is a drag-and-resize widget grid. Any page can be
-opened in a **side view** — a third of the window, with the active pane clearly marked.
+Paste, drag in, or use `/image` and `/file`. An attachment becomes a block of its own — a rounded
+card you pick up by the handle in the margin and drop anywhere else in the note. Images take a
+caption and a width; anything else shows as a file card that opens in whatever handles it.
+Attachments also work as a **Files** property, so a type can carry them as data rather than prose.
+
+They're stored in a `files` folder beside the vault, named by the SHA-256 of their contents and
+sharded one level deep:
+
+```
+My Habitat/
+  My Habitat.db
+  files/a3/a3f9…c1.png
+```
+
+Addressing by content means the same image pasted twenty times is one file on disk, names never
+collide, and copying the vault folder takes everything with it. Nothing points at a file any more?
+Settings → General shows what attachments take up and sweeps the unreferenced ones — a deliberate
+button rather than reference counting, because walking what actually refers to a file is the only
+answer that stays right.
+
+## Search
+
+`⌘K` searches titles, nicknames and the text of every note, including daily entries, through an
+FTS5 index kept in step by triggers — so it stays an index lookup rather than a scan as the vault
+grows, and results come back ranked with the matching text around them.
+
+Filters mix in with the words, and the palette offers them as one-click chips:
+
+| Filter | Matches |
+| --- | --- |
+| `type:task` | one kind of object (plurals forgiven) |
+| `tag:habitat` | anything carrying that tag |
+| `is:pinned` | pinned only |
+| `due:today` `due:tomorrow` `due:week` `due:overdue` | any date property in that window |
+| `created:today` `created:yesterday` `created:week` `created:month` | when it was made |
+| `edited:…` | when it was last touched |
+
+So `type:task due:week invoice` is a legitimate query, and the same string works through the HTTP
+API and the MCP `search` tool.
+
+## Views, filters and sort
+
+Every type list has a toolbar: pick a view, filter it, sort it. What you set is remembered per
+type, with the vault.
+
+- **Table** — the spreadsheet, with editable cells
+- **Gallery** — cards with a snippet and the properties that are filled in
+- **Board** — a column per option of a select property; drag a card to change it
+- **Calendar** — by any date property, or by when things were created or edited
+- **Checklist** — for task-shaped types: drag between Scheduled and Unscheduled to set or clear
+  a date
+
+Task-shaped types get a **Hide done** toggle in the toolbar that clears finished work out of
+every view at once.
+
+**Filters** stack, and each one reads as a sentence — *Status is none of Done*, *Due is in the
+next 7 days*, *Name contains draft*. **Sort** takes any field. Both work on the type's properties
+and, for types that have none, on Created and Edited — so even a bare Note type can be shown
+newest-first or narrowed to this week.
+
+The dashboard is a drag-and-resize widget grid. Any page can be opened in a **side view** — a
+third of the window, with the active pane clearly marked.
 
 ## Automations
 
@@ -74,17 +135,34 @@ conditions hold, *then* run a list of actions.
 - **Triggers** — object created/edited/deleted, a property changes to a value, a date property
   comes up, someone's birthday comes up, every day or on chosen weekdays at a time, or when the
   app opens
+- **Look at** — a scheduled rule can be pointed at a type and given conditions, then act either
+  once on the whole matching set or once per object. *Every day at 09:00, look at every task
+  where Status is not Done and Edited is not in the last 7 days* → one notification listing them.
+  Nothing matching means the rule stays quiet.
+- **Conditions** — any property plus Name, Created and Edited, compared with is / is not /
+  contains / before / after / in the last N days / **not** in the last N days, which is how you
+  ask for what's gone untouched. The builder shows what a rule matches right now, live.
 - **Actions** — set a property, create an object, add a line to today's daily note, add a tag,
   link objects, pin, notify, or message you on Telegram
-- **Templates** — `{{link}}` (a real link, not just a name), `{{title}}`, `{{prop:id}}`,
-  `{{today}}`, `{{tomorrow}}`, `{{now}}`, `{{date+7}}`, and `{{turning}}`/`{{age}}` in birthday
-  rules
+- **Values** — `{{link}}` (a real link, not just a name), `{{title}}`, `{{prop:id}}`, `{{today}}`,
+  `{{tomorrow}}`, `{{now}}`, `{{date+7}}`, `{{turning}}`/`{{age}}` in birthday rules, and
+  `{{count}}`/`{{list}}` for a rule watching a whole set. The `{ }` button on every text field
+  lists them. A daily-note line from a set-watching rule is followed by the matches as real
+  links, so the note connects to each one.
+- **Examples** — “Start from an example” drops in working rules (stale-task nudge, today's
+  agenda, overdue check, weekly review, birthdays) already wired to your own types
 
 ## Capture from your phone
 
 Settings → Capture connects your own Telegram bot. Message it and the text lands in the vault; the
 first word routes it — `daily …` appends to today's note, `task …` creates a Task, anything else
 becomes your fallback type. Habitat polls while it's open, and Telegram holds messages until then.
+
+A bot is reachable by anyone who finds it, so the bridge is paired rather than open: Settings shows
+a six-character code, and only the account that sends that code — from a private chat, within 15
+minutes — is linked. After that every message is checked against both that chat *and* that sender;
+anything else is dropped without a reply, and group chats are refused outright. The rules live in
+one pure function, [`gate()`](electron/telegram.js), covered by `npm test`.
 
 ## Local API and AI agents
 

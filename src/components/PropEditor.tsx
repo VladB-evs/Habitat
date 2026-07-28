@@ -18,6 +18,7 @@ export const KIND_LABELS: Record<PropKind, string> = {
   rating: 'Rating',
   progress: 'Progress',
   color: 'Color',
+  file: 'Files',
   relation: 'Relation',
 };
 
