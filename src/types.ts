@@ -171,6 +171,8 @@ export interface HttpApiConfig {
   enabled: boolean;
   port: number;
   token: string;
+  /** Whether the /mcp endpoint may change and delete things, not just read and add. */
+  mcpEdit: boolean;
 }
 
 export interface TelegramConfig {

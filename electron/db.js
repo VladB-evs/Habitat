@@ -1608,7 +1608,7 @@ const api = {
   /** The token the local HTTP API expects, minted on first use. */  /** The token the local HTTP API expects, minted on first use. */
   'api:config': () => {
     const r = db.prepare("SELECT value FROM kv WHERE key = 'httpApi'").get();
-    let cfg = { enabled: false, port: 37373, token: '' };
+    let cfg = { enabled: false, port: 37373, token: '', mcpEdit: false };
     if (r) {
       try {
         cfg = { ...cfg, ...JSON.parse(r.value) };
@@ -1625,7 +1625,7 @@ const api = {
 
   'api:save': (patch) => {
     const r = db.prepare("SELECT value FROM kv WHERE key = 'httpApi'").get();
-    let cur = { enabled: false, port: 37373, token: '' };
+    let cur = { enabled: false, port: 37373, token: '', mcpEdit: false };
     if (r) {
       try {
         cur = { ...cur, ...JSON.parse(r.value) };

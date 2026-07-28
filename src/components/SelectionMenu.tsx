@@ -22,30 +22,32 @@ const TEXT_COLORS = [
   { id: 'violet', label: 'Violet', color: '#8b7bea' },
 ];
 
+/**
+ * Highlights are translucent rather than pastel: the text keeps whatever colour
+ * it already has, so a marked phrase stays readable in both themes instead of
+ * being forced to near-black on a pale block.
+ */
 const HIGHLIGHTS = [
   { id: 'none', label: 'No highlight', color: '' },
-  { id: 'h-yellow', label: 'Yellow highlight', color: '#f7e0a3' },
-  { id: 'h-green', label: 'Green highlight', color: '#bfe8d4' },
-  { id: 'h-blue', label: 'Blue highlight', color: '#c3dcf7' },
-  { id: 'h-pink', label: 'Pink highlight', color: '#f5cede' },
+  { id: 'h-yellow', label: 'Yellow highlight', color: 'rgba(237, 161, 0, 0.34)' },
+  { id: 'h-green', label: 'Green highlight', color: 'rgba(46, 178, 122, 0.32)' },
+  { id: 'h-blue', label: 'Blue highlight', color: 'rgba(64, 140, 214, 0.32)' },
+  { id: 'h-violet', label: 'Violet highlight', color: 'rgba(139, 123, 234, 0.34)' },
+  { id: 'h-pink', label: 'Pink highlight', color: 'rgba(226, 96, 150, 0.30)' },
+  { id: 'h-orange', label: 'Orange highlight', color: 'rgba(235, 104, 52, 0.30)' },
 ];
 
 /**
- * Toolbar that floats above the current text selection. Clickable by default;
- * ⌘/ hands it keyboard focus so the arrows move through it instead of the text.
+ * Toolbar that floats above the current text selection: select something and
+ * every button is there to be clicked. Hovering one names it, since a row of
+ * small icons is only obvious to whoever drew it.
  */
 export function SelectionMenu({ editor }: { editor: Editor | null }) {
   const [visible, setVisible] = useState(false);
   const [pos, setPos] = useState({ left: 0, top: 0 });
   const [colorOpen, setColorOpen] = useState(false);
-  const [navMode, setNavMode] = useState(false);
-  const [index, setIndex] = useState(0);
+  const [tip, setTip] = useState('');
   const ref = useRef<HTMLDivElement>(null);
-  const btns = useRef<(HTMLButtonElement | null)[]>([]);
-  // Keyboard mode moves focus onto a toolbar button, which blurs the editor —
-  // the visibility check has to know that so it doesn't hide the menu.
-  const navRef = useRef(false);
-  navRef.current = navMode;
 
   const place = useCallback(() => {
     if (!editor) return;
@@ -68,11 +70,11 @@ export function SelectionMenu({ editor }: { editor: Editor | null }) {
     if (!editor) return;
     const update = () => {
       const { empty } = editor.state.selection;
-      const show = !empty && (editor.isFocused || navRef.current);
+      const show = !empty && editor.isFocused;
       setVisible((was) => {
         if (!show && was) {
           setColorOpen(false);
-          setNavMode(false);
+          setTip('');
         }
         return show;
       });
@@ -92,10 +94,6 @@ export function SelectionMenu({ editor }: { editor: Editor | null }) {
   useEffect(() => {
     if (visible) place();
   }, [visible, colorOpen, place]);
-
-  useEffect(() => {
-    if (navMode) btns.current[index]?.focus();
-  }, [navMode, index]);
 
   const items: Item[] = [];
   if (editor) {
@@ -156,56 +154,24 @@ export function SelectionMenu({ editor }: { editor: Editor | null }) {
     }
   }
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!visible) return;
-      // ⌘/ moves control into the toolbar (and back out).
-      if ((e.metaKey || e.ctrlKey) && e.key === '/') {
-        e.preventDefault();
-        setNavMode((v) => {
-          if (v) editor?.commands.focus();
-          else setIndex(0);
-          return !v;
-        });
-        return;
-      }
-      if (!navMode) return;
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setNavMode(false);
-        setColorOpen(false);
-        editor?.commands.focus();
-      } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-        e.preventDefault();
-        setIndex((i) => (i + 1) % items.length);
-      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        setIndex((i) => (i - 1 + items.length) % items.length);
-      } else if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        items[index]?.run();
-      }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [visible, navMode, items, index, editor]);
-
   if (!editor || !visible) return null;
 
+  const swatchStart = items.length - TEXT_COLORS.length - HIGHLIGHTS.length;
+  // Naming what the pointer is over, in the toolbar's own voice rather than the
+  // operating system's slow tooltip.
+  const named = (label: string) => ({
+    onMouseEnter: () => setTip(label),
+    onMouseLeave: () => setTip((t) => (t === label ? '' : t)),
+    onFocus: () => setTip(label),
+    onBlur: () => setTip(''),
+    'aria-label': label,
+  });
+
   return (
-    <div ref={ref} className={'sel-menu' + (navMode ? ' nav' : '')} style={pos} onMouseDown={(e) => e.preventDefault()}>
+    <div ref={ref} className="sel-menu" style={pos} onMouseDown={(e) => e.preventDefault()} onMouseLeave={() => setTip('')}>
       <div className="sel-row">
-        {items.slice(0, colorOpen ? items.length - TEXT_COLORS.length - HIGHLIGHTS.length : items.length).map((it, i) => (
-          <button
-            key={it.id}
-            ref={(el) => {
-              btns.current[i] = el;
-            }}
-            className={'sel-btn' + (it.active ? ' on' : '') + (navMode && i === index ? ' cursor' : '')}
-            title={it.label}
-            aria-label={it.label}
-            onClick={it.run}
-          >
+        {items.slice(0, colorOpen ? swatchStart : items.length).map((it) => (
+          <button key={it.id} className={'sel-btn' + (it.active ? ' on' : '')} onClick={it.run} {...named(it.label)}>
             {it.icon ? <Icon name={it.icon} size={14} /> : <span className="sel-text">{it.text}</span>}
           </button>
         ))}
@@ -213,22 +179,21 @@ export function SelectionMenu({ editor }: { editor: Editor | null }) {
 
       {colorOpen && (
         <div className="sel-colors">
-          {items.slice(items.length - TEXT_COLORS.length - HIGHLIGHTS.length).map((it, j) => {
-            const i = items.length - TEXT_COLORS.length - HIGHLIGHTS.length + j;
+          {items.slice(swatchStart).map((it, j) => {
             const isText = j < TEXT_COLORS.length;
             return (
               <button
                 key={it.id}
-                ref={(el) => {
-                  btns.current[i] = el;
-                }}
-                className={
-                  'sel-swatch' + (isText ? ' text' : '') + (it.active ? ' on' : '') + (navMode && i === index ? ' cursor' : '')
-                }
-                title={it.label}
-                aria-label={it.label}
+                className={'sel-swatch' + (isText ? ' text' : '') + (it.active ? ' on' : '')}
                 onClick={it.run}
-                style={it.swatch && it.swatch !== 'text' && it.swatch !== 'none' ? { background: it.swatch } : undefined}
+                // Translucent highlights are composited over the page colour by
+                // the stylesheet, so the swatch shows what the mark will look like.
+                style={
+                  it.swatch && it.swatch !== 'text' && it.swatch !== 'none'
+                    ? ({ '--swatch': it.swatch } as React.CSSProperties)
+                    : undefined
+                }
+                {...named(it.label)}
               >
                 {isText ? <span style={{ color: it.swatch === 'text' ? 'var(--text)' : it.swatch }}>A</span> : null}
                 {it.swatch === 'none' && <Icon name="x" size={11} />}
@@ -238,7 +203,7 @@ export function SelectionMenu({ editor }: { editor: Editor | null }) {
         </div>
       )}
 
-      <span className="sel-hint">{navMode ? '↔ move · ↵ apply · esc exit' : '⌘/ to use arrows'}</span>
+      {tip && <span className="sel-tip">{tip}</span>}
     </div>
   );
 }

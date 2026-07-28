@@ -66,6 +66,25 @@ function listText(list: PMNode, marker: (i: number, item: PMNode) => string): st
   return lines.join('\n');
 }
 
+/**
+ * A Markdown table. Cells are flattened to one line each — a newline inside a
+ * cell would break the row — and a header separator is always written, since
+ * Markdown has no table without one.
+ */
+function tableText(table: PMNode): string {
+  const rows: string[][] = [];
+  table.content.forEach((row) => {
+    const cells: string[] = [];
+    row.content.forEach((cell) => cells.push(blocks(cell.content).join(' ').replace(/\s*\n\s*/g, ' ').trim()));
+    rows.push(cells);
+  });
+  if (!rows.length) return '';
+  const width = Math.max(...rows.map((r) => r.length));
+  const line = (cells: string[]) => `| ${Array.from({ length: width }, (_, i) => cells[i] ?? '').join(' | ')} |`;
+  const [head, ...body] = rows;
+  return [line(head), `| ${Array.from({ length: width }, () => '---').join(' | ')} |`, ...body.map(line)].join('\n');
+}
+
 function blockText(node: PMNode): string {
   const name = node.type.name;
   switch (name) {
@@ -77,6 +96,8 @@ function blockText(node: PMNode): string {
       return prefix(blocks(node.content).join('\n\n'), '> ');
     case 'horizontalRule':
       return '---';
+    case 'table':
+      return tableText(node);
     case 'bulletList':
       return listText(node, () => '- ');
     case 'orderedList':
@@ -116,15 +137,15 @@ function blocks(fragment: Fragment): string[] {
 
 export const asMarkdown = (fragment: Fragment): string => blocks(fragment).join('\n\n');
 
-/** ProseMirror's HTML, minus the paragraph wrapper inside list items. */
+/** ProseMirror's HTML, minus the paragraph wrapper inside list items and cells. */
 function htmlSerializer(schema: Schema): DOMSerializer {
   const base = DOMSerializer.fromSchema(schema);
   const serializer = new DOMSerializer(base.nodes, base.marks);
   const serializeFragment = serializer.serializeFragment.bind(serializer);
   serializer.serializeFragment = ((fragment: any, options: any, target: any) => {
     const dom = serializeFragment(fragment, options, target);
-    for (const li of Array.from((dom as DocumentFragment).querySelectorAll?.('li') ?? [])) {
-      const first = li.firstElementChild;
+    for (const box of Array.from((dom as DocumentFragment).querySelectorAll?.('li, td, th') ?? [])) {
+      const first = box.firstElementChild;
       // Only the leading paragraph: a nested list after it keeps its own shape.
       if (first?.nodeName === 'P') first.replaceWith(...Array.from(first.childNodes));
     }

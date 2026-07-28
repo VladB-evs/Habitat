@@ -55,12 +55,18 @@ up. Settings → General shows the exact path and the habitat's code.
 | --- | --- |
 | `@` | link an object |
 | `#` | tag |
-| `/` | commands, blocks, date/time variables, your own scripts |
+| `/` | commands, blocks, date/time variables, your own scripts — best match first |
 | `/task` | turn the line into a real unscheduled task and link to it |
 | `:` | emoji picker — the full CLDR set, searchable |
 | `/image` `/file` | attach from your computer — or just paste or drag one in |
+| `/table` | a table, with a toolbar for rows, columns and headers |
+| `/code` | a code block, syntax highlighted, with a language picker |
+| `$…$` | inline maths, rendered with KaTeX — a searchable symbol palette opens while you're inside one |
 | `⌘K` | search everything — see below |
 | `⌘\` | show/hide the sidebar |
+
+Every top-level block has a grip in the left margin: drag it to move the block, or click it to
+duplicate, delete, or turn it into a heading, list or quote.
 
 ## Images and files
 
@@ -174,9 +180,15 @@ curl -H "Authorization: Bearer YOUR_TOKEN" "http://127.0.0.1:37373/objects?type=
 
 Endpoints cover objects, search, backlinks, daily notes, tasks, tags, stats, automations and
 capture, plus the address book — `/people`, `/people/:id`, `/people/birthdays`, `/people/fields`
-and `/me`. [`mcp/server.mjs`](mcp/server.mjs) puts the same surface behind MCP, so Claude, Cursor or
+and `/me`. [`mcp/tools.mjs`](mcp/tools.mjs) puts the same surface behind MCP, so Claude, Cursor or
 any MCP client can read and write the vault — reads plus create/capture by default, edits and
-deletes only with `HABITAT_EDIT=1`. Settings → API shows a ready-to-paste config.
+deletes only when they're allowed.
+
+Two ways in, same tools. A client that spawns a command runs
+[`mcp/server.mjs`](mcp/server.mjs) over stdio, with `HABITAT_TOKEN` and optionally `HABITAT_EDIT=1`.
+A client that only takes a URL — Osaurus, LM Studio — points at `http://127.0.0.1:37373/mcp`, which
+the app serves itself (streamable HTTP, stateless) behind the same bearer token; what it may change
+is the "Let it edit" toggle in Settings → API. Both configs are shown there ready to paste.
 
 ## Releasing
 

@@ -41,7 +41,10 @@ function blockItems(): SlashItem[] {
     block('bullet', 'Bullet list', 'list', 'Plain list', (c) => c.toggleBulletList()),
     block('numbered', 'Numbered list', 'list-ordered', '1. 2. 3.', (c) => c.toggleOrderedList()),
     block('quote', 'Quote', 'quote', 'Callout text', (c) => c.toggleBlockquote()),
-    block('code', 'Code block', 'code', 'Monospace', (c) => c.toggleCodeBlock()),
+    block('code', 'Code block', 'code', 'Syntax highlighted', (c) => c.toggleCodeBlock()),
+    block('table', 'Table', 'table', '3×3 with a header row', (c) =>
+      c.insertTable({ rows: 3, cols: 3, withHeaderRow: true })
+    ),
     block('divider', 'Divider', 'minus', 'Horizontal rule', (c) => c.setHorizontalRule()),
     block('text', 'Plain text', 'doc', 'Paragraph', (c) => c.setParagraph()),
   ];
@@ -188,7 +191,65 @@ function triggerItems(): SlashItem[] {
     trigger('mention', 'Link an object', 'link', 'Opens the @ picker', '@'),
     trigger('tag', 'Tag', 'hash', 'Opens the # picker', '#'),
     trigger('emoji', 'Emoji', 'smile', 'Opens the : picker', ':'),
+    {
+      id: 'math',
+      label: 'Equation',
+      icon: 'sigma',
+      hint: 'Inline maths, like $e^{i\\pi}+1=0$',
+      group: 'Insert',
+      // Caret between the dollars, ready to type: the render happens as soon as
+      // it leaves. `$$` on its own would match the empty-maths regex, so the
+      // selection is put in the middle rather than at the end.
+      run: (editor, range) =>
+        editor
+          .chain()
+          .focus()
+          .insertContentAt(range, '$$')
+          .setTextSelection(range.from + 1)
+          .run(),
+    },
   ];
+}
+
+/**
+ * How well one item answers what's been typed. The name counts for far more
+ * than the group or the preview value, which is what stops every "Date & time"
+ * row from matching "/time" equally and leaving Date on top.
+ */
+function score(item: SlashItem, q: string): number {
+  const label = item.label.toLowerCase();
+  if (label === q) return 100;
+  if (label.startsWith(q)) return 80;
+  if (label.split(/\s+/).some((w) => w.startsWith(q))) return 60;
+  if (label.includes(q)) return 40;
+  // Still worth finding: "/identifier" reaches UUID through its group, "/uuid"
+  // through its own name, "/2026" through the value it would insert.
+  if (`${item.group} ${item.hint}`.toLowerCase().includes(q)) return 10;
+  return 0;
+}
+
+/**
+ * Matches, best first, but still grouped: items are sorted inside their group
+ * and the groups are ordered by their best item. The menu keeps its headings
+ * and the row you meant is at the top.
+ */
+function ranked(items: SlashItem[], q: string): SlashItem[] {
+  const hits = items.map((item) => ({ item, s: score(item, q) })).filter((h) => h.s > 0);
+  const best = new Map<string, number>();
+  const order = new Map<string, number>();
+  for (const h of hits) {
+    best.set(h.item.group, Math.max(best.get(h.item.group) ?? 0, h.s));
+    if (!order.has(h.item.group)) order.set(h.item.group, order.size);
+  }
+  const group = (g: string) => [best.get(g)!, order.get(g)!] as const;
+  return hits
+    .sort((a, b) => {
+      const [ba, oa] = group(a.item.group);
+      const [bb, ob] = group(b.item.group);
+      // Groups stay whole — two of them scoring the same must not interleave.
+      return bb - ba || oa - ob || b.s - a.s;
+    })
+    .map((h) => h.item);
 }
 
 const suggestionConfig = {
@@ -212,12 +273,7 @@ const suggestionConfig = {
     }));
     const q = query.trim().toLowerCase();
     const all = [...blockItems(), ...mediaItems(), ...triggerItems(), ...insertItems(), ...custom];
-    if (!q) return all;
-    // Match the name, the group, or the preview value, so "/uuid", "/identifier"
-    // and "/date" all reach the right row. Nothing is truncated — the menu scrolls.
-    return all.filter((i) =>
-      `${i.label} ${i.group} ${i.hint}`.toLowerCase().includes(q)
-    );
+    return q ? ranked(all, q) : all;
   },
 
   command: ({ editor, range, props }: any) => {

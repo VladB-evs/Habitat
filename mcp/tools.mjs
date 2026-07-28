@@ -1,0 +1,418 @@
+// Every tool the Habitat MCP server offers, over whichever transport reached us.
+//
+// The tools never touch the vault directly — they go through the local HTTP API,
+// passed in as `call(method, path, body)`. `mcp/server.mjs` hands over a fetch
+// to another process for stdio clients; the app serves the same tools at /mcp
+// on the API port and dispatches straight into the route table.
+
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+
+const q = (params) => {
+  const s = new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined && v !== '')).toString();
+  return s ? `?${s}` : '';
+};
+
+/** Objects carry a full editor document; agents only ever need the readable parts. */
+const slim = (o) =>
+  o && {
+    id: o.id,
+    type: o.typeId,
+    title: o.title,
+    props: o.props,
+    snippet: o.snippet,
+    pinned: o.pinned,
+    created: new Date(o.createdAt).toISOString(),
+    updated: new Date(o.updatedAt).toISOString(),
+  };
+
+const text = (value) => ({ content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] });
+
+/**
+ * All the tools, wired to one vault. `canEdit` gates anything that changes or
+ * removes what is already there — reading, creating and appending are always
+ * allowed.
+ */
+export function createHabitatServer({ call, canEdit = false, version = '0.1.0' }) {
+  const server = new McpServer({ name: 'habitat', version });
+
+  const guard = () => {
+    if (!canEdit)
+      throw new Error(
+        'This connection is read-and-add only. Allow editing for MCP in Habitat → Settings → API, ' +
+          'or set HABITAT_EDIT=1 if you are running the server from the command line.'
+      );
+  };
+
+  // ---------- reading ----------
+
+  server.registerTool(
+    'list_types',
+    {
+      title: 'List types',
+      description: 'The object types in this vault and the properties each one has. Call this first to learn property ids.',
+      inputSchema: {},
+    },
+    async () => text((await call('GET', '/types')).map((t) => ({ id: t.id, name: t.name, properties: t.properties })))
+  );
+
+  server.registerTool(
+    'search',
+    {
+      title: 'Search',
+      description:
+        'Search objects by title and note text. Use this to find something before reading or updating it. ' +
+        'The query also understands filters mixed in with the words: type:task, tag:habitat, is:pinned, ' +
+        'due:today|tomorrow|week|overdue, created:today|yesterday|week|month, edited:… — e.g. "type:task due:week invoice".',
+      inputSchema: {
+        query: z.string().describe('what to look for'),
+        include_note_text: z.boolean().optional().describe('also search inside note bodies (default true)'),
+      },
+    },
+    async ({ query, include_note_text }) =>
+      text((await call('GET', `/search${q({ q: query, content: include_note_text === false ? 'false' : 'true' })}`)).map(slim))
+  );
+
+  server.registerTool(
+    'list_objects',
+    {
+      title: 'List objects',
+      description: 'Objects of a type, newest first. Prefer search when you know roughly what you want.',
+      inputSchema: {
+        type: z.string().optional().describe('a type id from list_types'),
+        limit: z.number().optional().describe('how many to return (default 50)'),
+      },
+    },
+    async ({ type, limit }) => text((await call('GET', `/objects${q({ type, limit: limit ?? 50 })}`)).map(slim))
+  );
+
+  server.registerTool(
+    'get_object',
+    {
+      title: 'Get object',
+      description: 'One object with its properties and note text.',
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      const o = await call('GET', `/objects/${encodeURIComponent(id)}`);
+      if (!o) throw new Error('no object with that id');
+      return text({ ...slim(o), body: docText(o.content) });
+    }
+  );
+
+  server.registerTool(
+    'get_backlinks',
+    {
+      title: 'Get backlinks',
+      description: 'Everything that links to or mentions this object.',
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => text((await call('GET', `/backlinks/${encodeURIComponent(id)}`)).map(slim))
+  );
+
+  server.registerTool(
+    'get_daily_note',
+    {
+      title: 'Get daily note',
+      description: "A day's journal entry. Defaults to today.",
+      inputSchema: { date: z.string().optional().describe('YYYY-MM-DD') },
+    },
+    async ({ date }) => {
+      const note = await call('GET', `/daily${q({ date })}`);
+      return text(note ? { date: note.dateKey, body: docText(note.content) } : 'No entry for that day.');
+    }
+  );
+
+  server.registerTool(
+    'list_tasks',
+    {
+      title: 'List tasks',
+      description: 'Tasks due on a day. Defaults to today.',
+      inputSchema: { date: z.string().optional().describe('YYYY-MM-DD') },
+    },
+    async ({ date }) => text((await call('GET', `/tasks${q({ date })}`)).map(slim))
+  );
+
+  // ---------- people ----------
+
+  /** People carry contact details and a birthday countdown; agents want those flattened. */
+  const person = (p) =>
+    p && {
+      id: p.id,
+      name: p.title,
+      is_me: !!p.isSelf,
+      props: p.props,
+      birthday: p.nextBirthday && {
+        date: p.props?.birthday,
+        next: p.nextBirthday.key,
+        days_away: p.nextBirthday.days,
+        turning: p.nextBirthday.turning,
+        age: p.nextBirthday.age,
+      },
+      snippet: p.snippet,
+    };
+
+  server.registerTool(
+    'list_people',
+    {
+      title: 'List people',
+      description:
+        'Everyone in the address book, with their contact details and birthdays. Optionally filtered by name, nickname, company, email or phone.',
+      inputSchema: { query: z.string().optional().describe('narrow the list by name or detail') },
+    },
+    async ({ query }) => text((await call('GET', `/people${q({ q: query })}`)).map(person))
+  );
+
+  server.registerTool(
+    'get_person',
+    {
+      title: 'Get person',
+      description: 'One person: every detail on their card plus whatever is written in their notes.',
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      const p = await call('GET', `/people/${encodeURIComponent(id)}`);
+      if (!p) throw new Error('no person with that id');
+      return text({ ...person(p), extra_fields: p.extraProps, body: docText(p.content) });
+    }
+  );
+
+  server.registerTool(
+    'whoami',
+    {
+      title: 'About the user',
+      description:
+        "The user's own card — their name, birthday and details, as they filled it in. It is its own entity, not one of the contacts.",
+      inputSchema: {},
+    },
+    async () => {
+      const me = await call('GET', '/me');
+      return text(me ? { ...person(me), body: docText(me.content) } : 'The user has not filled in their own card yet.');
+    }
+  );
+
+  server.registerTool(
+    'upcoming_birthdays',
+    {
+      title: 'Upcoming birthdays',
+      description: 'Whose birthday is coming up, soonest first, with how many days away it is.',
+      inputSchema: { within_days: z.number().optional().describe('how far ahead to look (default 60)') },
+    },
+    async ({ within_days }) =>
+      text(
+        (await call('GET', `/people/birthdays${q({ within: within_days ?? 60 })}`)).map((p) => ({
+          name: p.title,
+          date: p.props?.birthday,
+          days_away: p.nextBirthday?.days,
+          turning: p.nextBirthday?.turning,
+        }))
+      )
+  );
+
+  server.registerTool(
+    'list_person_fields',
+    {
+      title: 'List person fields',
+      description:
+        'The optional details a person can be given (work, social, personal…), with the exact ids and kinds to use when adding one.',
+      inputSchema: {},
+    },
+    async () => text(await call('GET', '/people/fields'))
+  );
+
+  server.registerTool(
+    'add_person',
+    {
+      title: 'Add person',
+      description:
+        'Add someone to the address book. Core details are nickname, relationship (a list — someone can be a colleague and a friend), ' +
+        'birthday (YYYY-MM-DD), phone, email, company and role.',
+      inputSchema: {
+        name: z.string(),
+        details: z.record(z.string(), z.any()).optional().describe('property ids from the People type'),
+        notes: z.string().optional().describe('free text about them, one paragraph per line'),
+      },
+    },
+    async ({ name, details, notes }) => {
+      const made = await call('POST', '/people', { name, props: details || {} });
+      if (notes) await call('PATCH', `/objects/${encodeURIComponent(made.id)}`, { content: doc(notes) });
+      return text(person(made));
+    }
+  );
+
+  server.registerTool(
+    'update_person',
+    {
+      title: 'Update person',
+      description:
+        "Change someone's details. Properties are merged, so you only pass what changes. The user's own card is its own entity: " +
+        'properties that describe a link to someone else, like relationship, are not kept on it.',
+      inputSchema: {
+        id: z.string(),
+        name: z.string().optional(),
+        details: z.record(z.string(), z.any()).optional().describe('property ids from the People type'),
+      },
+    },
+    async ({ id, name, details }) => {
+      guard();
+      const cur = await call('GET', `/people/${encodeURIComponent(id)}`);
+      if (!cur) throw new Error('no person with that id');
+      const patch = {};
+      if (name !== undefined) patch.title = name;
+      if (details) patch.props = { ...cur.props, ...details };
+      return text(person(await call('PATCH', `/people/${encodeURIComponent(id)}`, patch)));
+    }
+  );
+
+  server.registerTool(
+    'get_stats',
+    { title: 'Vault stats', description: 'Object counts per type, recently edited, and pinned items.', inputSchema: {} },
+    async () => {
+      const s = await call('GET', '/stats');
+      return text({ counts: s.counts, recent: (s.recent || []).map(slim), pinned: (s.pinned || []).map(slim) });
+    }
+  );
+
+  // ---------- adding ----------
+
+  server.registerTool(
+    'create_object',
+    {
+      title: 'Create object',
+      description:
+        'Create an object of a type. Property keys are property ids from list_types; relation properties take arrays of object ids.',
+      inputSchema: {
+        type: z.string().describe('type id'),
+        title: z.string(),
+        properties: z.record(z.string(), z.any()).optional(),
+        body: z.string().optional().describe('note text, one paragraph per line'),
+      },
+    },
+    async ({ type, title, properties, body }) =>
+      text(slim(await call('POST', '/objects', { typeId: type, title, props: properties || {}, content: doc(body) })))
+  );
+
+  server.registerTool(
+    'append_daily_note',
+    {
+      title: 'Append to daily note',
+      description: "Add a line to a day's journal entry, creating it if there isn't one. Defaults to today.",
+      inputSchema: { text: z.string(), date: z.string().optional().describe('YYYY-MM-DD') },
+    },
+    async ({ text: line, date }) => {
+      await call('POST', '/daily/append', { text: line, date });
+      return text('Added.');
+    }
+  );
+
+  server.registerTool(
+    'capture',
+    {
+      title: 'Quick capture',
+      description:
+        'One line of text, routed by its first word: "daily …" appends to today\'s note, a type name like "task …" creates that type, anything else becomes the fallback type.',
+      inputSchema: { text: z.string() },
+    },
+    async ({ text: line }) => {
+      const r = await call('POST', '/capture', { text: line });
+      return text(r?.kind === 'daily' ? `Added to today's note: ${r.title}` : `Created ${r?.typeName}: ${r?.title}`);
+    }
+  );
+
+  // ---------- changing (needs editing to be allowed) ----------
+
+  server.registerTool(
+    'update_object',
+    {
+      title: 'Update object',
+      description: 'Change an object\'s title, properties or pinned state. Properties are merged, not replaced.',
+      inputSchema: {
+        id: z.string(),
+        title: z.string().optional(),
+        properties: z.record(z.string(), z.any()).optional(),
+        pinned: z.boolean().optional(),
+      },
+    },
+    async ({ id, title, properties, pinned }) => {
+      guard();
+      const cur = await call('GET', `/objects/${encodeURIComponent(id)}`);
+      if (!cur) throw new Error('no object with that id');
+      const patch = {};
+      if (title !== undefined) patch.title = title;
+      if (pinned !== undefined) patch.pinned = pinned;
+      if (properties) patch.props = { ...cur.props, ...properties };
+      return text(slim(await call('PATCH', `/objects/${encodeURIComponent(id)}`, patch)));
+    }
+  );
+
+  server.registerTool(
+    'delete_object',
+    {
+      title: 'Delete object',
+      description: 'Permanently delete an object and its links. There is no undo — confirm with the user first.',
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      guard();
+      await call('DELETE', `/objects/${encodeURIComponent(id)}`);
+      return text('Deleted.');
+    }
+  );
+
+  server.registerTool(
+    'list_automations',
+    { title: 'List automations', description: 'The vault\'s automation rules and when they last ran.', inputSchema: {} },
+    async () =>
+      text(
+        (await call('GET', '/automations')).map((r) => ({
+          id: r.id,
+          name: r.name,
+          enabled: r.enabled,
+          trigger: r.trigger,
+          actions: (r.actions || []).map((a) => a.kind),
+          runs: r.runs || 0,
+        }))
+      )
+  );
+
+  server.registerTool(
+    'run_automation',
+    {
+      title: 'Run automation',
+      description: 'Run a rule now, ignoring its schedule. Returns how many objects it touched.',
+      inputSchema: { id: z.string() },
+    },
+    async ({ id }) => {
+      guard();
+      return text(await call('POST', `/automations/${encodeURIComponent(id)}/run`));
+    }
+  );
+
+  return server;
+}
+
+// ---------- helpers ----------
+
+function docText(node) {
+  if (!node) return '';
+  let out = typeof node.text === 'string' ? node.text : '';
+  if (node.type === 'mention') out += `@${node.attrs?.label ?? ''}`;
+  if (node.type === 'media') out += `[attached: ${node.attrs?.name ?? 'file'}]${node.attrs?.caption ? ` ${node.attrs.caption}` : ''}\n`;
+  if (Array.isArray(node.content)) {
+    for (const c of node.content) out += docText(c);
+    if (node.type === 'paragraph' || node.type?.startsWith('heading')) out += '\n';
+  }
+  return out;
+}
+
+function doc(body) {
+  if (!body) return null;
+  return {
+    type: 'doc',
+    content: body
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((line) => ({ type: 'paragraph', content: [{ type: 'text', text: line }] })),
+  };
+}
+

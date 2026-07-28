@@ -1,4 +1,11 @@
 ## Version 0.1.6: Shipped July 28, 2026 ✅️ 
+- Added table support 
+- Added math equation support
+- New select context menu and better highlight coolors
+- Better exposed and faster MCP and API
+- Row text blocks can now be rearranged with the drag handle on the left side
+
+## Version 0.1.6: Shipped July 28, 2026 ✅️ 
 - Telegram bot connection sec changes
 - Hide/ show completed tasks in the list
 - Fix the open button clipping

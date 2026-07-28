@@ -5,6 +5,7 @@ import { Icon } from './Icons';
 
 const ROUTES: [string, string][] = [
   ['GET /health', 'is it up'],
+  ['POST /mcp', 'MCP over HTTP, for agents'],
   ['GET /types', 'your object types'],
   ['GET /objects?type=task&limit=20', 'objects, optionally by type'],
   ['GET /objects/:id', 'one object'],
@@ -154,9 +155,39 @@ export function ApiSettings() {
         <div className="s-hint">
           Point Claude Desktop, Claude Code, Cursor or any MCP client at the vault. It gets tools for searching,
           reading, capturing and creating, plus the address book — who someone is, whose birthday is next, and who
-          you are. Leave <code>HABITAT_EDIT</code> out to keep it read-and-add only; set it to{' '}
-          <code>1</code> to also allow editing, deleting and running automations.
+          you are.
         </div>
+      </div>
+
+      <div className="tg-row">
+        <span className="s-sub">Over HTTP</span>
+        <input className="field mono" readOnly value={`${base}/mcp`} />
+        <button className="btn subtle" onClick={() => copy(`${base}/mcp`, 'MCP URL')}>
+          Copy
+        </button>
+      </div>
+      <div className="s-hint">
+        For clients that take a URL and a token instead of a command — Osaurus, LM Studio and the like. Served by
+        Habitat itself while the server above is on, with the same token as the API.
+      </div>
+
+      <div className="tg-row">
+        <span className="s-sub">Let it edit</span>
+        <button
+          className={'toggle' + (cfg.mcpEdit ? ' on' : '')}
+          onClick={() => apply({ mcpEdit: !cfg.mcpEdit })}
+          aria-label={cfg.mcpEdit ? 'Keep MCP read-and-add only' : 'Allow MCP to edit and delete'}
+        >
+          <span className="knob" />
+        </button>
+        <span className="tg-state">
+          {cfg.mcpEdit ? 'can change, delete and run automations' : 'read and add only'}
+        </span>
+      </div>
+
+      <div className="s-hint">
+        For a client that spawns a command instead, use this — its own <code>HABITAT_EDIT</code> decides what it may
+        change, so the toggle above doesn't apply to it.
       </div>
 
       <div className="api-try">

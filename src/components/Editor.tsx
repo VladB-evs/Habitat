@@ -1,6 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Extension } from '@tiptap/core';
 import { EditorContent, ReactNodeViewRenderer, useEditor } from '@tiptap/react';
+import type { Editor as EditorType } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import TaskItem from '@tiptap/extension-task-item';
@@ -10,7 +11,16 @@ import TextStyle from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
 import Underline from '@tiptap/extension-underline';
+import Table from '@tiptap/extension-table';
+import TableCell from '@tiptap/extension-table-cell';
+import TableHeader from '@tiptap/extension-table-header';
+import TableRow from '@tiptap/extension-table-row';
+import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
+import { Mathematics } from '@tiptap/extension-mathematics';
+import { createLowlight, common } from 'lowlight';
+import 'katex/dist/katex.min.css';
 import { useApp } from '../store';
+import { BlockHandle } from '../blockHandle';
 import { Clipboard } from '../clipboard';
 import { EmojiPicker } from '../emoji';
 import { mentionSuggestion } from '../mention';
@@ -18,9 +28,12 @@ import { loadEmoji } from '../emoji';
 import { SlashCommands } from '../slash';
 import { TagMention } from '../tagMention';
 import { Media, storeFiles } from '../media';
+import { CodeBlockView } from './CodeBlockView';
+import { MathBar } from './MathBar';
 import { MentionChip } from './MentionChip';
 import { MediaView } from './MediaView';
 import { SelectionMenu } from './SelectionMenu';
+import { TableMenu } from './TableMenu';
 
 /**
  * Getting out of a list should be effortless: Enter on the empty item you just
@@ -94,6 +107,19 @@ const MediaBlock = Media.extend({
 });
 
 /**
+ * Highlighting replaces StarterKit's plain code block. The node keeps its name,
+ * so `/code`, ⌘-shortcuts and every note written before this all still work —
+ * they just gain colour, and a bar for picking the language.
+ */
+const lowlight = createLowlight(common);
+
+const CodeBlock = CodeBlockLowlight.extend({
+  addNodeView() {
+    return ReactNodeViewRenderer(CodeBlockView);
+  },
+}).configure({ lowlight });
+
+/**
  * Files arriving by paste or drop are stored first, then inserted at the point
  * they landed. Returning true keeps ProseMirror from also inserting whatever
  * text representation the drag carried.
@@ -110,8 +136,46 @@ function takeFiles(editor: any, list: FileList | null | undefined, at?: number) 
   return true;
 }
 
+/**
+ * Somewhere to click when the note ends in something you can't type your way
+ * out of — a table, an image, a list, a code block, where Enter either does
+ * nothing useful or belongs to the block itself. A note ending in ordinary
+ * prose gets no gap, and nothing is written to the document until you click.
+ */
+function KeepWriting({ editor }: { editor: EditorType | null }) {
+  const [needed, setNeeded] = useState(false);
+
+  useEffect(() => {
+    if (!editor) return;
+    const check = () => {
+      const last = editor.state.doc.lastChild;
+      // A code block is a textblock too, but Enter inside one only adds a line.
+      const canTypeOn = !!last && last.isTextblock && last.type.name !== 'codeBlock';
+      setNeeded(!!last && !canTypeOn);
+    };
+    check();
+    editor.on('transaction', check);
+    return () => {
+      editor.off('transaction', check);
+    };
+  }, [editor]);
+
+  if (!editor || !needed || !editor.isEditable) return null;
+
+  return (
+    <div
+      className="editor-tail"
+      title="Click to keep writing"
+      onClick={() =>
+        editor.chain().insertContentAt(editor.state.doc.content.size, { type: 'paragraph' }).focus('end').run()
+      }
+    />
+  );
+}
+
 export function Editor({ content, placeholder, onSave }: { content: any; placeholder?: string; onSave: (json: any) => void }) {
   const { openObject } = useApp();
+  const [wrap, setWrap] = useState<HTMLElement | null>(null);
   const openRef = useRef(openObject);
   openRef.current = openObject;
   const onSaveRef = useRef(onSave);
@@ -140,7 +204,23 @@ export function Editor({ content, placeholder, onSave }: { content: any; placeho
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false }),
+      CodeBlock,
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+      // Inline maths: `$…$` renders through KaTeX, and shows its source again
+      // whenever the caret is inside it. It stays plain text in the document,
+      // so search, Markdown copy and the MCP tools need to know nothing.
+      //
+      // The regex is tighter than the extension's default, which happily turns
+      // "$5 for $10" into an equation: the maths may not start or end with a
+      // space, and a closing `$` followed by a digit is a price, not a sum.
+      Mathematics.configure({
+        regex: /\$([^\s$][^$]*?[^\s$]|[^\s$])\$(?!\d)/g,
+        katexOptions: { throwOnError: false },
+      }),
       Placeholder.configure({
         placeholder: placeholder || "Write something… '@' links an object, '/' runs a command, ':' picks an emoji",
       }),
@@ -195,9 +275,14 @@ export function Editor({ content, placeholder, onSave }: { content: any; placeho
   });
 
   return (
-    <>
+    // The wrapper is what the grip in the margin is positioned against.
+    <div className="editor-wrap" ref={setWrap}>
       <EditorContent editor={editor} className="editor" />
+      <KeepWriting editor={editor} />
+      <BlockHandle editor={editor} container={wrap} />
+      <MathBar editor={editor} />
+      <TableMenu editor={editor} />
       <SelectionMenu editor={editor} />
-    </>
+    </div>
   );
 }

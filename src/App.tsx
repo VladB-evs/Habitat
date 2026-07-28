@@ -189,7 +189,10 @@ function Shell() {
               : []),
             <motion.section
               key={i}
-              className={'pane' + (isSplit ? (i === active ? ' focused' : ' dimmed') : '')}
+              // `single` tells the page inside to leave room for the split
+              // buttons, which float in its own top-right corner when there's
+              // no pane bar to hold them.
+              className={'pane' + (isSplit ? (i === active ? ' focused' : ' dimmed') : ' single')}
               style={i === 0 ? { flexBasis: mainBasis, flexGrow: 0, flexShrink: 0 } : undefined}
               initial={i === 0 ? false : { opacity: 0, x: dir === 'row' ? 44 : 0, y: dir === 'col' ? 44 : 0 }}
               animate={{ opacity: 1, x: 0, y: 0 }}

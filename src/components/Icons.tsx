@@ -93,6 +93,7 @@ import {
   LuCodesandbox,
   LuCoffee,
   LuColumns2,
+  LuCopy,
   LuFileText,
   LuFolder,
   LuEraser,
@@ -125,8 +126,10 @@ import {
   LuSettings,
   LuSprout,
   LuStar,
+  LuSigma,
   LuStrikethrough,
   LuSun,
+  LuTable,
   LuTag,
   LuTrash2,
   LuUnderline,
@@ -201,6 +204,9 @@ const UI: Record<string, IconType> = {
   grip: LuGripVertical,
   image: LuImage,
   paperclip: LuPaperclip,
+  table: LuTable,
+  sigma: LuSigma,
+  copy: LuCopy,
 };
 
 export function Icon({ name, size = 16, className }: { name: string; size?: number; className?: string }) {

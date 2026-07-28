@@ -26,6 +26,14 @@
   --tag-fg: #ef8a5c;
   --focus-ring: rgba(255, 255, 255, 0.09);
   --shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  /* Code tokens, warm enough to sit in this palette rather than fight it. */
+  --hl-keyword: #ea6962;
+  --hl-string: #a9b665;
+  --hl-number: #d8a657;
+  --hl-name: #89b482;
+  --hl-type: #e78a4e;
+  --hl-meta: #7daea3;
+  --hl-variable: #d3869b;
 }
 
 :root[data-theme='light'] {
@@ -45,6 +53,13 @@
   --tag-fg: #b4400f;
   --focus-ring: rgba(44, 43, 40, 0.10);
   --shadow: 0 8px 24px rgba(40, 35, 20, 0.12);
+  --hl-keyword: #c14a4a;
+  --hl-string: #6c782e;
+  --hl-number: #b47109;
+  --hl-name: #4c7a5d;
+  --hl-type: #c35e0a;
+  --hl-meta: #45707a;
+  --hl-variable: #945e80;
 }
 
 html,
@@ -1974,6 +1989,12 @@ tr:hover .row-del {
   backdrop-filter: blur(10px);
 }
 
+/* Without a pane bar the split buttons float in this exact corner — pin and
+   delete step aside rather than hide underneath them. */
+.pane.single .obj-topbar {
+  padding-right: 104px;
+}
+
 .crumb {
   display: inline-flex;
   align-items: center;
@@ -3047,6 +3068,11 @@ code.var-ref-name {
 
 /* ---------- editor (TipTap) ---------- */
 
+/* The grip in the margin is positioned against this, not against the page. */
+.editor-wrap {
+  position: relative;
+}
+
 .editor .ProseMirror {
   outline: none;
   min-height: 160px;
@@ -3156,6 +3182,341 @@ code.var-ref-name {
   border: none;
   border-top: 1px solid var(--border);
   margin: 1.4em 0;
+}
+
+/* ---------- block grip ---------- */
+
+/* Height is mirrored by GRIP in blockHandle.tsx, which centres it on the first
+   line of its block. */
+.block-grip {
+  position: absolute;
+  left: -28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 24px;
+  border-radius: 5px;
+  color: var(--text-3);
+  cursor: grab;
+  opacity: 0.75;
+}
+
+.block-grip:hover {
+  background: var(--bg-3);
+  color: var(--text-2);
+  opacity: 1;
+}
+
+.block-grip:active {
+  cursor: grabbing;
+}
+
+.block-menu {
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+/* The line ProseMirror draws where a dragged block would land. */
+.editor .ProseMirror-dropcursor {
+  border-top-color: var(--accent);
+}
+
+/* Room to start a new line after a note that ends in a table or an image. */
+.editor-tail {
+  height: 64px;
+  cursor: text;
+}
+
+/* ---------- tables ---------- */
+
+.editor .ProseMirror .tableWrapper {
+  overflow-x: auto;
+  margin: 0.9em 0;
+}
+
+.editor .ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  font-size: 14px;
+}
+
+.editor .ProseMirror th,
+.editor .ProseMirror td {
+  border: 1px solid var(--border);
+  padding: 7px 10px;
+  vertical-align: top;
+  position: relative;
+  min-width: 60px;
+}
+
+.editor .ProseMirror th {
+  background: var(--bg-2);
+  font-weight: 600;
+  text-align: left;
+}
+
+.editor .ProseMirror th > p,
+.editor .ProseMirror td > p {
+  margin: 0;
+}
+
+.editor .ProseMirror .selectedCell::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  pointer-events: none;
+}
+
+.editor .ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--accent);
+  cursor: col-resize;
+}
+
+.editor .ProseMirror.resize-cursor {
+  cursor: col-resize;
+}
+
+.table-menu {
+  position: fixed;
+  z-index: 95;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 4px 5px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow);
+}
+
+.table-menu .sel-btn.danger {
+  color: #e66767;
+}
+
+.sel-text.small {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+/* ---------- code blocks ---------- */
+
+.editor .code-block {
+  position: relative;
+}
+
+.editor .code-tools {
+  position: absolute;
+  top: 7px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.editor .code-block:hover .code-tools,
+.editor .code-tools:focus-within {
+  opacity: 1;
+}
+
+.code-lang {
+  font-size: 11.5px;
+  color: var(--text-3);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px 4px;
+  outline: none;
+}
+
+/* highlight.js token classes, mapped onto this app's palette so the colours
+   follow the theme switch instead of coming from a fixed vendor stylesheet. */
+.editor .hljs-comment,
+.editor .hljs-quote {
+  color: var(--text-3);
+  font-style: italic;
+}
+
+.editor .hljs-keyword,
+.editor .hljs-selector-tag,
+.editor .hljs-literal,
+.editor .hljs-section,
+.editor .hljs-doctag,
+.editor .hljs-tag {
+  color: var(--hl-keyword);
+}
+
+.editor .hljs-string,
+.editor .hljs-regexp,
+.editor .hljs-addition {
+  color: var(--hl-string);
+}
+
+.editor .hljs-number,
+.editor .hljs-attr,
+.editor .hljs-attribute,
+.editor .hljs-symbol {
+  color: var(--hl-number);
+}
+
+.editor .hljs-title,
+.editor .hljs-name,
+.editor .hljs-selector-id,
+.editor .hljs-selector-class {
+  color: var(--hl-name);
+}
+
+.editor .hljs-built_in,
+.editor .hljs-type,
+.editor .hljs-class,
+.editor .hljs-params {
+  color: var(--hl-type);
+}
+
+.editor .hljs-meta,
+.editor .hljs-link,
+.editor .hljs-bullet {
+  color: var(--hl-meta);
+}
+
+.editor .hljs-variable,
+.editor .hljs-template-variable,
+.editor .hljs-property,
+.editor .hljs-deletion {
+  color: var(--hl-variable);
+}
+
+.editor .hljs-emphasis {
+  font-style: italic;
+}
+
+.editor .hljs-strong {
+  font-weight: 700;
+}
+
+/* ---------- maths ---------- */
+
+.Tiptap-mathematics-render {
+  padding: 0 2px;
+  cursor: text;
+}
+
+.Tiptap-mathematics-render--editable:hover {
+  background: var(--bg-3);
+  border-radius: 4px;
+}
+
+.Tiptap-mathematics-editor {
+  color: var(--mention-fg);
+  font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+  font-size: 0.92em;
+}
+
+/* While the caret is inside an equation: one strip of symbols, and the rest
+   only when asked for. It sits above the line so it never covers what is
+   being typed. */
+.math-bar {
+  position: fixed;
+  z-index: 95;
+  width: max-content;
+  max-width: 460px;
+  border-radius: 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.math-strip {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 3px 4px;
+}
+
+.math-sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.math-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--text-3);
+}
+
+.math-more:hover,
+.math-more.on {
+  background: var(--bg-3);
+  color: var(--text);
+}
+
+.math-panel {
+  width: 360px;
+  border-top: 1px solid var(--border);
+}
+
+.math-search {
+  width: calc(100% - 12px);
+  margin: 6px;
+  padding: 5px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border-2);
+  border-radius: 7px;
+  outline: none;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.math-groups {
+  max-height: 190px;
+  overflow-y: auto;
+  padding-bottom: 6px;
+}
+
+.math-group .picker-group {
+  padding: 8px 10px 3px;
+}
+
+.math-keys {
+  display: grid;
+  grid-template-columns: repeat(9, 1fr);
+  gap: 2px;
+  padding: 0 6px;
+}
+
+.math-key {
+  height: 26px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: 'SF Mono', ui-monospace, Menlo, monospace;
+  overflow: hidden;
+}
+
+.math-strip .math-key {
+  min-width: 25px;
+  padding: 0 3px;
+}
+
+.math-key:hover {
+  background: var(--bg-3);
+  color: var(--mention-fg);
 }
 
 .editor .ProseMirror p.is-editor-empty:first-child::before {
@@ -3703,10 +4064,6 @@ code.var-ref-name {
   max-width: 92vw;
 }
 
-.sel-menu.nav {
-  border-color: var(--accent);
-}
-
 .sel-row {
   display: flex;
   align-items: center;
@@ -3733,12 +4090,6 @@ code.var-ref-name {
 .sel-btn.on {
   background: var(--bg-3);
   color: var(--mention-fg);
-}
-
-.sel-btn.cursor,
-.sel-swatch.cursor {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
 }
 
 .sel-text {
@@ -3781,17 +4132,42 @@ code.var-ref-name {
   border-width: 2px;
 }
 
-.sel-hint {
-  font-size: 10.5px;
-  color: var(--text-3);
-  padding: 0 2px 1px;
+/* The name of whatever the pointer is on, hung under the toolbar so the bar
+   itself doesn't change size as you move along it. */
+.sel-tip {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 7px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
   white-space: nowrap;
+  color: var(--text);
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow);
+  pointer-events: none;
 }
 
-/* Highlight marks written by the toolbar. */
+/* Translucent highlights need something behind them to read against. */
+.sel-swatch:not(.text) {
+  background-color: var(--bg);
+  background-image: linear-gradient(var(--swatch, transparent), var(--swatch, transparent));
+}
+
+/* Highlight marks written by the toolbar. The colours are translucent, so the
+   text keeps its own colour and stays readable in either theme. */
 .editor .ProseMirror mark {
   border-radius: 3px;
   padding: 0 2px;
+  color: inherit;
+}
+
+/* Highlights written before the palette went translucent are solid pastels —
+   those still need dark text on top of them. */
+.editor .ProseMirror mark[data-color^='#'] {
   color: #2c2b28;
 }
 

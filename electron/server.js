@@ -6,6 +6,9 @@
 
 const http = require('http');
 const { timingSafeEqual } = require('crypto');
+const mcp = require('./mcp');
+
+const version = require('../package.json').version;
 
 let server = null;
 let current = { port: 0 };
@@ -208,6 +211,24 @@ function match(route, method, pathname) {
   return params;
 }
 
+/**
+ * Run one route in-process, with the same shape the MCP server sees over HTTP:
+ * a missing route or an empty result is an error, so a tool behaves the same
+ * whether it reached us through a socket or through the /mcp endpoint.
+ */
+async function dispatch(api, method, path, body) {
+  const url = new URL(path, 'http://127.0.0.1');
+  for (const route of ROUTES) {
+    const params = match(route, method, url.pathname);
+    if (!params) continue;
+    const query = Object.fromEntries(url.searchParams.entries());
+    const out = await route[2]({ api, params, query, body: body || {} });
+    if (out === null || out === undefined) throw new Error('not found');
+    return out;
+  }
+  throw new Error(`no route for ${method} ${url.pathname}`);
+}
+
 /** Starts (or restarts) the server. Returns { ok, port } or { ok: false, error }. */
 function start(api, cfg) {
   stop();
@@ -219,6 +240,17 @@ function start(api, cfg) {
         const auth = req.headers.authorization || '';
         const token = auth.startsWith('Bearer ') ? auth.slice(7) : url.searchParams.get('token') || '';
         if (!cfg.token || !sameToken(token, cfg.token)) return json(res, 401, { error: 'bad or missing token' });
+
+        // MCP speaks its own protocol on top of HTTP, so it takes the raw
+        // request rather than going through the route table.
+        if (url.pathname === '/mcp' || url.pathname === '/mcp/') {
+          const body = req.method === 'GET' || req.method === 'DELETE' ? undefined : await readBody(req);
+          return mcp.handle(req, res, body, {
+            call: (method, at, payload) => dispatch(api, method, at, payload),
+            canEdit: !!cfg.mcpEdit,
+            version,
+          });
+        }
 
         for (const route of ROUTES) {
           const params = match(route, req.method, url.pathname);
@@ -257,4 +289,4 @@ function stop() {
 
 const status = () => ({ running: !!server, port: current.port });
 
-module.exports = { start, stop, status, ROUTES };
+module.exports = { start, stop, status, dispatch, ROUTES };
