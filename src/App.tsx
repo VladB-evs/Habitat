@@ -45,14 +45,14 @@ function PaneView({ view }: { view: View }) {
 }
 
 function Shell() {
-  const { panes, dir, active, setActive, split, closePane } = useApp();
+  const { panes, dir, active, setActive, split, closing, requestClose, endClose } = useApp();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(() => localStorage.getItem('habitat:sidebar') === 'hidden');
   /** A hidden sidebar peeks over the content while the pointer is on it. */
   const [peeking, setPeeking] = useState(false);
   const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  /** The side view takes a third; the main pane keeps two thirds. */
-  const [ratio, setRatio] = useState(2 / 3);
+  /** A split is down the middle until the divider says otherwise. */
+  const [ratio, setRatio] = useState(1 / 2);
   const mainRef = useRef<HTMLDivElement>(null);
   const dragging = useRef(false);
   const isSplit = panes.length > 1;
@@ -63,15 +63,27 @@ function Shell() {
   const mainBasis = useMotionTemplate`calc(${mainSize}% - 3px)`;
 
   useEffect(() => {
-    if (!isSplit) setRatio(2 / 3);
+    if (!isSplit) setRatio(1 / 2);
   }, [isSplit]);
 
+  /**
+   * Closing is animated first and committed after, rather than removing the
+   * pane and animating what's left. Whichever one is going collapses to nothing
+   * while the other grows into the space it leaves — so the survivor slides
+   * over from where it actually was instead of reappearing at the edge.
+   */
+  const target = closing === 0 ? 0 : closing === 1 || !isSplit ? 100 : ratio * 100;
+
   useEffect(() => {
-    const target = isSplit ? ratio * 100 : 100;
     if (dragging.current) return void mainSize.set(target);
     const controls = animate(mainSize, target, softSpring);
+    if (closing !== null) {
+      // Either way it commits: an interrupted animation must not leave a pane
+      // collapsed to nothing and still on screen.
+      controls.finished.then(endClose, endClose);
+    }
     return () => controls.stop();
-  }, [isSplit, ratio, mainSize]);
+  }, [target, closing, endClose, mainSize]);
 
   const startDivider = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -172,6 +184,8 @@ function Shell() {
       </AnimatePresence>
 
       <div ref={mainRef} className={'main-area ' + (dir === 'row' ? 'dir-row' : 'dir-col')}>
+        {/* Panes need no exit animation of their own: by the time one is taken
+            out of the list it has already collapsed to nothing. */}
         <AnimatePresence initial={false}>
           {panes.flatMap((p, i) => [
             ...(i === 1
@@ -181,22 +195,26 @@ function Shell() {
                     className="split-divider"
                     onMouseDown={startDivider}
                     initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
+                    animate={{ opacity: closing === null ? 1 : 0 }}
                     exit={{ opacity: 0 }}
                     transition={snap}
                   />,
                 ]
               : []),
             <motion.section
-              key={i}
+              // Keyed by the pane itself, not its position: closing the left
+              // pane must animate the left pane away, not hand its identity to
+              // the right one.
+              key={p.id}
               // `single` tells the page inside to leave room for the split
               // buttons, which float in its own top-right corner when there's
               // no pane bar to hold them.
               className={'pane' + (isSplit ? (i === active ? ' focused' : ' dimmed') : ' single')}
-              style={i === 0 ? { flexBasis: mainBasis, flexGrow: 0, flexShrink: 0 } : undefined}
+              style={isSplit && i === 0 ? { flexBasis: mainBasis, flexGrow: 0, flexShrink: 0 } : undefined}
               initial={i === 0 ? false : { opacity: 0, x: dir === 'row' ? 44 : 0, y: dir === 'col' ? 44 : 0 }}
-              animate={{ opacity: 1, x: 0, y: 0 }}
-              exit={{ opacity: 0, x: dir === 'row' ? 44 : 0, y: dir === 'col' ? 44 : 0 }}
+              // The one being closed fades as it collapses; the other holds
+              // still and simply widens.
+              animate={{ opacity: closing === i ? 0 : 1, x: 0, y: 0 }}
               transition={softSpring}
               onMouseDownCapture={() => setActive(i)}
             >
@@ -246,7 +264,7 @@ function Shell() {
                     className="icon-btn"
                     onClick={(e) => {
                       e.stopPropagation();
-                      closePane(i);
+                      requestClose(i);
                     }}
                     aria-label="Close pane"
                     title="Close this pane"

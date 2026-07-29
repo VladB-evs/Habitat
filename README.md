@@ -178,8 +178,8 @@ Settings → API runs a loopback-only HTTP server (bearer token, `127.0.0.1` onl
 curl -H "Authorization: Bearer YOUR_TOKEN" "http://127.0.0.1:37373/objects?type=task"
 ```
 
-Endpoints cover objects, search, backlinks, daily notes, tasks, tags, stats, automations and
-capture, plus the address book — `/people`, `/people/:id`, `/people/birthdays`, `/people/fields`
+Endpoints cover types (including creating one with its properties), objects, search, backlinks,
+daily notes, tasks, tags, stats, automations and capture, plus the address book — `/people`, `/people/:id`, `/people/birthdays`, `/people/fields`
 and `/me`. [`mcp/tools.mjs`](mcp/tools.mjs) puts the same surface behind MCP, so Claude, Cursor or
 any MCP client can read and write the vault — reads plus create/capture by default, edits and
 deletes only when they're allowed.

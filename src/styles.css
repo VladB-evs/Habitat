@@ -4311,6 +4311,61 @@ code.var-ref-name {
   right: 18px;
 }
 
+/* Search and filters, top-left so they clear the pane's own buttons. */
+.graph-tools {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.graph-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+  color: var(--text-3);
+}
+
+.graph-search input {
+  width: 150px;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.graph-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+}
+
+.graph-chip:hover {
+  color: var(--text);
+  border-color: var(--border-2);
+}
+
+.graph-chip.on {
+  color: var(--mention-fg);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg));
+}
+
 .graph-legend.bottom {
   top: auto;
   bottom: 18px;
@@ -4330,6 +4385,34 @@ code.var-ref-name {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* In the graph the legend is also the filter: a row is a switch. */
+.graph-legend .legend-row {
+  width: 100%;
+  color: var(--text-2);
+  font-size: 12.5px;
+  padding: 2px 0;
+}
+
+.graph-legend .legend-row:hover {
+  color: var(--text);
+}
+
+.graph-legend .legend-row.off {
+  opacity: 0.4;
+}
+
+.graph-legend .legend-row.off .legend-dot {
+  background: var(--text-3) !important;
+}
+
+.legend-n {
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 11px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .legend-dot {

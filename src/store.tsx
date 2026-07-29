@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useState } from 'rea
 import type { ReactNode } from 'react';
 import { api } from './api';
 import type { ObjType } from './types';
+import { clientUid } from './util';
 
 export type View =
   | { kind: 'dashboard' }
@@ -16,6 +17,13 @@ export type View =
 export type SplitDir = 'row' | 'col';
 
 interface Pane {
+  /**
+   * Identity that survives the other pane closing. Without it a pane is only
+   * known by its position, and closing the left one looks to React like the
+   * right one going away — so the wrong pane plays the exit animation and the
+   * survivor jumps across the window.
+   */
+  id: string;
   stack: View[];
 }
 
@@ -27,7 +35,10 @@ interface AppCtx {
   active: number;
   setActive: (i: number) => void;
   split: (dir: SplitDir) => void;
-  closePane: (i: number) => void;
+  /** Which pane is on its way out, so the shell can animate it before it goes. */
+  closing: number | null;
+  requestClose: (i: number) => void;
+  endClose: () => void;
   view: View;
   navigate: (v: View) => void;
   back: () => void;
@@ -57,7 +68,7 @@ function initialView(): View {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [types, setTypes] = useState<ObjType[]>([]);
-  const [panes, setPanes] = useState<Pane[]>([{ stack: [initialView()] }]);
+  const [panes, setPanes] = useState<Pane[]>([{ id: clientUid(), stack: [initialView()] }]);
   const [dir, setDir] = useState<SplitDir>('row');
   const [active, setActive] = useState(0);
   const [theme, setThemeState] = useState<string>(() => localStorage.getItem('habitat:theme') || 'dark');
@@ -67,17 +78,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const navigate = useCallback(
     (v: View) =>
-      setPanes((ps) => ps.map((p, i) => (i === Math.min(active, ps.length - 1) ? { stack: [...p.stack.slice(-40), v] } : p))),
+      setPanes((ps) => ps.map((p, i) => (i === Math.min(active, ps.length - 1) ? { ...p, stack: [...p.stack.slice(-40), v] } : p))),
     [active]
   );
 
-  const back = useCallback(
-    () =>
-      setPanes((ps) =>
-        ps.map((p, i) => (i === Math.min(active, ps.length - 1) && p.stack.length > 1 ? { stack: p.stack.slice(0, -1) } : p))
-      ),
-    [active]
-  );
+  const [closing, setClosing] = useState<number | null>(null);
+
+  const requestClose = useCallback((i: number) => setClosing((c) => (c === null ? i : c)), []);
+
+  /** Called once the shell has finished animating the pane away. */
+  const endClose = useCallback(() => {
+    setPanes((ps) => (ps.length === 2 && closing !== null ? [ps[1 - closing]] : ps));
+    setActive(0);
+    setClosing(null);
+  }, [closing]);
+
+  const here = Math.min(active, panes.length - 1);
+  /**
+   * Back walks the pane's own history, and when there is none left in the side
+   * view it closes it — that history is the pane you opened it from, so going
+   * back means putting it away rather than sitting on a dead button.
+   */
+  const canBack = panes[here].stack.length > 1 || (panes.length > 1 && here === 1);
+
+  const back = useCallback(() => {
+    if (panes[here].stack.length > 1) {
+      setPanes((ps) => ps.map((p, i) => (i === here && p.stack.length > 1 ? { ...p, stack: p.stack.slice(0, -1) } : p)));
+    } else if (panes.length > 1 && here === 1) {
+      requestClose(1);
+    }
+  }, [panes, here, requestClose]);
 
   const openObject = useCallback((id: string) => navigate({ kind: 'object', id }), [navigate]);
 
@@ -88,7 +118,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
    */
   const openBeside = useCallback((id: string) => {
     const view: View = { kind: 'object', id };
-    setPanes((ps) => (ps.length === 1 ? [ps[0], { stack: [view] }] : ps.map((p, i) => (i === 1 ? { stack: [...p.stack.slice(-40), view] } : p))));
+    setPanes((ps) =>
+      ps.length === 1
+        ? [ps[0], { id: clientUid(), stack: [view] }]
+        : ps.map((p, i) => (i === 1 ? { ...p, stack: [...p.stack.slice(-40), view] } : p))
+    );
     setActive(1);
   }, []);
 
@@ -110,17 +144,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPanes((ps) => {
         if (ps.length > 1) return ps;
         const top = ps[0].stack[ps[0].stack.length - 1];
-        return [ps[0], { stack: [top] }];
+        return [ps[0], { id: clientUid(), stack: [top] }];
       });
       setActive(1);
     },
     []
   );
-
-  const closePane = useCallback((i: number) => {
-    setPanes((ps) => (ps.length === 2 ? [ps[1 - i]] : ps));
-    setActive(0);
-  }, []);
 
   const reloadTypes = useCallback(async () => {
     setTypes(await api.types.list());
@@ -150,11 +179,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         active,
         setActive,
         split,
-        closePane,
+        closing,
+        requestClose,
+        endClose,
         view,
         navigate,
         back,
-        canBack: pane.stack.length > 1,
+        canBack,
         openObject,
         openFrom,
         openBeside,

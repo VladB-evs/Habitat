@@ -60,6 +60,26 @@ const ROUTES = [
 
   ['GET', '/types', ({ api }) => api['types:list']()],
 
+  /**
+   * A whole type in one call: name, look, and the properties it carries.
+   * `properties` is the same shape GET /types returns — [{ id, name, kind,
+   * options?, targetTypeId? }] — so a type can be copied between vaults.
+   */
+  [
+    'POST',
+    '/types',
+    ({ api, body }) => {
+      if (!body.name) throw new HttpError(400, 'name is required');
+      const made = api['types:create']({ name: body.name, icon: body.icon, color: body.color });
+      const patch = {};
+      if (Array.isArray(body.properties)) patch.properties = body.properties;
+      if (body.starred !== undefined) patch.starred = body.starred;
+      return Object.keys(patch).length ? api['types:update']({ id: made.id, patch }) : made;
+    },
+  ],
+
+  ['PATCH', '/types/:id', ({ api, params, body }) => api['types:update']({ id: params.id, patch: body })],
+
   [
     'GET',
     '/objects',

@@ -7,6 +7,8 @@ const ROUTES: [string, string][] = [
   ['GET /health', 'is it up'],
   ['POST /mcp', 'MCP over HTTP, for agents'],
   ['GET /types', 'your object types'],
+  ['POST /types', '{ name, icon, color, properties }'],
+  ['PATCH /types/:id', 'rename, recolour, edit properties'],
   ['GET /objects?type=task&limit=20', 'objects, optionally by type'],
   ['GET /objects/:id', 'one object'],
   ['POST /objects', '{ typeId, title, props, content }'],

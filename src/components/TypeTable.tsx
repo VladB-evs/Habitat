@@ -761,7 +761,9 @@ export function TypeTable({ typeId }: { typeId: string }) {
             ))}
           </tbody>
         </table>
-        <button className="add-row" onClick={addRow}>
+        {/* Wrapped, not passed straight through: as a handler it would be
+            called with the click event, which then arrives as `preset`. */}
+        <button className="add-row" onClick={() => addRow()}>
           <Icon name="plus" size={14} /> New {type.name.toLowerCase()}
         </button>
       </div>
