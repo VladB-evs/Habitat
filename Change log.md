@@ -1,3 +1,10 @@
+Version 0.1.6: Published on July 29, 2026 ✅
+
+- Panels open half way now instead of a third
+- Fixed a bug with the closing split panel animation would go the wrong way
+- Fix the inline new note button bug (not working)
+- Fix the back button not working
+
 ## Version 0.1.6: Shipped July 28, 2026 ✅️ 
 - Added table support 
 - Added math equation support
