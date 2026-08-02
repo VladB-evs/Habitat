@@ -5,6 +5,7 @@ import type { Template } from '../types';
 import { typeColor } from '../util';
 import { Editor } from './Editor';
 import { Icon, TypeIcon } from './Icons';
+import { SplitControls } from './SplitControls';
 import { PropsPanel } from './PropsPanel';
 
 export function TemplatePage({ id }: { id: string }) {
@@ -66,6 +67,7 @@ export function TemplatePage({ id }: { id: string }) {
         <button className="icon-btn" onClick={del} aria-label="Delete template">
           <Icon name="trash" size={15} />
         </button>
+        <SplitControls />
       </div>
 
       <div className="obj-body">

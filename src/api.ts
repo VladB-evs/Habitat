@@ -46,6 +46,11 @@ export const api = {
       id: string,
       patch: { title?: string; props?: Record<string, any>; content?: any; pinned?: boolean; extraProps?: PropDef[] }
     ): Promise<Obj> => inv('objects:update', { id, patch }),
+    /**
+     * Move an object to another type. Values the new type also defines carry
+     * over; the rest are kept on the object as extra properties.
+     */
+    setType: (id: string, typeId: string): Promise<Obj | { error: string }> => inv('objects:setType', { id, typeId }),
     remove: (id: string): Promise<boolean> => inv('objects:delete', id),
     /** `content: true` also searches inside every note's text, daily entries included. */
     search: (q: string, opts?: { content?: boolean }): Promise<Obj[]> =>
@@ -181,6 +186,14 @@ export const api = {
     undated: number;
     undatedSample: string[];
   } | null> => inv('import:obsidianVault', { mode }),
+  /**
+   * Writes the vault out. `markdown` is a readable folder that imports back;
+   * `json` is one exact file. Neither includes the API or Telegram tokens.
+   */
+  exportVault: (
+    format: 'markdown' | 'json'
+  ): Promise<{ format: string; path: string; objects: number; types: number; files: number } | { error: string } | null> =>
+    inv('export:vault', { format }),
   tags: {
     list: (): Promise<TagObj[]> => inv('tags:list'),
     search: (q: string): Promise<Obj[]> => inv('tags:search', q),

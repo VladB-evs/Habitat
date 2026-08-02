@@ -161,6 +161,14 @@ export const clientUid = () => Math.random().toString(36).slice(2, 10);
 export const PEOPLE_TYPE = 'people';
 
 /**
+ * Types an object can't be moved in or out of: a daily note is keyed by its
+ * date, a tag is only a label, and a person backs the address book. The main
+ * process refuses these too — this is the same rule, so the UI doesn't offer a
+ * move that would only come back as an error.
+ */
+export const canChangeType = (typeId: string) => typeId !== 'daily' && typeId !== 'tag' && typeId !== PEOPLE_TYPE;
+
+/**
  * Properties that describe a link to someone else, so they never appear on the
  * user's own card — there is no relationship between me and me. The main
  * process strips them on write; this is the same list for the editor.

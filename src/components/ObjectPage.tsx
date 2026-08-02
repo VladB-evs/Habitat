@@ -2,12 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
-import type { Obj, PropDef } from '../types';
-import { ago, PEOPLE_TYPE, typeColor } from '../util';
+import type { Obj, ObjType, PropDef } from '../types';
+import { ago, canChangeType, PEOPLE_TYPE, typeColor } from '../util';
 import { Editor } from './Editor';
 import { Icon, TypeIcon } from './Icons';
 import { PersonBody } from './PersonBody';
 import { PropsPanel } from './PropsPanel';
+import { SplitControls } from './SplitControls';
 
 export function ObjectPage({ id }: { id: string }) {
   const { types, back, canBack, navigate, openFrom, theme } = useApp();
@@ -16,6 +17,8 @@ export function ObjectPage({ id }: { id: string }) {
   const [backlinks, setBacklinks] = useState<Obj[]>([]);
   const [title, setTitle] = useState('');
   const [selfId, setSelfId] = useState<string | null>(null);
+  /** Anchored under the type crumb when open. */
+  const [movePos, setMovePos] = useState<{ left: number; top: number } | null>(null);
   const titleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const loadSelf = useCallback(() => api.people.self().then((me) => setSelfId(me?.id ?? null)), []);
@@ -102,16 +105,42 @@ export function ObjectPage({ id }: { id: string }) {
     navigate({ kind: 'type', typeId: type.id });
   };
 
+  const movable = canChangeType(obj.typeId) ? types.filter((t) => t.id !== obj.typeId && canChangeType(t.id)) : [];
+
+  const moveTo = async (t: ObjType) => {
+    setMovePos(null);
+    const res = await api.objects.setType(id, t.id);
+    if ('error' in res) return void alert(`Could not move this to ${t.name}.`);
+    // The editor owns its own text; only the surrounding data is replaced.
+    setObj((prev) => (prev ? { ...res, content: prev.content } : res));
+    objectChanged(id);
+  };
+
   return (
     <div className="page">
       <div className="obj-topbar">
         <button className="icon-btn" onClick={back} disabled={!canBack} style={{ opacity: canBack ? 1 : 0.35 }} aria-label="Back">
           <Icon name="arrow-left" />
         </button>
-        <button className="crumb" onClick={goToType}>
-          <TypeIcon icon={type?.icon} color={typeColor(type?.color, theme)} size={14} />
-          {type?.name}
-        </button>
+        <span className="crumb-group">
+          <button className="crumb" onClick={goToType}>
+            <TypeIcon icon={type?.icon} color={typeColor(type?.color, theme)} size={14} />
+            {type?.name}
+          </button>
+          {movable.length > 0 && (
+            <button
+              className="crumb-more"
+              aria-label="Change type"
+              title="Change type"
+              onClick={(e) => {
+                const r = e.currentTarget.getBoundingClientRect();
+                setMovePos(movePos ? null : { left: r.left - 8, top: r.bottom + 6 });
+              }}
+            >
+              <Icon name="chevron-down" size={12} />
+            </button>
+          )}
+        </span>
         <div className="spacer" />
         {!isTag && (
           <button className={'icon-btn' + (obj.pinned ? ' active' : '')} onClick={togglePin} aria-label="Pin">
@@ -121,7 +150,27 @@ export function ObjectPage({ id }: { id: string }) {
         <button className="icon-btn" onClick={del} aria-label="Delete">
           <Icon name="trash" size={15} />
         </button>
+        <SplitControls />
       </div>
+
+      {movePos && (
+        <>
+          <div className="backdrop" onClick={() => setMovePos(null)} />
+          <div className="popover" style={movePos}>
+            <div className="picker-group">Change type to</div>
+            <div className="popover-list">
+              {movable.map((t) => (
+                <button key={t.id} className="menu-item" onClick={() => moveTo(t)}>
+                  <TypeIcon icon={t.icon} color={typeColor(t.color, theme)} size={14} />
+                  {t.name}
+                </button>
+              ))}
+            </div>
+            <div className="menu-sep" />
+            <div className="move-note">Properties the new type doesn't have are kept on this object.</div>
+          </div>
+        </>
+      )}
 
       <div className="obj-body">
         {/* A tag is just a label: no properties, no body — only what it's attached to. */}

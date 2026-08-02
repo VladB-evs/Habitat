@@ -1013,6 +1013,60 @@ function updateObject({ id, patch }) {
   return saved;
 }
 
+/**
+ * Daily notes, tags and people are not interchangeable with ordinary types: a
+ * daily note is keyed by its date, a tag is only a label, and a person backs the
+ * address book and the self card. Moving one in or out would leave the feature
+ * that owns it holding an object it can't render.
+ */
+const fixedType = (id) => id === 'daily' || id === 'tag' || id === PEOPLE_TYPE;
+
+/**
+ * Move an object to a different type.
+ *
+ * Values whose property the new type also defines carry over untouched. The rest
+ * would otherwise vanish — the type no longer describes them — so their
+ * definitions ride along as the object's own extra properties, which is exactly
+ * what extra_props is for. Nothing entered is lost, and moving back restores the
+ * original layout.
+ */
+function setObjectType({ id, typeId }) {
+  const cur = db.prepare('SELECT * FROM objects WHERE id = ?').get(id);
+  if (!cur) return { error: 'not-found' };
+  if (cur.type_id === typeId) return getObj(id, true);
+  if (!getType(typeId)) return { error: 'unknown-type' };
+  if (fixedType(cur.type_id) || fixedType(typeId)) return { error: 'fixed-type' };
+
+  const target = getType(typeId);
+  const from = getType(cur.type_id);
+  const props = JSON.parse(cur.props || '{}');
+  const extra = JSON.parse(cur.extra_props || '[]');
+  const defined = new Set(target.properties.map((p) => p.id));
+  const already = new Set(extra.map((p) => p.id));
+
+  const filled = (v) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length);
+  const carried = [...extra];
+  for (const def of from ? from.properties : []) {
+    if (defined.has(def.id) || already.has(def.id)) continue;
+    if (filled(props[def.id])) carried.push(def);
+  }
+  // An extra property the new type defines itself would otherwise render twice.
+  const kept = carried.filter((p) => !defined.has(p.id));
+
+  db.prepare('UPDATE objects SET type_id = ?, extra_props = ?, updated_at = ? WHERE id = ?').run(
+    typeId,
+    JSON.stringify(kept),
+    now(),
+    id
+  );
+  // Relation targets are read off the type's definitions, so they must be
+  // rebuilt against the new type or backlinks keep pointing through old props.
+  syncRelationLinks(id, typeId, props, kept);
+  const saved = getObj(id, true);
+  runAutomations('updated', saved, props);
+  return saved;
+}
+
 function deleteObject(id) {
   const gone = getObj(id);
   db.prepare('DELETE FROM links WHERE from_id = ? OR to_id = ?').run(id, id);
@@ -1107,9 +1161,34 @@ const api = {
     return rows.map((r) => parseObj(r));
   },
 
+  /**
+   * Everything in the vault, for export.
+   *
+   * `httpApi` and `telegram` are held back on purpose: they hold the API bearer
+   * token and the Telegram bot token, and an export is a file people copy to a
+   * drive or hand to someone else. Nothing else in kv is a secret.
+   */
+  'export:data': () => {
+    const secret = new Set(['httpApi', 'telegram']);
+    return {
+      app: 'habitat',
+      exportedAt: now(),
+      types: db.prepare('SELECT * FROM types ORDER BY builtin DESC, created_at').all().map(parseType),
+      objects: db.prepare('SELECT * FROM objects ORDER BY created_at').all().map((r) => parseObj(r, true)),
+      templates: db.prepare('SELECT * FROM templates ORDER BY created_at').all().map((r) => parseTemplate(r, true)),
+      links: db.prepare('SELECT from_id, to_id, kind, prop_id FROM links').all(),
+      files: db.prepare('SELECT * FROM files ORDER BY created_at').all(),
+      settings: db
+        .prepare('SELECT key, value FROM kv')
+        .all()
+        .filter((r) => !secret.has(r.key)),
+    };
+  },
+
   'objects:get': (id) => getObj(id, true),
   'objects:create': (p) => createObject(p),
   'objects:update': (p) => updateObject(p),
+  'objects:setType': (p) => setObjectType(p),
   'objects:delete': (id) => deleteObject(id),
 
   'objects:bulkDelete': (ids) => {

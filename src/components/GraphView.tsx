@@ -4,6 +4,7 @@ import { useApp } from '../store';
 import type { GraphData } from '../types';
 import { typeColor } from '../util';
 import { Icon } from './Icons';
+import { SplitControls } from './SplitControls';
 
 interface SimNode {
   id: string;
@@ -525,6 +526,7 @@ export function GraphView() {
         <button className="graph-chip" onClick={() => fit.current?.()} title="Frame everything">
           <Icon name="layout" size={12} /> Fit
         </button>
+        <SplitControls />
       </div>
 
       {legendTypes.length > 0 && (

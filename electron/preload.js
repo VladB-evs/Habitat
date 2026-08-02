@@ -2,7 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const CHANNELS = new Set([
   'types:list', 'types:create', 'types:update', 'types:delete',
-  'objects:list', 'objects:get', 'objects:create', 'objects:update', 'objects:delete', 'objects:search',
+  'objects:list', 'objects:get', 'objects:create', 'objects:update', 'objects:setType', 'objects:delete', 'objects:search',
   'objects:createFromTemplate', 'objects:bulkDelete', 'objects:bulkSetProp',
   'templates:list', 'templates:get', 'templates:create', 'templates:update', 'templates:delete',
   'tasks:forDay',
@@ -10,7 +10,7 @@ const CHANNELS = new Set([
   'backlinks:list', 'graph:data', 'stats:get',
   'dashboard:get', 'dashboard:save', 'dashboard:reset',
   'settings:get', 'settings:chooseVault', 'settings:reveal',
-  'profile:get', 'import:obsidianVault',
+  'profile:get', 'import:obsidianVault', 'export:vault',
   'people:list', 'people:get', 'people:create', 'people:self', 'people:birthdays', 'people:fields',
   'habitats:create', 'habitats:open', 'habitats:switch', 'habitats:onboard', 'habitats:delete', 'habitats:pickFolder',
   'vars:list', 'vars:save',

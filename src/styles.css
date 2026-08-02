@@ -504,21 +504,25 @@ kbd {
   margin-bottom: 10px;
 }
 
-/* Single pane: the split buttons ride in the page's own top-right corner
-   instead of floating over the whole window. */
-.pane-bar.floating {
-  position: absolute;
-  top: 13px;
-  right: 16px;
-  height: auto;
-  z-index: 20;
+/* On a single pane the split buttons sit in each page's own header row instead
+   of floating over its top-right corner, where they covered whatever the page
+   had put there. */
+.split-controls {
+  display: inline-flex;
+  align-items: center;
   gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--bg) 72%, transparent);
-  backdrop-filter: blur(10px);
+  flex-shrink: 0;
   -webkit-app-region: no-drag;
+}
+
+/* A rule of its own so the buttons read as window chrome rather than as one
+   more of the page's controls. */
+.split-controls::before {
+  content: '';
+  width: 1px;
+  height: 16px;
+  margin: 0 5px 0 3px;
+  background: var(--border-2);
 }
 
 /* Hover target along the very edge of the window: sweep the pointer there and
@@ -1488,15 +1492,38 @@ kbd {
   position: relative;
 }
 
+.db-table tbody tr {
+  cursor: pointer;
+}
+
+/* The controls inside a row keep their own cursor — only the space between them
+   reads as "open this". */
+.db-table tbody tr input,
+.db-table tbody tr textarea {
+  cursor: auto;
+}
+
 .db-table tr:hover td {
   background: color-mix(in srgb, var(--bg-2) 55%, transparent);
 }
 
-.td-name {
+/*
+ * The flexible column. `max-width` on .db-table td was capping this at 340px, so
+ * a name was clipped however wide the window got; `width: 100%` now hands it
+ * every pixel the property columns don't need. It gives way only when the
+ * window is genuinely narrow or there are enough properties to need the room —
+ * that's what the min-width is for.
+ */
+/* Qualified with .db-table so it actually outranks `.db-table td` (0,1,1) —
+   unqualified, this rule's min-width never applied at all. */
+.db-table .td-name {
   min-width: 280px;
+  max-width: none;
+  width: 100%;
   position: relative;
 }
 
+/* Laid out further down, where the rule that used to cap the title lives. */
 .cell-name {
   display: flex;
   align-items: center;
@@ -1514,6 +1541,36 @@ kbd {
 
 .cell-input.name {
   font-weight: 500;
+  /* Only bites once the title is longer than the column it has been given. */
+  text-overflow: ellipsis;
+}
+
+/*
+ * Sizes the title input to its own text: a hidden copy of the value sits in the
+ * same grid cell, so the column is as wide as the name and no wider. Everything
+ * to the right of it is row, not input, which is what makes clicking a row's
+ * empty space open the object.
+ */
+.name-fit {
+  display: inline-grid;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.name-fit > input,
+.name-fit::after {
+  grid-area: 1 / 1;
+  padding: 8px 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  min-width: 6ch;
+}
+
+.name-fit::after {
+  content: attr(data-value);
+  visibility: hidden;
+  white-space: pre;
+  overflow: hidden;
 }
 
 .cell-input:focus {
@@ -1989,12 +2046,6 @@ tr:hover .row-del {
   backdrop-filter: blur(10px);
 }
 
-/* Without a pane bar the split buttons float in this exact corner — pin and
-   delete step aside rather than hide underneath them. */
-.pane.single .obj-topbar {
-  padding-right: 104px;
-}
-
 .crumb {
   display: inline-flex;
   align-items: center;
@@ -2008,6 +2059,36 @@ tr:hover .row-del {
 .crumb:hover {
   background: var(--bg-2);
   color: var(--text);
+}
+
+/* The crumb navigates to the type; the chevron beside it changes the type. Two
+   actions, one visual unit, so the pairing is obvious. */
+.crumb-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.crumb-more {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 5px;
+  border-radius: 7px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.crumb-more:hover {
+  background: var(--bg-2);
+  color: var(--text);
+}
+
+.move-note {
+  padding: 4px 10px 6px;
+  max-width: 240px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-3);
 }
 
 .spacer {
@@ -2375,42 +2456,253 @@ tr:hover .row-del {
   padding-bottom: 8px;
 }
 
-/* One row of tabs instead of one long scroll. */
-.settings-nav {
-  flex-shrink: 0;
-  display: flex;
-  gap: 2px;
-  padding: 0 16px 10px;
-  border-bottom: 1px solid var(--border);
+/* ---------- preferences window ---------- */
+
+/* Taller than the ⌘K palette, so it centres rather than hanging from 13vh. */
+.prefs-backdrop {
+  align-items: center;
+  padding-top: 0;
 }
 
-.settings-tab {
-  display: inline-flex;
+.prefs {
+  display: flex;
+  width: 800px;
+  max-width: 94vw;
+  height: 600px;
+  max-height: 86vh;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+/* Sections live in a rail, so adding one never crowds a row of tabs. */
+.prefs-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 176px;
+  flex-shrink: 0;
+  padding: 14px 10px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.prefs-rail h2 {
+  padding: 0 8px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-3);
+}
+
+.prefs-tab {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 11px;
+  gap: 9px;
+  padding: 7px 9px;
   border-radius: 8px;
   font-size: 13px;
   font-weight: 500;
-  color: var(--text-3);
+  color: var(--text-2);
+  text-align: left;
   cursor: pointer;
 }
 
-.settings-tab:hover {
+.prefs-tab svg {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.prefs-tab:hover {
   color: var(--text);
   background: var(--bg-3);
 }
 
-.settings-tab.on {
+.prefs-tab.on {
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
-.var-ref-fold summary {
-  cursor: pointer;
+.prefs-tab.on svg {
+  color: var(--accent);
+}
+
+.prefs-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.prefs-head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 16px 11px;
+}
+
+.prefs-head h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.prefs-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 16px 18px;
+}
+
+/* A section is a titled stack of grouped rows. */
+.set-sec + .set-sec {
+  margin-top: 16px;
+}
+
+.set-title {
+  margin: 0 0 7px 3px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.set-group {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.set-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 46px;
+  padding: 10px 13px;
+}
+
+.set-item + .set-item,
+.set-fold {
+  border-top: 1px solid var(--border);
+}
+
+/* Full-width content — paths, code samples, editors — stacks under its label. */
+.set-item.stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 9px;
+}
+
+.set-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* One line at most. Anything longer belongs in the guide, not the window. */
+.set-note {
+  margin-top: 2px;
+  max-width: 430px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
+.set-ctl {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.set-item.stack .set-ctl {
+  flex-wrap: wrap;
+}
+
+.set-item.stack .set-ctl .field {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* Right-hand status text: "listening on…", "Up to date". */
+.set-val {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 12.5px;
   color: var(--text-2);
-  margin: 8px 0;
+}
+
+.set-note code,
+.set-val code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+}
+
+/* What used to be a paragraph of explanation folds away instead. */
+.set-fold summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 13px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  cursor: pointer;
+  list-style: none;
+}
+
+.set-fold summary::-webkit-details-marker {
+  display: none;
+}
+
+.set-fold summary::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  opacity: 0.7;
+  transform: rotate(-45deg);
+  transition: transform 0.15s ease;
+}
+
+.set-fold[open] summary {
+  color: var(--text);
+}
+
+.set-fold[open] summary::before {
+  transform: rotate(45deg);
+}
+
+.set-fold-body {
+  padding: 0 13px 12px;
+}
+
+.set-fold-body > * + * {
+  margin-top: 9px;
+}
+
+/* Opens the online guide; renders nothing until GUIDE_URL is set. */
+.set-guide {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.set-guide:hover {
+  color: var(--accent);
 }
 
 /* ---------- local API ---------- */
@@ -2443,35 +2735,10 @@ tr:hover .row-del {
 /* ---------- telegram ---------- */
 
 .tg-steps {
-  margin: 10px 0 4px 16px;
+  margin: 0 0 0 16px;
   padding: 0;
   font-size: 12.5px;
   line-height: 1.7;
-  color: var(--text-2);
-}
-
-.tg-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.tg-row .field {
-  flex: 1;
-}
-
-.s-sub {
-  width: 96px;
-  flex-shrink: 0;
-  font-size: 12.5px;
-  color: var(--text-3);
-}
-
-.tg-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12.5px;
   color: var(--text-2);
 }
 
@@ -2482,6 +2749,11 @@ tr:hover .row-del {
   flex-direction: column;
   gap: 8px;
   padding: 16px 20px;
+}
+
+/* The prefs pane supplies its own padding. */
+.prefs-body .autos {
+  padding: 0;
 }
 
 .auto-card {
@@ -2741,11 +3013,6 @@ tr:hover .row-del {
   flex-direction: column;
   align-items: stretch;
   gap: 11px;
-}
-
-.s-label {
-  font-size: 14px;
-  font-weight: 600;
 }
 
 .s-hint {
@@ -5084,12 +5351,6 @@ code.var-ref-name {
   padding: 0;
 }
 
-/* The inline values ride along inside the name cell and scroll on their own. */
-.cell-name .inline-props {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
 .td-pick.off {
   display: none;
 }
@@ -5102,10 +5363,19 @@ code.var-ref-name {
 
 /* Two fixed tracks, so every row's inline values start at the same x instead of
    trailing whatever length the title happens to be. */
+/*
+ * This was a two-column grid — `minmax(90px, 34%)` for the title, the rest for
+ * inline values — so that every row's values began at the same x. The cost was
+ * that a title could never use more than a third of the column, however wide the
+ * window or however few values the row had, which is what clipped names.
+ *
+ * The title now takes the width it needs and the values follow it. They no
+ * longer line up column-wise between rows; a readable name is worth more.
+ */
 .cell-name {
-  display: grid;
-  grid-template-columns: minmax(90px, 34%) minmax(0, 1fr);
+  display: flex;
   align-items: center;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -5116,6 +5386,7 @@ code.var-ref-name {
 }
 
 .cell-name .inline-props {
+  flex: 0 1 auto;
   min-width: 0;
   margin-left: 0;
 }

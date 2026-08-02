@@ -12,10 +12,13 @@ const LABEL: Record<UpdateState['status'], string> = {
   staged: 'Ready to install',
   installing: 'Installing…',
   error: 'Could not check',
-  dev: 'Development build — updates are off',
+  dev: 'Development build',
 };
 
-/** Update status, plus a way to install one without waiting for the next quit. */
+/**
+ * One row inside General's first group — version, state, and a way to install
+ * without waiting for the next quit.
+ */
 export function UpdateSettings() {
   const [state, setState] = useState<UpdateState | null>(null);
 
@@ -26,38 +29,20 @@ export function UpdateSettings() {
 
   if (!state) return null;
   const busy = state.status === 'checking' || state.status === 'downloading' || state.status === 'installing';
+  const next = state.next && state.next !== state.version ? ` → ${state.next}` : '';
 
   return (
-    <div className="settings-row col">
+    <div className="set-item">
       <div>
-        <div className="s-label">Updates</div>
-        <div className="s-hint">
-          Habitat checks GitHub for new releases on launch and every few hours and downloads them in the background.
-          Because the builds aren't code-signed, it replaces its own app bundle rather than going through macOS's
-          updater — press Restart &amp; install when one is ready.
+        <div className="set-name">Updates</div>
+        <div className="set-note">
+          {state.error || `${state.version}${next} · ${LABEL[state.status]}`}
         </div>
       </div>
-
-      <div className="tg-row">
-        <span className="s-sub">Version</span>
-        <span className="tg-state">
-          {state.version}
-          {state.next && state.next !== state.version ? ` → ${state.next}` : ''}
-        </span>
-      </div>
-
-      <div className="tg-row">
-        <span className="s-sub">Status</span>
-        <span className="tg-state">
-          {state.status === 'current' && <Icon name="check" size={13} />}
-          {LABEL[state.status]}
-
-        </span>
-      </div>
-
-      <div style={{ display: 'flex', gap: 8 }}>
-        <button className="btn" disabled={busy || state.status === 'dev'} onClick={() => api.updates.check()}>
-          {busy ? 'Working…' : 'Check now'}
+      <div className="set-ctl">
+        {state.status === 'current' && <span className="set-val"><Icon name="check" size={13} /></span>}
+        <button className="btn subtle" disabled={busy || state.status === 'dev'} onClick={() => api.updates.check()}>
+          {busy ? 'Working…' : 'Check'}
         </button>
         {state.status === 'staged' && (
           <button className="btn primary" onClick={() => api.updates.install()}>
@@ -70,8 +55,6 @@ export function UpdateSettings() {
           </button>
         )}
       </div>
-
-      {state.error && <div className="s-notice">{state.error}</div>}
     </div>
   );
 }

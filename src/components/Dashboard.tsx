@@ -20,6 +20,7 @@ import {
 } from '../widgets';
 import { typeColor } from '../util';
 import { Icon } from './Icons';
+import { SplitControls } from './SplitControls';
 
 /* ---------- one placed widget ---------- */
 
@@ -395,6 +396,7 @@ export function Dashboard() {
             <Icon name="pencil" size={13} /> Edit dashboard
           </button>
         )}
+        <SplitControls />
       </div>
 
       <DashDataCtx.Provider value={dash}>

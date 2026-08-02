@@ -4,6 +4,7 @@ import { useApp } from '../store';
 import type { TagObj } from '../types';
 import { typeColor } from '../util';
 import { Icon } from './Icons';
+import { SplitControls } from './SplitControls';
 
 export function TagsView() {
   const { types, openFrom, theme } = useApp();
@@ -46,6 +47,7 @@ export function TagsView() {
           <h1>Tags</h1>
           <span className="count-badge">{tags?.length ?? 0}</span>
         </div>
+        <SplitControls />
       </header>
 
       <div className="tags-page">

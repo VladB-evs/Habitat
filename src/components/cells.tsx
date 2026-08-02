@@ -35,11 +35,12 @@ function TextCell({
     if (v === prev) return;
     onCommit(number ? (v.trim() === '' ? null : Number(v)) : v);
   };
-  return (
+  const shown = placeholder ?? (name ? 'Untitled' : '');
+  const input = (
     <input
       className={'cell-input' + (name ? ' name' : '')}
       value={v}
-      placeholder={placeholder ?? (name ? 'Untitled' : '')}
+      placeholder={shown}
       inputMode={number ? 'decimal' : undefined}
       onChange={(e) => setV(e.target.value)}
       onBlur={commit}
@@ -47,6 +48,17 @@ function TextCell({
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
       }}
     />
+  );
+
+  // A title is sized to its own text rather than filling the column, so the
+  // space beside it belongs to the row — which opens the object. A full-width
+  // input would swallow that click and offer a rename instead.
+  return name ? (
+    <span className="name-fit" data-value={v || shown}>
+      {input}
+    </span>
+  ) : (
+    input
   );
 }
 

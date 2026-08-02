@@ -20,6 +20,7 @@ import {
 } from '../viewModel';
 import { Cell, TextCell, popPos } from './cells';
 import { Icon, TypeIcon } from './Icons';
+import { SplitControls } from './SplitControls';
 import { PropEditor } from './PropEditor';
 import { BoardView, GalleryView } from './typeViews';
 import { TypeEditor } from './TypeEditor';
@@ -495,6 +496,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
               <Icon name="chevron-down" size={14} />
             </button>
           </div>
+          <SplitControls />
         </div>
       </header>
 
@@ -727,7 +729,18 @@ export function TypeTable({ typeId }: { typeId: string }) {
           </thead>
           <tbody>
             {visible.map((o, rowIndex) => (
-              <tr key={o.id} className={selected.has(o.id) ? 'picked' : ''}>
+              <tr
+                key={o.id}
+                className={selected.has(o.id) ? 'picked' : ''}
+                onClick={(e) => {
+                  // A row's own controls — the title field, cell editors, delete,
+                  // the Open pill — keep their behaviour. The space between them
+                  // opens the object, the same way a checklist row does.
+                  if ((e.target as HTMLElement).closest('button, input, select, textarea, a, [contenteditable]')) return;
+                  if (selectMode) return toggleRow(rowIndex, e.shiftKey);
+                  openFrom(e, o.id);
+                }}
+              >
                 <td className={'td-pick' + (selectMode ? '' : ' off')}>
                   <input
                     type="checkbox"

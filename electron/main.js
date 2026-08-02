@@ -646,6 +646,53 @@ function boot() {
     };
   });
 
+  /**
+   * Export the vault. Markdown writes a folder you can read anywhere and import
+   * back; JSON writes one exact file, for keeping rather than reading.
+   *
+   * Both go into a new, date-stamped folder or file so an export never lands on
+   * top of an earlier one.
+   */
+  ipcMain.handle('export:vault', async (_e, { format } = {}) => {
+    const json = format === 'json';
+    const parent = await pickFolderDialog(
+      'Choose where to export',
+      json
+        ? 'One .json file holding everything in this habitat, exactly as stored.'
+        : 'A folder of Markdown files — one per object, grouped by type, attachments included.'
+    );
+    if (!parent) return null;
+
+    const vaultName = safeName(path.basename(currentDbPath, '.db'));
+    const stamp = new Date().toISOString().slice(0, 10);
+    const data = api['export:data']();
+    data.version = app.getVersion();
+    data.habitat = vaultName;
+
+    try {
+      if (json) {
+        let target = path.join(parent, `${vaultName} ${stamp}.json`);
+        for (let n = 2; fs.existsSync(target); n++) target = path.join(parent, `${vaultName} ${stamp} ${n}.json`);
+        fs.writeFileSync(target, JSON.stringify(data, null, 2), 'utf8');
+        shell.showItemInFolder(target);
+        return { format: 'json', path: target, objects: data.objects.length, types: data.types.length, files: 0 };
+      }
+
+      const { writeMarkdown } = require('./export');
+      let root = path.join(parent, `${vaultName} ${stamp}`);
+      for (let n = 2; fs.existsSync(root); n++) root = path.join(parent, `${vaultName} ${stamp} ${n}`);
+      fs.mkdirSync(root, { recursive: true });
+      const res = writeMarkdown(root, data, filesStore.dir());
+      // The exact copy rides along with the readable one — it costs nothing and
+      // it's the only form that can be restored without loss.
+      fs.writeFileSync(path.join(root, 'habitat.json'), JSON.stringify(data, null, 2), 'utf8');
+      shell.showItemInFolder(root);
+      return { format: 'markdown', path: root, objects: res.written, types: res.types, files: res.files };
+    } catch (e) {
+      return { error: e.message };
+    }
+  });
+
   ipcMain.handle('settings:reveal', () => {
     shell.showItemInFolder(currentDbPath);
     return true;

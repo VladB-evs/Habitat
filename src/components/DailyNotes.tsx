@@ -7,6 +7,7 @@ import { dealtIn, snap, spring, stagger } from '../motion';
 import { DayTasks } from './DayTasks';
 import { Editor } from './Editor';
 import { Icon } from './Icons';
+import { SplitControls } from './SplitControls';
 
 function docText(n: any): string {
   let s = typeof n?.text === 'string' ? n.text : '';
@@ -114,6 +115,7 @@ export function DailyNotes() {
               </button>
             </>
           )}
+          <SplitControls />
         </div>
       </div>
 

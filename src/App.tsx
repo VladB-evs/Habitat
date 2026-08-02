@@ -206,10 +206,7 @@ function Shell() {
               // pane must animate the left pane away, not hand its identity to
               // the right one.
               key={p.id}
-              // `single` tells the page inside to leave room for the split
-              // buttons, which float in its own top-right corner when there's
-              // no pane bar to hold them.
-              className={'pane' + (isSplit ? (i === active ? ' focused' : ' dimmed') : ' single')}
+              className={'pane' + (isSplit ? (i === active ? ' focused' : ' dimmed') : '')}
               style={isSplit && i === 0 ? { flexBasis: mainBasis, flexGrow: 0, flexShrink: 0 } : undefined}
               initial={i === 0 ? false : { opacity: 0, x: dir === 'row' ? 44 : 0, y: dir === 'col' ? 44 : 0 }}
               // The one being closed fades as it collapses; the other holds
@@ -218,48 +215,46 @@ function Shell() {
               transition={softSpring}
               onMouseDownCapture={() => setActive(i)}
             >
-              <div className={'pane-bar' + (isSplit ? '' : ' floating')}>
-                {isSplit && (
-                  <>
-                    <motion.span className="pane-dot" animate={{ scale: i === active ? 1 : 0.8 }} transition={spring} />
-                    <span className="pane-name">{i === 0 ? 'Main' : 'Side view'}</span>
-                    <AnimatePresence>
-                      {i === active && (
-                        <motion.span
-                          className="pane-active-tag"
-                          initial={{ opacity: 0, scale: 0.8 }}
-                          animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, scale: 0.8 }}
-                          transition={spring}
-                        >
-                          active
-                        </motion.span>
-                      )}
-                    </AnimatePresence>
-                    <span className="spacer" />
-                  </>
-                )}
-                <motion.button
-                  className={'icon-btn' + (isSplit && dir === 'row' ? ' active' : '')}
-                  onClick={() => split('row')}
-                  aria-label={isSplit ? 'Split side by side' : 'Split right'}
-                  title={isSplit ? 'Side by side' : 'Split right'}
-                  whileHover={{ scale: 1.12 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  <Icon name="columns" size={isSplit ? 13 : 15} />
-                </motion.button>
-                <motion.button
-                  className={'icon-btn' + (isSplit && dir === 'col' ? ' active' : '')}
-                  onClick={() => split('col')}
-                  aria-label={isSplit ? 'Split stacked' : 'Split down'}
-                  title={isSplit ? 'Stacked' : 'Split down'}
-                  whileHover={{ scale: 1.12 }}
-                  whileTap={{ scale: 0.9 }}
-                >
-                  <Icon name="rows" size={isSplit ? 13 : 15} />
-                </motion.button>
-                {isSplit && (
+              {/* Only in a split. On a single pane the split buttons live in
+                  the page's own header, via <SplitControls />. */}
+              {isSplit && (
+                <div className="pane-bar">
+                  <motion.span className="pane-dot" animate={{ scale: i === active ? 1 : 0.8 }} transition={spring} />
+                  <span className="pane-name">{i === 0 ? 'Main' : 'Side view'}</span>
+                  <AnimatePresence>
+                    {i === active && (
+                      <motion.span
+                        className="pane-active-tag"
+                        initial={{ opacity: 0, scale: 0.8 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.8 }}
+                        transition={spring}
+                      >
+                        active
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                  <span className="spacer" />
+                  <motion.button
+                    className={'icon-btn' + (dir === 'row' ? ' active' : '')}
+                    onClick={() => split('row')}
+                    aria-label="Split side by side"
+                    title="Side by side"
+                    whileHover={{ scale: 1.12 }}
+                    whileTap={{ scale: 0.9 }}
+                  >
+                    <Icon name="columns" size={13} />
+                  </motion.button>
+                  <motion.button
+                    className={'icon-btn' + (dir === 'col' ? ' active' : '')}
+                    onClick={() => split('col')}
+                    aria-label="Split stacked"
+                    title="Stacked"
+                    whileHover={{ scale: 1.12 }}
+                    whileTap={{ scale: 0.9 }}
+                  >
+                    <Icon name="rows" size={13} />
+                  </motion.button>
                   <motion.button
                     className="icon-btn"
                     onClick={(e) => {
@@ -273,8 +268,8 @@ function Shell() {
                   >
                     <Icon name="x" size={13} />
                   </motion.button>
-                )}
-              </div>
+                </div>
+              )}
               <div className="pane-scroll">
                 <PaneView view={p.stack[p.stack.length - 1]} />
               </div>

@@ -85,136 +85,152 @@ export function ApiSettings() {
   };
 
   return (
-    <div className="settings-row col">
-      <div>
-        <div className="s-label">Local API</div>
-        <div className="s-hint">
-          Reads and writes your vault over HTTP, bound to <code>127.0.0.1</code> only — nothing on your network can
-          reach it, and every request needs the token below. Runs while Habitat is open.
-        </div>
-      </div>
-
-      <div className="tg-row">
-        <span className="s-sub">Server</span>
-        <button
-          className={'toggle' + (cfg.enabled ? ' on' : '')}
-          onClick={() => apply({ enabled: !cfg.enabled })}
-          aria-label={cfg.enabled ? 'Stop the server' : 'Start the server'}
-        >
-          <span className="knob" />
-        </button>
-        <span className="tg-state">
-          {status?.running ? (
-            <>
-              <Icon name="check" size={13} /> listening on {base}
-            </>
-          ) : (
-            'stopped'
-          )}
-        </span>
-      </div>
-
-      <div className="tg-row">
-        <span className="s-sub">Port</span>
-        <input
-          className="field"
-          style={{ maxWidth: 120 }}
-          value={cfg.port}
-          onChange={(e) => setCfg({ ...cfg, port: Number(e.target.value) || 0 })}
-          onBlur={() => apply({ port: cfg.port })}
-        />
-      </div>
-
-      <div className="tg-row">
-        <span className="s-sub">Token</span>
-        <input className="field mono" readOnly value={reveal ? cfg.token : '•'.repeat(24)} />
-        <button className="btn subtle" onClick={() => setReveal((v) => !v)}>
-          {reveal ? 'Hide' : 'Show'}
-        </button>
-        <button className="btn subtle" onClick={() => copy(cfg.token, 'Token')}>
-          Copy
-        </button>
-        <button className="btn subtle" onClick={regenerate}>
-          New
-        </button>
-      </div>
-
-      <div className="api-try">
-        <code>{`curl -H "Authorization: Bearer ${reveal ? cfg.token : 'YOUR_TOKEN'}" "${base}/objects?type=task"`}</code>
-        <button
-          className="icon-btn"
-          aria-label="Copy example"
-          onClick={() => copy(`curl -H "Authorization: Bearer ${cfg.token}" "${base}/objects?type=task"`, 'Example')}
-        >
-          <Icon name="doc" size={13} />
-        </button>
-      </div>
-
-      {notice && <div className="s-notice">{notice}</div>}
-
-      <div>
-        <div className="s-label">AI agents (MCP)</div>
-        <div className="s-hint">
-          Point Claude Desktop, Claude Code, Cursor or any MCP client at the vault. It gets tools for searching,
-          reading, capturing and creating, plus the address book — who someone is, whose birthday is next, and who
-          you are.
-        </div>
-      </div>
-
-      <div className="tg-row">
-        <span className="s-sub">Over HTTP</span>
-        <input className="field mono" readOnly value={`${base}/mcp`} />
-        <button className="btn subtle" onClick={() => copy(`${base}/mcp`, 'MCP URL')}>
-          Copy
-        </button>
-      </div>
-      <div className="s-hint">
-        For clients that take a URL and a token instead of a command — Osaurus, LM Studio and the like. Served by
-        Habitat itself while the server above is on, with the same token as the API.
-      </div>
-
-      <div className="tg-row">
-        <span className="s-sub">Let it edit</span>
-        <button
-          className={'toggle' + (cfg.mcpEdit ? ' on' : '')}
-          onClick={() => apply({ mcpEdit: !cfg.mcpEdit })}
-          aria-label={cfg.mcpEdit ? 'Keep MCP read-and-add only' : 'Allow MCP to edit and delete'}
-        >
-          <span className="knob" />
-        </button>
-        <span className="tg-state">
-          {cfg.mcpEdit ? 'can change, delete and run automations' : 'read and add only'}
-        </span>
-      </div>
-
-      <div className="s-hint">
-        For a client that spawns a command instead, use this — its own <code>HABITAT_EDIT</code> decides what it may
-        change, so the toggle above doesn't apply to it.
-      </div>
-
-      <div className="api-try">
-        <code>{mcpSnippet(reveal ? cfg.token : 'YOUR_TOKEN', cfg.port, appDir)}</code>
-        <button className="icon-btn" aria-label="Copy MCP config" onClick={() => copy(mcpSnippet(cfg.token, cfg.port, appDir), 'MCP config')}>
-          <Icon name="doc" size={13} />
-        </button>
-      </div>
-
-      <details className="var-ref-fold">
-        <summary>Endpoints</summary>
-        <div className="var-ref">
-          {ROUTES.map(([route, what]) => (
-            <div className="var-ref-row" key={route}>
-              <code className="var-ref-name">{route}</code>
-              <span className="var-ref-val">{what}</span>
+    <>
+      <section className="set-sec">
+        <div className="set-title">Local API</div>
+        <div className="set-group">
+          <div className="set-item">
+            <div>
+              <div className="set-name">Server</div>
+              <div className="set-note">
+                Bound to <code>127.0.0.1</code> only, while Habitat is open.
+              </div>
             </div>
-          ))}
-        </div>
-      </details>
+            <div className="set-ctl">
+              <span className="set-val">
+                {status?.running ? (
+                  <>
+                    <Icon name="check" size={13} /> {base}
+                  </>
+                ) : (
+                  'stopped'
+                )}
+              </span>
+              <button
+                className={'toggle' + (cfg.enabled ? ' on' : '')}
+                onClick={() => apply({ enabled: !cfg.enabled })}
+                aria-label={cfg.enabled ? 'Stop the server' : 'Start the server'}
+              >
+                <span className="knob" />
+              </button>
+            </div>
+          </div>
 
-      <div className="s-hint">
-        The token is stored in the vault file. Treat it like a password — anyone who has it can read and change
-        everything in this habitat.
-      </div>
-    </div>
+          <div className="set-item">
+            <div className="set-name">Port</div>
+            <input
+              className="field"
+              style={{ width: 90 }}
+              value={cfg.port}
+              onChange={(e) => setCfg({ ...cfg, port: Number(e.target.value) || 0 })}
+              onBlur={() => apply({ port: cfg.port })}
+            />
+          </div>
+
+          <div className="set-item">
+            <div>
+              <div className="set-name">Token</div>
+              <div className="set-note">Treat it like a password.</div>
+            </div>
+            <div className="set-ctl">
+              <input className="field mono" style={{ width: 170 }} readOnly value={reveal ? cfg.token : '•'.repeat(24)} />
+              <button className="btn subtle" onClick={() => setReveal((v) => !v)}>
+                {reveal ? 'Hide' : 'Show'}
+              </button>
+              <button className="btn subtle" onClick={() => copy(cfg.token, 'Token')}>
+                Copy
+              </button>
+              <button className="btn subtle" onClick={regenerate}>
+                New
+              </button>
+            </div>
+          </div>
+
+          <div className="set-item stack">
+            <div className="api-try">
+              <code>{`curl -H "Authorization: Bearer ${reveal ? cfg.token : 'YOUR_TOKEN'}" "${base}/objects?type=task"`}</code>
+              <button
+                className="icon-btn"
+                aria-label="Copy example"
+                onClick={() => copy(`curl -H "Authorization: Bearer ${cfg.token}" "${base}/objects?type=task"`, 'Example')}
+              >
+                <Icon name="copy" size={13} />
+              </button>
+            </div>
+          </div>
+
+          <details className="set-fold">
+            <summary>Endpoints</summary>
+            <div className="set-fold-body">
+              <div className="var-ref">
+                {ROUTES.map(([route, what]) => (
+                  <div className="var-ref-row" key={route}>
+                    <code className="var-ref-name">{route}</code>
+                    <span className="var-ref-val">{what}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <section className="set-sec">
+        <div className="set-title">AI agents (MCP)</div>
+        <div className="set-group">
+          <div className="set-item">
+            <div>
+              <div className="set-name">Over HTTP</div>
+              <div className="set-note">For clients that take a URL and a token.</div>
+            </div>
+            <div className="set-ctl">
+              <input className="field mono" style={{ width: 190 }} readOnly value={`${base}/mcp`} />
+              <button className="btn subtle" onClick={() => copy(`${base}/mcp`, 'MCP URL')}>
+                Copy
+              </button>
+            </div>
+          </div>
+
+          <div className="set-item">
+            <div>
+              <div className="set-name">Let it edit</div>
+              <div className="set-note">{cfg.mcpEdit ? 'Can change, delete and run automations.' : 'Read and add only.'}</div>
+            </div>
+            <button
+              className={'toggle' + (cfg.mcpEdit ? ' on' : '')}
+              onClick={() => apply({ mcpEdit: !cfg.mcpEdit })}
+              aria-label={cfg.mcpEdit ? 'Keep MCP read-and-add only' : 'Allow MCP to edit and delete'}
+            >
+              <span className="knob" />
+            </button>
+          </div>
+
+          <details className="set-fold">
+            <summary>Config for command-based clients</summary>
+            <div className="set-fold-body">
+              <div className="api-try">
+                <code>{mcpSnippet(reveal ? cfg.token : 'YOUR_TOKEN', cfg.port, appDir)}</code>
+                <button
+                  className="icon-btn"
+                  aria-label="Copy MCP config"
+                  onClick={() => copy(mcpSnippet(cfg.token, cfg.port, appDir), 'MCP config')}
+                >
+                  <Icon name="copy" size={13} />
+                </button>
+              </div>
+              <div className="set-note">
+                Its own <code>HABITAT_EDIT</code> decides what it may change, so the toggle above doesn't apply.
+              </div>
+            </div>
+          </details>
+        </div>
+      </section>
+
+      {notice && (
+        <div className="s-notice" style={{ marginTop: 10 }}>
+          {notice}
+        </div>
+      )}
+    </>
   );
 }

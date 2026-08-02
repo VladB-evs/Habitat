@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { GuideLink } from '../docs';
 import { useApp } from '../store';
 import type { UserVar } from '../types';
 import { clientUid } from '../util';
@@ -13,12 +14,28 @@ const TABS = [
   { id: 'general', label: 'General', icon: 'settings' },
   { id: 'automations', label: 'Automations', icon: 'zap' },
   { id: 'capture', label: 'Capture', icon: 'message-circle' },
-  { id: 'api', label: 'API', icon: 'code' },
-  { id: 'import', label: 'Import', icon: 'folder' },
+  { id: 'api', label: 'API', icon: 'globe' },
   { id: 'scripts', label: 'Scripts', icon: 'code' },
+  { id: 'import', label: 'Import & Export', icon: 'doc' },
 ] as const;
 
 type Tab = (typeof TABS)[number]['id'];
+
+/** What the `habitat` object hands to scripts. Kept folded — it's reference, not chrome. */
+const SCRIPT_API: [string, string][] = [
+  ['habitat.count(type?)', 'how many objects'],
+  ['habitat.objects(type?)', 'all objects of a type'],
+  ['habitat.search(text)', 'objects matching text'],
+  ['habitat.tasks(date?)', 'tasks due on a date'],
+  ['habitat.daily(date?)', 'a daily note'],
+  ['habitat.recent()', 'the objects you edited last'],
+  ['habitat.pinned()', 'everything you have pinned'],
+  ['habitat.counts()', 'object count per type'],
+  ['habitat.tags()', 'your tags, with usage counts'],
+  ['habitat.types()', 'your object types'],
+  ['habitat.me()', 'your name'],
+  ['habitat.today()', "today's date"],
+];
 
 export function SettingsModal({ onClose }: { onClose: () => void }) {
   const { theme, setTheme } = useApp();
@@ -27,6 +44,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [vars, setVars] = useState<UserVar[]>([]);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [exportResult, setExportResult] = useState('');
   const [tab, setTab] = useState<Tab>('general');
   const [code, setCode] = useState('');
 
@@ -74,6 +93,22 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const runExport = async (format: 'markdown' | 'json') => {
+    setExportResult('');
+    setExporting(true);
+    try {
+      const r = await api.exportVault(format);
+      if (!r) return;
+      if ('error' in r) return setExportResult(`Could not export: ${r.error}`);
+      const bits = [`${r.objects} ${r.objects === 1 ? 'object' : 'objects'}`];
+      if (r.types) bits.push(`${r.types} ${r.types === 1 ? 'type' : 'types'}`);
+      if (r.files) bits.push(`${r.files} ${r.files === 1 ? 'attachment' : 'attachments'}`);
+      setExportResult(`Exported ${bits.join(' · ')} to ${r.path}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const choose = async () => {
     const res = await api.settings.chooseVault();
     if (!res) return;
@@ -82,179 +117,219 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       return;
     }
     setDbPath(res.dbPath);
-    setNotice(
-      res.existed
-        ? 'Opened the existing vault in that folder. Reloading…'
-        : 'Vault copied to the new folder (the old file stays as a backup). Reloading…'
-    );
+    setNotice(res.existed ? 'Opened the vault in that folder. Reloading…' : 'Vault copied there. Reloading…');
     setTimeout(() => window.location.reload(), 900);
   };
 
-  return (
-    <div className="palette-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="settings">
-        <div className="settings-head">
-          <h2>Settings</h2>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">
-            <Icon name="x" size={15} />
-          </button>
-        </div>
+  const current = TABS.find((t) => t.id === tab)!;
 
-        <div className="settings-nav">
+  return (
+    <div
+      className="palette-backdrop prefs-backdrop"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div className="prefs">
+        <nav className="prefs-rail">
+          <h2>Settings</h2>
           {TABS.map((t) => (
-            <button key={t.id} className={'settings-tab' + (tab === t.id ? ' on' : '')} onClick={() => setTab(t.id)}>
+            <button key={t.id} className={'prefs-tab' + (tab === t.id ? ' on' : '')} onClick={() => setTab(t.id)}>
               <Icon name={t.icon} size={14} /> {t.label}
             </button>
           ))}
-        </div>
+        </nav>
 
-        <div className="settings-body">
-        {tab === 'general' && (
-          <>
-            <UpdateSettings />
-        <div className="settings-row">
-          <div>
-            <div className="s-label">Appearance</div>
-            <div className="s-hint">How Habitat looks.</div>
-          </div>
-          <div className="seg">
-            <button className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')}>
-              <Icon name="sun" size={13} /> Light
-            </button>
-            <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>
-              <Icon name="moon" size={13} /> Dark
-            </button>
-          </div>
-        </div>
-
-        <Attachments />
-
-        <div className="settings-row col">
-          <div>
-            <div className="s-label">Vault location</div>
-            <div className="s-hint">
-              Your entire Habitat lives in one SQLite file. Pick a folder that already contains a vault to open it;
-              otherwise your current vault is copied there.
-            </div>
-          </div>
-          <code className="vault-path">{dbPath}</code>
-          <div className="s-hint">
-            Habitat code <code>{code}</code> — a stable id for this file, safe to share.
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn" onClick={choose}>
-              Change location…
-            </button>
-            <button className="btn subtle" onClick={() => api.settings.reveal()}>
-              Show in Finder
-            </button>
-          </div>
-          {notice && <div className="s-notice">{notice}</div>}
-        </div>
-
-          </>
-        )}
-
-        {tab === 'automations' && <Automations />}
-
-        {tab === 'capture' && <TelegramSettings />}
-
-        {tab === 'api' && <ApiSettings />}
-
-        {tab === 'import' && (
-        <div className="settings-row col">
-          <div>
-            <div className="s-label">Import</div>
-            <div className="s-hint">
-              <b>Whole vault</b> walks every subfolder: date-named files become daily notes, the rest become notes.{' '}
-              <b>Daily notes folder</b> treats every file in it as a daily note, reading the date from the filename —
-              use this if your daily notes aren't named starting with the date.{' '}
-              <code>#tags</code> become tags and <code>[[wikilinks]]</code> become real links. Nothing already here is
-              overwritten.
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <button className="btn" disabled={importing} onClick={() => runImport('vault')}>
-              {importing ? 'Importing…' : 'Whole vault…'}
-            </button>
-            <button className="btn" disabled={importing} onClick={() => runImport('daily')}>
-              Daily notes folder…
-            </button>
-          </div>
-          {importResult && <div className="s-notice">{importResult}</div>}
-        </div>
-
-        )}
-
-        {tab === 'scripts' && (
-        <div className="settings-row col">
-          <div>
-            <div className="s-label">Your variables</div>
-            <div className="s-hint">
-              Write a JavaScript expression (or a full body using <code>return</code>) and it appears in the same{' '}
-              <code>/</code> menu under “Your variables”. Scripts get a <code>habitat</code> object for reading your
-              data — every call is async except <code>today()</code>, so <code>await</code> them:
-            </div>
-            <details className="var-ref-fold">
-              <summary>Script reference</summary>
-            <div className="var-ref">
-              {[
-                ['habitat.count(type?)', 'how many objects — e.g. count("task")'],
-                ['habitat.objects(type?)', 'all objects of a type'],
-                ['habitat.search(text)', 'objects matching text'],
-                ['habitat.tasks(date?)', 'tasks due on a date, default today'],
-                ['habitat.daily(date?)', "a daily note, default today's"],
-                ['habitat.recent()', 'the objects you edited last'],
-                ['habitat.pinned()', 'everything you have pinned'],
-                ['habitat.counts()', 'object count per type'],
-                ['habitat.tags()', 'your tags, with usage counts'],
-                ['habitat.types()', 'your object types'],
-                ['habitat.me()', 'your name'],
-                ['habitat.today()', "today's date, e.g. 2026-07-25"],
-              ].map(([call, what]) => (
-                <div className="var-ref-row" key={call}>
-                  <code className="var-ref-name">{call}</code>
-                  <span className="var-ref-val">{what}</span>
-                </div>
-              ))}
-            </div>
-            </details>
-            <div className="s-hint">
-              Examples: <code>{"await habitat.count('task') + ' tasks'"}</code> ·{' '}
-              <code>{'`Hi ${await habitat.me()}`'}</code> ·{' '}
-              <code>{"(await habitat.tasks()).map(t => t.title).join(', ')"}</code>
-            </div>
-            <div className="s-hint">
-              The same <code>habitat</code> object is available to Custom script widgets on the dashboard, where you can
-              render whatever you like instead of returning text.
-            </div>
-          </div>
-          {vars.map((v, i) => (
-            <div className="var-row" key={v.id}>
-              <input
-                className="field var-name"
-                placeholder="Name"
-                value={v.name}
-                onChange={(e) => saveVars(vars.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-              />
-              <input
-                className="field var-code"
-                placeholder="new Date().getFullYear()"
-                value={v.code}
-                onChange={(e) => saveVars(vars.map((x, j) => (j === i ? { ...x, code: e.target.value } : x)))}
-              />
-              <button className="icon-btn" onClick={() => saveVars(vars.filter((_, j) => j !== i))} aria-label="Delete variable">
-                <Icon name="trash" size={14} />
+        <div className="prefs-pane">
+          <div className="prefs-head">
+            <h3>{current.label}</h3>
+            <div className="set-ctl">
+              <GuideLink slug={current.id} />
+              <button className="icon-btn" onClick={onClose} aria-label="Close">
+                <Icon name="x" size={15} />
               </button>
             </div>
-          ))}
-          <button className="add-prop" onClick={() => saveVars([...vars, { id: clientUid(), name: '', code: '' }])}>
-            <Icon name="plus" size={13} /> Add variable
-          </button>
-        </div>
+          </div>
 
-        )}
+          <div className="prefs-body">
+            {tab === 'general' && (
+              <>
+                <section className="set-sec">
+                  <div className="set-group">
+                    <div className="set-item">
+                      <div className="set-name">Appearance</div>
+                      <div className="seg">
+                        <button className={theme === 'light' ? 'on' : ''} onClick={() => setTheme('light')}>
+                          <Icon name="sun" size={13} /> Light
+                        </button>
+                        <button className={theme === 'dark' ? 'on' : ''} onClick={() => setTheme('dark')}>
+                          <Icon name="moon" size={13} /> Dark
+                        </button>
+                      </div>
+                    </div>
+                    <UpdateSettings />
+                  </div>
+                </section>
 
+                <section className="set-sec">
+                  <div className="set-title">Vault</div>
+                  <div className="set-group">
+                    <div className="set-item stack">
+                      <div>
+                        <div className="set-name">Location</div>
+                        <div className="set-note">
+                          Habitat code <code>{code}</code> — safe to share.
+                        </div>
+                      </div>
+                      <code className="vault-path">{dbPath}</code>
+                      <div className="set-ctl">
+                        <button className="btn" onClick={choose}>
+                          Change location…
+                        </button>
+                        <button className="btn subtle" onClick={() => api.settings.reveal()}>
+                          Show in Finder
+                        </button>
+                      </div>
+                      {notice && <div className="s-notice">{notice}</div>}
+                    </div>
+                    <Attachments />
+                  </div>
+                </section>
+              </>
+            )}
+
+            {tab === 'automations' && <Automations />}
+            {tab === 'capture' && <TelegramSettings />}
+            {tab === 'api' && <ApiSettings />}
+
+            {tab === 'scripts' && (
+              <section className="set-sec">
+                <div className="set-title">Your variables</div>
+                <div className="set-group">
+                  <div className="set-item stack">
+                    <div className="set-note">
+                      JavaScript that runs when you pick it from the <code>/</code> menu.
+                    </div>
+                    {vars.map((v, i) => (
+                      <div className="var-row" key={v.id}>
+                        <input
+                          className="field var-name"
+                          placeholder="Name"
+                          value={v.name}
+                          onChange={(e) => saveVars(vars.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
+                        />
+                        <input
+                          className="field var-code"
+                          placeholder="new Date().getFullYear()"
+                          value={v.code}
+                          onChange={(e) => saveVars(vars.map((x, j) => (j === i ? { ...x, code: e.target.value } : x)))}
+                        />
+                        <button
+                          className="icon-btn"
+                          onClick={() => saveVars(vars.filter((_, j) => j !== i))}
+                          aria-label="Delete variable"
+                        >
+                          <Icon name="trash" size={14} />
+                        </button>
+                      </div>
+                    ))}
+                    <button className="add-prop" onClick={() => saveVars([...vars, { id: clientUid(), name: '', code: '' }])}>
+                      <Icon name="plus" size={13} /> Add variable
+                    </button>
+                  </div>
+
+                  <details className="set-fold">
+                    <summary>Script reference</summary>
+                    <div className="set-fold-body">
+                      <div className="set-note">
+                        Every call is async except <code>today()</code> — <code>await</code> them. The same object is
+                        available to Custom widgets on the dashboard.
+                      </div>
+                      <div className="var-ref">
+                        {SCRIPT_API.map(([call, what]) => (
+                          <div className="var-ref-row" key={call}>
+                            <code className="var-ref-name">{call}</code>
+                            <span className="var-ref-val">{what}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="set-note">
+                        <code>{"await habitat.count('task') + ' tasks'"}</code> ·{' '}
+                        <code>{'`Hi ${await habitat.me()}`'}</code>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+              </section>
+            )}
+
+            {tab === 'import' && (
+              <section className="set-sec">
+                <div className="set-title">From Obsidian</div>
+                <div className="set-group">
+                  <div className="set-item">
+                    <div>
+                      <div className="set-name">Whole vault</div>
+                      <div className="set-note">Date-named files become daily notes, the rest become notes.</div>
+                    </div>
+                    <button className="btn" disabled={importing} onClick={() => runImport('vault')}>
+                      {importing ? 'Importing…' : 'Choose folder…'}
+                    </button>
+                  </div>
+                  <div className="set-item">
+                    <div>
+                      <div className="set-name">Daily notes folder</div>
+                      <div className="set-note">Every file becomes a daily note, dated from its filename.</div>
+                    </div>
+                    <button className="btn" disabled={importing} onClick={() => runImport('daily')}>
+                      Choose folder…
+                    </button>
+                  </div>
+                  <div className="set-item">
+                    <div className="set-note">
+                      <code>#tags</code> and <code>[[wikilinks]]</code> are converted. Nothing already here is
+                      overwritten.
+                    </div>
+                  </div>
+                </div>
+                {importResult && (
+                  <div className="s-notice" style={{ marginTop: 10 }}>
+                    {importResult}
+                  </div>
+                )}
+
+                <div className="set-title" style={{ marginTop: 18 }}>
+                  Export
+                </div>
+                <div className="set-group">
+                  <div className="set-item">
+                    <div>
+                      <div className="set-name">Markdown &amp; files</div>
+                      <div className="set-note">A folder per type, attachments included. Imports back into Habitat.</div>
+                    </div>
+                    <button className="btn" disabled={exporting} onClick={() => runExport('markdown')}>
+                      {exporting ? 'Exporting…' : 'Choose folder…'}
+                    </button>
+                  </div>
+                  <div className="set-item">
+                    <div>
+                      <div className="set-name">JSON backup</div>
+                      <div className="set-note">One file, everything exactly as stored.</div>
+                    </div>
+                    <button className="btn" disabled={exporting} onClick={() => runExport('json')}>
+                      Choose folder…
+                    </button>
+                  </div>
+                  <div className="set-item">
+                    <div className="set-note">Your API and Telegram tokens are never included.</div>
+                  </div>
+                </div>
+                {exportResult && (
+                  <div className="s-notice" style={{ marginTop: 10 }}>
+                    {exportResult}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -282,7 +357,9 @@ function Attachments() {
     setBusy(true);
     try {
       const { removed, freed } = await api.files.gc();
-      setNote(removed ? `Removed ${removed} unused ${removed === 1 ? 'file' : 'files'}, freeing ${size(freed)}.` : 'Nothing to clean up.');
+      setNote(
+        removed ? `Removed ${removed} unused ${removed === 1 ? 'file' : 'files'}, freeing ${size(freed)}.` : 'Nothing to clean up.'
+      );
       await load();
     } finally {
       setBusy(false);
@@ -290,26 +367,20 @@ function Attachments() {
   };
 
   return (
-    <div className="settings-row col">
+    <div className="set-item">
       <div>
-        <div className="s-label">Attachments</div>
-        <div className="s-hint">
-          Images and files you paste, drop or attach live in a <code>files</code> folder next to the vault, named by
-          their contents — so the same picture used twice is stored once, and copying the vault folder takes everything
-          with it.
+        <div className="set-name">Attachments</div>
+        <div className="set-note">
+          {stats.count} {stats.count === 1 ? 'file' : 'files'} · {size(stats.bytes)}
+          {stats.unusedCount > 0 && ` · ${stats.unusedCount} unused (${size(stats.unusedBytes)})`}
+          {note && ` — ${note}`}
         </div>
       </div>
-      <code className="vault-path">{stats.dir}</code>
-      <div className="s-hint">
-        {stats.count} {stats.count === 1 ? 'file' : 'files'} · {size(stats.bytes)}
-        {stats.unusedCount > 0 && ` · ${stats.unusedCount} no longer referenced (${size(stats.unusedBytes)})`}
-      </div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <button className="btn" disabled={busy || stats.unusedCount === 0} onClick={sweep}>
-          {busy ? 'Cleaning…' : 'Clean up unused'}
+      <div className="set-ctl">
+        <button className="btn subtle" disabled={busy || stats.unusedCount === 0} onClick={sweep}>
+          {busy ? 'Cleaning…' : 'Clean up'}
         </button>
       </div>
-      {note && <div className="s-notice">{note}</div>}
     </div>
   );
 }

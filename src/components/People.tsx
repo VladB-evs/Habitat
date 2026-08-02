@@ -7,6 +7,7 @@ import { useApp } from '../store';
 import type { NextBirthday, Person } from '../types';
 import { avatarColor, birthdayCountdown, fmtBirthday, initials, relationships } from '../util';
 import { Icon } from './Icons';
+import { SplitControls } from './SplitControls';
 
 /** Initials on a colour that stays the same for a given name, everywhere in the app. */
 export function Avatar({ name, size = 40, theme }: { name: string; size?: number; theme: string }) {
@@ -283,6 +284,7 @@ export function People() {
           <button className="btn primary" onClick={() => setAdding(true)}>
             <Icon name="plus" size={14} /> Add person
           </button>
+          <SplitControls />
         </div>
       </header>
 

@@ -269,10 +269,8 @@ export function Automations() {
 
   return (
     <div className="autos">
-      <div className="s-hint">
-        Rules run inside Habitat as your data changes — nothing leaves the vault. A rule on a schedule can be pointed at a
-        type and given conditions, which is how you get “every morning, tell me which tasks have gone quiet”. The{' '}
-        <code>{'{ }'}</code> button on any text field lists what you can drop into it.
+      <div className="set-note">
+        Rules run inside Habitat as your data changes — nothing leaves the vault.
       </div>
 
       {rules.map((r) => {
