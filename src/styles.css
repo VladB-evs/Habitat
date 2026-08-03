@@ -6735,3 +6735,237 @@ figcaption {
   color: var(--text);
   background: var(--bg-3);
 }
+
+/* ============================================================
+   Calendar — the per-hour day/week grid
+   ============================================================ */
+
+/*
+ * Absolute against .pane-scroll rather than a flex child, because the pane's
+ * page wrapper is only `min-height: 100%` — with 24 hours of rows inside, an
+ * in-flow page simply grows and the *pane* scrolls, leaving the day headers to
+ * slide away and the grid always parked at midnight. Taken out of flow it gets
+ * a definite box, so the header and all-day strip hold still and .cal-scroll is
+ * the thing that moves.
+ */
+.cal-page {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 44px 28px 0;
+}
+
+.cal-page .daily-head {
+  flex-shrink: 0;
+}
+
+.cal-head,
+.cal-allday {
+  display: grid;
+  grid-template-columns: 56px repeat(var(--cal-days), minmax(0, 1fr));
+  flex-shrink: 0;
+}
+
+.cal-head {
+  border-bottom: 1px solid var(--border);
+}
+
+.cal-gutter-head {
+  padding: 6px 8px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  text-align: right;
+  align-self: end;
+}
+
+.cal-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 6px 8px;
+}
+
+.cal-dow-name {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.cal-day-num {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.cal-day-head.today .cal-day-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 25px;
+  height: 25px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+}
+
+.cal-allday {
+  border-bottom: 1px solid var(--border);
+  max-height: 84px;
+  overflow-y: auto;
+}
+
+.cal-allday-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+
+.cal-chip {
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  text-align: left;
+  color: var(--text);
+  background: color-mix(in srgb, var(--c) 18%, transparent);
+  border-left: 2px solid var(--c);
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-chip:hover {
+  background: color-mix(in srgb, var(--c) 30%, transparent);
+}
+
+.cal-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cal-body {
+  display: grid;
+  grid-template-columns: 56px repeat(var(--cal-days), minmax(0, 1fr));
+}
+
+.cal-gutter {
+  display: flex;
+  flex-direction: column;
+}
+
+/* The label sits on the line, not inside the slot, so it reads as "10:00 starts
+   here" the way a paper diary does. */
+.cal-hour-label {
+  height: var(--hour-h);
+  position: relative;
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.cal-hour-label span {
+  position: absolute;
+  top: -6px;
+  right: 8px;
+}
+
+.cal-col {
+  position: relative;
+  height: calc(24 * var(--hour-h));
+  border-left: 1px solid var(--border);
+  min-width: 0;
+}
+
+.cal-col.today {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.cal-hour {
+  height: var(--hour-h);
+  border-top: 1px solid var(--border);
+}
+
+.cal-now {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #e34948;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.cal-now::before {
+  content: '';
+  position: absolute;
+  left: -3px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #e34948;
+}
+
+.cal-event {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+  color: var(--text);
+  background: color-mix(in srgb, var(--c) 22%, var(--bg));
+  border-left: 3px solid var(--c);
+  transition: background 0.12s ease;
+}
+
+.cal-event:hover {
+  background: color-mix(in srgb, var(--c) 34%, var(--bg));
+}
+
+/* Half an hour has room for one line only — the time gives way to the title. */
+.cal-event.tight {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 5px;
+  padding: 1px 6px;
+}
+
+.cal-event.done {
+  opacity: 0.55;
+}
+
+.cal-event.done .cal-event-title {
+  text-decoration: line-through;
+}
+
+.cal-event-time {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-2);
+}
+
+.cal-event-title {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cal-empty {
+  flex-shrink: 0;
+  padding: 14px 0 20px;
+}

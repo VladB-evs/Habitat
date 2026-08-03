@@ -72,6 +72,46 @@ CREATE INDEX IF NOT EXISTS idx_links_to ON links(to_id);
 CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_id);
 `;
 
+/**
+ * The properties that put an object at an hour rather than on a day. Conventional
+ * ids, not a new schema: any type gains a place on the calendar's time grid by
+ * having a `datetime` property, and these two are simply the ones Habitat adds to
+ * Task and Meeting itself. `duration` is in minutes.
+ */
+const TIME_PROP = 'startsAt';
+const DURATION_PROP = 'duration';
+const DEFAULT_MINUTES = 60;
+
+/** The builtin types that happen at a time, wherever they get created. */
+const TIMED_TYPES = new Set(['task', 'meeting']);
+
+/**
+ * One definition of "this type carries a time", used both when a flavor seeds
+ * its types and when the migration back-fills a vault that predates them.
+ */
+function withTimeProps(typeId, defs) {
+  if (!TIMED_TYPES.has(typeId)) return defs;
+  const out = [...(defs || [])];
+  if (!out.some((p) => p.id === TIME_PROP)) out.push({ id: TIME_PROP, name: 'Starts', kind: 'datetime' });
+  if (!out.some((p) => p.id === DURATION_PROP)) out.push({ id: DURATION_PROP, name: 'Minutes', kind: 'number' });
+  return out;
+}
+
+/** A date's own day, not UTC's — 00:30 local must not land on the day before. */
+const localKey = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+/**
+ * Finished, for any type built the way a task is: a select property offering
+ * "Done". The same rule the renderer uses, so a calendar entry fades exactly
+ * when its checklist row does.
+ */
+function isDoneObject(obj, type) {
+  const defs = [...(type ? type.properties : []), ...(obj.extraProps || [])];
+  const def = defs.find((p) => p.kind === 'select' && (p.options || []).includes('Done'));
+  return !!def && obj.props[def.id] === 'Done';
+}
+
 // ---------- helpers ----------
 
 // The `emoji` column now stores an icon key (e.g. 'file-text'); exposed as `icon`.
@@ -1185,6 +1225,63 @@ const api = {
     };
   },
 
+  /**
+   * Everything happening between two day keys, across every type.
+   *
+   * Resolved here rather than in the renderer so the HTTP API and MCP see the
+   * same calendar the app does. Each entry is either timed — a `datetime`
+   * property, placed at an hour and given a length — or all-day, from a `date`
+   * property or a daily note's own date. A type needs no special support: give
+   * it a datetime property and its objects land on the time grid.
+   */
+  'calendar:range': ({ from, to }) => {
+    const first = String(from || '').slice(0, 10);
+    const last = String(to || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(first) || !/^\d{4}-\d{2}-\d{2}$/.test(last)) return [];
+
+    const types = new Map(db.prepare('SELECT * FROM types').all().map((r) => [r.id, parseType(r)]));
+    const out = [];
+
+    for (const row of db.prepare('SELECT * FROM objects').all()) {
+      // A tag is a label, never an appointment.
+      if (row.type_id === 'tag') continue;
+      const type = types.get(row.type_id);
+      const obj = parseObj(row);
+      const defs = [...(type ? type.properties : []), ...obj.extraProps];
+
+      const timeDef = defs.find((p) => p.kind === 'datetime' && obj.props[p.id]);
+      const dayDef = defs.find((p) => p.kind === 'date' && obj.props[p.id]);
+      const raw = timeDef ? String(obj.props[timeDef.id]) : null;
+      // `datetime-local` values have no zone: read them as local time, which is
+      // what the person who typed them meant.
+      const startsAt = raw && raw.length >= 16 ? new Date(raw.length === 16 ? raw + ':00' : raw) : null;
+      const timed = startsAt && !Number.isNaN(startsAt.getTime());
+
+      const dayKey = timed
+        ? localKey(startsAt)
+        : dayDef
+          ? String(obj.props[dayDef.id]).slice(0, 10)
+          : row.date_key || null;
+      if (!dayKey || dayKey < first || dayKey > last) continue;
+
+      const minutes = Number(obj.props[DURATION_PROP]);
+      out.push({
+        id: obj.id,
+        typeId: obj.typeId,
+        typeName: type ? type.name : obj.typeId,
+        title: obj.title || 'Untitled',
+        dayKey,
+        allDay: !timed,
+        startMinute: timed ? startsAt.getHours() * 60 + startsAt.getMinutes() : null,
+        minutes: timed ? (Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_MINUTES) : null,
+        done: isDoneObject(obj, type),
+      });
+    }
+
+    out.sort((a, b) => a.dayKey.localeCompare(b.dayKey) || (a.startMinute ?? -1) - (b.startMinute ?? -1));
+    return out;
+  },
+
   'objects:get': (id) => getObj(id, true),
   'objects:create': (p) => createObject(p),
   'objects:update': (p) => updateObject(p),
@@ -2001,6 +2098,20 @@ function migrate() {
       upd.run(JSON.stringify(props), r.id);
     }
   });
+
+  // Anything that happens at a time rather than on a day needs somewhere to put
+  // that time. Added once: a user who removes either property again shouldn't
+  // have it grow back on the next launch.
+  runOnce('timed-props-v1', () => {
+    for (const typeId of TIMED_TYPES) {
+      const type = getType(typeId);
+      if (!type) continue;
+      db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(
+        JSON.stringify(withTimeProps(typeId, type.properties)),
+        typeId
+      );
+    }
+  });
 }
 
 /** Run a one-time data migration, remembered in the kv table. */
@@ -2141,7 +2252,9 @@ function seedTypesForFlavor(flavor) {
   const ins = db.prepare(
     'INSERT OR IGNORE INTO types (id, name, emoji, color, properties, builtin, starred, created_at) VALUES (?, ?, ?, ?, ?, 1, 1, ?)'
   );
-  list.forEach((t, i) => ins.run(t.id, t.name, t.icon, t.color, JSON.stringify(t.properties || []), now() + i));
+  list.forEach((t, i) =>
+    ins.run(t.id, t.name, t.icon, t.color, JSON.stringify(withTimeProps(t.id, t.properties)), now() + i)
+  );
   return list.length;
 }
 

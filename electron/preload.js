@@ -5,7 +5,7 @@ const CHANNELS = new Set([
   'objects:list', 'objects:get', 'objects:create', 'objects:update', 'objects:setType', 'objects:delete', 'objects:search',
   'objects:createFromTemplate', 'objects:bulkDelete', 'objects:bulkSetProp',
   'templates:list', 'templates:get', 'templates:create', 'templates:update', 'templates:delete',
-  'tasks:forDay',
+  'tasks:forDay', 'calendar:range',
   'daily:get', 'daily:create', 'daily:list',
   'backlinks:list', 'graph:data', 'stats:get',
   'dashboard:get', 'dashboard:save', 'dashboard:reset',

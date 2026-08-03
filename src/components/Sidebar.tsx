@@ -187,6 +187,7 @@ export function Sidebar({
         <nav className="sidebar-nav">
           <NavItem icon="grid" label="Dashboard" active={view.kind === 'dashboard'} onClick={() => navigate({ kind: 'dashboard' })} />
           <NavItem icon="calendar" label="Daily Notes" active={view.kind === 'daily'} onClick={() => navigate({ kind: 'daily' })} />
+          <NavItem icon="clock" label="Calendar" active={view.kind === 'calendar'} onClick={() => navigate({ kind: 'calendar' })} />
           <NavItem icon="people" label="People" active={view.kind === 'people'} onClick={() => navigate({ kind: 'people' })} />
           <NavItem icon="hash" label="Tags" active={view.kind === 'tags'} onClick={() => navigate({ kind: 'tags' })} />
           <NavItem icon="graph" label="Graph" active={view.kind === 'graph'} onClick={() => navigate({ kind: 'graph' })} />

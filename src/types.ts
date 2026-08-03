@@ -16,6 +16,26 @@ export type PropKind =
   | 'file'
   | 'relation';
 
+/**
+ * One thing on the calendar. Times are resolved in the main process so the app,
+ * the HTTP API and MCP all agree on where something sits.
+ */
+export interface CalEntry {
+  id: string;
+  typeId: string;
+  typeName: string;
+  title: string;
+  /** The local day it belongs to, `YYYY-MM-DD`. */
+  dayKey: string;
+  /** True when it has a date but no time — shown in the strip above the grid. */
+  allDay: boolean;
+  /** Minutes past local midnight, or null when all-day. */
+  startMinute: number | null;
+  /** How long it runs, or null when all-day. */
+  minutes: number | null;
+  done: boolean;
+}
+
 /** A stored attachment, as embedded in a note or held by a file property. */
 export interface FileRef {
   hash: string;

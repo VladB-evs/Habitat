@@ -7,6 +7,7 @@ import { Onboarding } from './components/Habitats';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { DailyNotes } from './components/DailyNotes';
+import { CalendarView } from './components/CalendarView';
 import { TypeTable } from './components/TypeTable';
 import { ObjectPage } from './components/ObjectPage';
 import { TemplatePage } from './components/TemplatePage';
@@ -27,6 +28,7 @@ function PaneView({ view }: { view: View }) {
       <motion.div key={viewKey(view)} className="pane-page" variants={pageIn} initial="hidden" animate="shown" exit="gone">
         {view.kind === 'dashboard' && <Dashboard />}
         {view.kind === 'daily' && <DailyNotes />}
+        {view.kind === 'calendar' && <CalendarView />}
         {view.kind === 'graph' && (
           <Suspense fallback={null}>
             <GraphView />

@@ -1,4 +1,5 @@
 import type {
+  CalEntry,
   DailyMeta,
   DashLayout,
   GraphData,
@@ -73,6 +74,8 @@ export const api = {
   tasks: {
     forDay: (dateKey: string): Promise<Obj[]> => inv('tasks:forDay', { dateKey }),
   },
+  /** Everything happening between two day keys, across every type. */
+  calendar: (from: string, to: string): Promise<CalEntry[]> => inv('calendar:range', { from, to }),
   daily: {
     get: (dateKey: string): Promise<Obj | null> => inv('daily:get', { dateKey }),
     create: (dateKey: string, content: any): Promise<Obj> => inv('daily:create', { dateKey, content }),

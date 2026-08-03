@@ -7,6 +7,7 @@ import { clientUid } from './util';
 export type View =
   | { kind: 'dashboard' }
   | { kind: 'daily' }
+  | { kind: 'calendar' }
   | { kind: 'graph' }
   | { kind: 'tags' }
   | { kind: 'people' }
@@ -58,6 +59,7 @@ export const useApp = () => useContext(Ctx);
 function initialView(): View {
   const h = window.location.hash.replace(/^#/, '');
   if (h.startsWith('/daily')) return { kind: 'daily' };
+  if (h.startsWith('/calendar')) return { kind: 'calendar' };
   if (h.startsWith('/graph')) return { kind: 'graph' };
   if (h.startsWith('/tags')) return { kind: 'tags' };
   if (h.startsWith('/people')) return { kind: 'people' };
