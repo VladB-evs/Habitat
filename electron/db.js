@@ -8,6 +8,7 @@ const files = require('./files');
 const canvas = require('./canvas');
 const study = require('./study');
 const recur = require('./recur');
+const synclog = require('./synclog');
 
 let db;
 
@@ -2619,6 +2620,8 @@ function initDb(file) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   currentFile = file;
   files.useVault(file);
+  // Another vault may be a build behind or ahead; its columns are its own.
+  columnCache.clear();
   db = new DatabaseSync(file);
   try {
     db.exec('PRAGMA journal_mode = WAL;');
@@ -2640,6 +2643,9 @@ function initDb(file) {
   ensureColumn('objects', 'search_text', "search_text TEXT NOT NULL DEFAULT ''");
   const starredAdded = ensureColumn('types', 'starred', 'starred INTEGER NOT NULL DEFAULT 0');
   if (starredAdded) db.exec("UPDATE types SET starred = 1 WHERE id IN ('note', 'task', 'project')");
+  // Before the vault is seeded or migrated, so those writes are tracked like any
+  // other rather than needing a backfill of their own.
+  synclog.install(db);
   seed();
   migrate();
   // After migrations, so the index is built from settled search_text.
@@ -3375,4 +3381,159 @@ function switchVault(dir) {
   return { dbPath: target, changed: true, existed };
 }
 
-module.exports = { initDb, api, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePeopleType, ensureTagType };
+// ---------- sync ----------
+//
+// The vault's half of syncing: what has changed, and how to take in what
+// changed elsewhere. The engine that talks to the hub lives in sync.js and
+// reaches the database only through here, so it never needs a handle of its own
+// and never has to know how a link or a search index is kept up to date.
+
+/** SQLite will only bind these; jsonb hands back booleans and nested values. */
+const bindable = (v) => {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'boolean') return v ? 1 : 0;
+  if (typeof v === 'object') return JSON.stringify(v);
+  return v;
+};
+
+const columnCache = new Map();
+const columnsOf = (table) => {
+  if (!columnCache.has(table)) {
+    columnCache.set(table, db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+  }
+  return columnCache.get(table);
+};
+
+/**
+ * Write one row from the hub. Only columns this build actually has are used: a
+ * phone a version behind must be able to take a row a newer laptop wrote rather
+ * than failing on a column it has never heard of, and the column it drops is
+ * one it has no way to display anyway.
+ */
+function writeRemoteRow(table, pk, id, data) {
+  const cols = columnsOf(table).filter((c) => Object.prototype.hasOwnProperty.call(data, c));
+  if (!cols.includes(pk)) cols.push(pk);
+  const set = cols.filter((c) => c !== pk).map((c) => `${c} = excluded.${c}`);
+  const sql =
+    `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})` +
+    (set.length ? ` ON CONFLICT(${pk}) DO UPDATE SET ${set.join(', ')}` : ` ON CONFLICT(${pk}) DO NOTHING`);
+  db.prepare(sql).run(...cols.map((c) => (c === pk ? id : bindable(data[c]))));
+}
+
+/** Recompute what an object points at, since links are never synced. */
+function relink(id) {
+  const r = db.prepare('SELECT * FROM objects WHERE id = ?').get(id);
+  if (!r) return;
+  const parse = (s, fallback) => {
+    try {
+      return s ? JSON.parse(s) : fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  syncMentionLinks(id, parse(r.content, null));
+  syncRelationLinks(id, r.type_id, parse(r.props, {}), parse(r.extra_props, []));
+}
+
+/**
+ * Take in a batch pulled from the hub, all or nothing.
+ *
+ * Writing these rows trips the tracking triggers exactly as a local edit would,
+ * which would send them straight back up again. So each row's queue entry is
+ * cleared as it lands — that is this device hearing its own echo, not a change
+ * anyone made here. It is safe to do inside the transaction because nothing
+ * else can write to the vault while it is open: the data layer is synchronous
+ * and single-threaded.
+ */
+function applyRemote(rows) {
+  const objectsTouched = new Set();
+  const forget = db.prepare('DELETE FROM sync_changes WHERE tbl = ? AND row_id = ?');
+  db.exec('BEGIN');
+  try {
+    for (const r of rows) {
+      const spec = synclog.TABLES.find((t) => t.name === r.table);
+      if (!spec) continue; // A table this build doesn't have yet.
+      if (r.deleted) db.prepare(`DELETE FROM ${spec.name} WHERE ${spec.pk} = ?`).run(r.id);
+      else writeRemoteRow(spec.name, spec.pk, r.id, r.row || {});
+      if (spec.name === 'objects') objectsTouched.add(r.id);
+      forget.run(spec.name, r.id);
+    }
+    for (const id of objectsTouched) relink(id);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return rows.length;
+}
+
+// ---------- attachments ----------
+//
+// The rows in `files` are only a description; the bytes live beside the vault
+// in a folder addressed by content. Syncing the description without the bytes
+// is what makes an image arrive on another device as a broken one, so the two
+// travel separately and are reconciled separately.
+//
+// Being addressed by content is what keeps this simple: a blob never changes,
+// so it is uploaded once and never again, and it can be fetched whenever it
+// turns out to be missing rather than in step with anything else.
+
+/** Attachments this device has that the hub has not been told about. */
+const blobsToUpload = (limit = 20) =>
+  db
+    .prepare(
+      `SELECT f.hash, f.ext, f.name, f.mime FROM files f
+       WHERE NOT EXISTS (SELECT 1 FROM sync_blobs b WHERE b.hash = f.hash)
+       ORDER BY f.created_at LIMIT ?`
+    )
+    .all(limit)
+    .filter((f) => files.resolve(f.hash, f.ext)); // Skip ones whose bytes have gone missing locally.
+
+const markBlobUploaded = (hash) =>
+  db.prepare('INSERT OR REPLACE INTO sync_blobs (hash, at) VALUES (?, ?)').run(hash, now());
+
+/** Attachments this vault knows about but hasn't got the bytes for. */
+const blobsMissing = (limit = 20) =>
+  db
+    .prepare('SELECT hash, ext, name FROM files ORDER BY created_at LIMIT ?')
+    .all(limit * 10)
+    .filter((f) => !files.resolve(f.hash, f.ext))
+    .slice(0, limit);
+
+const readBlob = (hash, ext) => {
+  const at = files.resolve(hash, ext);
+  return at ? fs.readFileSync(at) : null;
+};
+
+/**
+ * Keep bytes fetched from the hub. The store hashes what it is given, so a
+ * download that arrived damaged lands under a different name than the one asked
+ * for — which is how we notice rather than quietly saving a corrupt file.
+ */
+function saveBlob(hash, name, buffer) {
+  const stored = files.store(buffer, name || '');
+  if (stored.hash !== hash) {
+    files.remove(stored.hash, stored.ext);
+    throw new Error(`downloaded attachment did not match its hash (${hash.slice(0, 8)}…)`);
+  }
+  markBlobUploaded(hash); // It is demonstrably on the hub — we just got it from there.
+  return stored;
+}
+
+/** Everything sync.js is allowed to do to the vault. */
+const sync = {
+  blobsToUpload,
+  blobsMissing,
+  markBlobUploaded,
+  readBlob,
+  saveBlob,
+  pending: (limit) => synclog.pending(db, limit),
+  ack: (entries) => synclog.ack(db, entries),
+  pendingCount: () => synclog.pendingCount(db),
+  deviceId: () => synclog.deviceId(db),
+  cursor: () => synclog.getState(db, 'cursor'),
+  setCursor: (v) => synclog.setState(db, 'cursor', v),
+  applyRemote,
+};
+
+module.exports = { initDb, api, sync, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePeopleType, ensureTagType };

@@ -35,6 +35,36 @@ npm run dist       # build installers into release/
 One SQLite file per habitat, in a folder you choose — plain, portable, and safe to sync or back
 up. Settings → General shows the exact path and the habitat's code.
 
+## Sync
+
+Settings → Sync signs in to a Supabase project and keeps a copy of the vault there, so the same
+habitat can be open on more than one device.
+
+The local file stays the one that works. Writing a note touches SQLite and returns; the queue
+behind it is drained on a timer, so the app is exactly as fast with no network as with one, and
+going offline isn't an error state — it's a sync that will happen later. Work done on a plane is
+sent when the plane lands.
+
+What changed is tracked by the database itself: triggers on every synced table maintain one small
+queue, which is why a feature added next year is covered without anyone remembering to add it.
+Deletes leave a tombstone, or a note deleted on your phone would just be a note your laptop still
+has and the next sync would put it back.
+
+- **Conflicts** resolve last-write-wins, decided by which device reconnects last rather than by
+  timestamps — two machines that have both been offline have no way to agree on whose "later" is
+  really later, and a wrong clock shouldn't be able to outrank a right one.
+- **Attachments** travel separately, a few per cycle, so a vault full of images never holds up the
+  text. Being addressed by content means each one is uploaded exactly once, and a transfer that
+  fails just happens next time.
+- **Not everything syncs.** Links and the search index are rebuilt on arrival rather than sent,
+  because the receiving side derives them anyway. Your Telegram and API tokens never leave the
+  machine they were typed into.
+
+The hub stores rows as JSON and never reads inside them, so a device a version behind can still
+take a row a newer one wrote. Setting up a project of your own is [one SQL
+file](supabase/schema.sql); row-level security is what keeps the data yours, not the publishable
+key, which ships in the app and is meant to be public.
+
 ## Concepts
 
 - **Type** — a schema (icon, colour, properties). Types are databases; open one from the sidebar.
@@ -209,4 +239,5 @@ GitHub Releases, which is also the update feed.
 
 Electron (main process owns the DB via `node:sqlite`, no native build step), React + Vite +
 TypeScript renderer, TipTap editor, Motion for animation. IPC goes over a small allowlisted bridge
-in `electron/preload.js`.
+in `electron/preload.js`. Sync talks to Supabase over plain `fetch` rather than a client library —
+three calls is all it needs, and the same code will run in a mobile webview later.

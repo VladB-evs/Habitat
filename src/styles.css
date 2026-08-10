@@ -728,6 +728,38 @@ kbd {
   color: var(--text-3);
 }
 
+/* The badge is a button whenever there's something to do — checking for an
+   update, or installing the one that's waiting — but it should read as the
+   quiet label it replaced until you point at it. */
+button.version {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+button.version:hover {
+  color: var(--text-2);
+}
+
+.version-update,
+button.version.version-update {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+button.version.version-update:hover {
+  color: var(--accent);
+  opacity: 0.75;
+}
+
 .new-type-form {
   background: var(--bg-2);
   border: 1px solid var(--border-2);

@@ -34,7 +34,7 @@ import type {
   Template,
   UserVar,
 } from './types';
-import type { Automation, HttpApiConfig, TelegramConfig, UpdateState } from './types';
+import type { Automation, HttpApiConfig, SyncConfig, SyncStatus, TelegramConfig, UpdateState } from './types';
 import type { AiAction, AiAnswer, AiAvailability, AiDelta, AiResult } from './types';
 
 declare global {
@@ -43,6 +43,7 @@ declare global {
       invoke: (channel: string, payload?: any) => Promise<any>;
       onUpdateState?: (fn: (state: UpdateState) => void) => () => void;
       onAiDelta?: (fn: (msg: AiDelta) => void) => () => void;
+      onSyncState?: (fn: (state: SyncStatus) => void) => () => void;
     };
   }
 }
@@ -304,6 +305,21 @@ export const api = {
     /** Starts or stops the server to match the saved settings. */
     apply: (): Promise<{ ok: boolean; running: boolean; port?: number; error?: string }> => inv('api:apply'),
     status: (): Promise<{ running: boolean; port: number }> => inv('api:status'),
+  },
+  /**
+   * The vault's copy in the cloud. Every call here is about the arrangement —
+   * signing in, forcing a cycle — never about the data itself: syncing is the
+   * main process's business and the renderer only ever watches it happen.
+   */
+  sync: {
+    status: (): Promise<SyncStatus> => inv('sync:status'),
+    /** Sync right now rather than waiting for the next two-minute tick. */
+    now: (): Promise<SyncStatus> => inv('sync:now'),
+    signIn: (email: string, password: string): Promise<SyncStatus> => inv('sync:signIn', { email, password }),
+    signOut: (): Promise<SyncStatus> => inv('sync:signOut'),
+    config: (): Promise<SyncConfig> => inv('sync:config'),
+    saveConfig: (patch: Partial<SyncConfig>): Promise<SyncConfig> => inv('sync:saveConfig', patch),
+    onState: (fn: (s: SyncStatus) => void): (() => void) => window.habitat.onSyncState?.(fn) ?? (() => {}),
   },
   telegram: {
     get: (): Promise<TelegramConfig> => inv('telegram:get'),

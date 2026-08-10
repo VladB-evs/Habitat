@@ -33,6 +33,7 @@ const CHANNELS = new Set([
   'kv:get', 'kv:set',
   'files:add', 'files:get', 'files:stats', 'files:gc', 'files:pick', 'files:reveal', 'files:open', 'files:saveAs',
   'window:trafficLights',
+  'sync:status', 'sync:now', 'sync:signIn', 'sync:signOut', 'sync:config', 'sync:saveConfig',
   'tags:list', 'tags:search', 'tags:ensure', 'tags:delete',
 ]);
 
@@ -48,6 +49,12 @@ contextBridge.exposeInMainWorld('habitat', {
     const handler = (_e, msg) => fn(msg);
     ipcRenderer.on('ai:delta', handler);
     return () => ipcRenderer.off('ai:delta', handler);
+  },
+  /** Sync happens on a timer, so its progress arrives unasked-for. */
+  onSyncState: (fn) => {
+    const handler = (_e, state) => fn(state);
+    ipcRenderer.on('sync:state', handler);
+    return () => ipcRenderer.off('sync:state', handler);
   },
   invoke: (channel, payload) => {
     if (!CHANNELS.has(channel)) return Promise.reject(new Error('Unknown channel: ' + channel));

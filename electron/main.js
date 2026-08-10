@@ -9,8 +9,10 @@ const filesStore = require('./files');
 const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
+const syncEngine = require('./sync');
+const supabase = require('./supabase');
 const {
-  initDb, api, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePeopleType, ensureTagType,
+  initDb, api, sync: vaultSync, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePeopleType, ensureTagType,
 } = require('./db');
 
 // Set before anything reads it: the menu bar, the About panel and ~/Library all
@@ -557,6 +559,72 @@ function boot() {
 
   checkForUpdates();
   setInterval(() => checkForUpdates(), 4 * 60 * 60 * 1000);
+
+  // ---------- sync ----------
+  //
+  // The vault stays the thing that works; the hub is a copy of it that other
+  // devices can reach. Nothing here is on the path of an edit — writing a note
+  // touches SQLite and returns, and the queue behind it is drained on a timer —
+  // so the app is exactly as fast offline as on, and losing the network is not
+  // an error state, just a sync that will happen later.
+
+  const DEFAULT_SYNC = {
+    url: 'https://qfqwyiwghbqtqlzqgnfq.supabase.co',
+    key: 'sb_publishable_ZhqyVkvLiHO1np8Gh13CjQ_XQPzVBOM',
+  };
+
+  const syncConfig = () => ({ ...DEFAULT_SYNC, ...(loadConfig().sync || {}) });
+
+  const hub = supabase.createHub({
+    config: syncConfig,
+    // The session belongs to this installation, not to the vault — a vault is a
+    // folder the user is invited to copy between machines, and an access token
+    // is not something to copy with it.
+    session: {
+      load: () => loadConfig().syncSession || null,
+      save: (s) => saveConfig({ syncSession: s }),
+    },
+  });
+
+  const syncStatus = () => ({ ...engine.state(), account: hub.account(), configured: hub.configured() });
+
+  const engine = syncEngine.createSync({
+    store: vaultSync,
+    transport: hub,
+    onState: () => win?.webContents.send('sync:state', syncStatus()),
+  });
+
+  /** Only worth attempting when there is an account to sync with. */
+  const autoSync = () => {
+    if (hub.account() && hub.configured()) engine.run();
+  };
+
+  ipcMain.handle('sync:status', () => syncStatus());
+  ipcMain.handle('sync:now', async () => {
+    await engine.run();
+    return syncStatus();
+  });
+  ipcMain.handle('sync:signIn', async (_e, { email, password } = {}) => {
+    try {
+      await hub.signIn(email, password);
+      await engine.run();
+      return syncStatus();
+    } catch (err) {
+      return { ...syncStatus(), error: String(err?.message || err) };
+    }
+  });
+  ipcMain.handle('sync:signOut', () => {
+    hub.signOut();
+    return syncStatus();
+  });
+  ipcMain.handle('sync:config', () => syncConfig());
+  ipcMain.handle('sync:saveConfig', (_e, patch) => {
+    saveConfig({ sync: { ...syncConfig(), ...patch } });
+    return syncConfig();
+  });
+
+  setTimeout(autoSync, 4000);
+  setInterval(autoSync, 2 * 60 * 1000);
 
   ipcMain.handle('app:info', () => ({ appDir: path.resolve(__dirname, '..'), version: app.getVersion() }));
   ipcMain.handle('api:apply', () => applyServer());

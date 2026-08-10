@@ -7,11 +7,13 @@ import { clientUid } from '../util';
 import { ApiSettings } from './ApiSettings';
 import { UpdateSettings } from './UpdateSettings';
 import { Automations } from './Automations';
+import { SyncSettings } from './SyncSettings';
 import { TelegramSettings } from './TelegramSettings';
 import { Icon } from './Icons';
 
 const TABS = [
   { id: 'general', label: 'General', icon: 'settings' },
+  { id: 'sync', label: 'Sync', icon: 'waypoints' },
   { id: 'automations', label: 'Automations', icon: 'zap' },
   { id: 'capture', label: 'Capture', icon: 'message-circle' },
   { id: 'api', label: 'API', icon: 'globe' },
@@ -197,6 +199,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </>
             )}
 
+            {tab === 'sync' && (
+              <section className="set-sec">
+                <div className="set-group">
+                  <SyncSettings />
+                </div>
+              </section>
+            )}
             {tab === 'automations' && <Automations />}
             {tab === 'capture' && <TelegramSettings />}
             {tab === 'api' && <ApiSettings />}

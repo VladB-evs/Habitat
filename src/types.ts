@@ -481,6 +481,25 @@ export interface UpdateState {
   error?: string | null;
 }
 
+/** Where the vault's copy in the cloud lives, and how it's doing. */
+export interface SyncConfig {
+  url: string;
+  key: string;
+}
+
+export interface SyncStatus {
+  status: 'idle' | 'syncing' | 'error';
+  /** Rows written here that the hub hasn't taken yet. */
+  pending: number;
+  error: string | null;
+  /** When the last full cycle finished, or null if it never has. */
+  at: number | null;
+  pushed?: number;
+  pulled?: number;
+  account: { email: string | null; userId: string | null } | null;
+  configured: boolean;
+}
+
 export interface HttpApiConfig {
   enabled: boolean;
   port: number;

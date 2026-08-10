@@ -9,6 +9,7 @@ import { PEOPLE_TYPE, typeColor, TYPE_PALETTE } from '../util';
 import { NewHabitatModal } from './Habitats';
 import { Icon, TypeIcon } from './Icons';
 import { ColorPicker, IconPicker } from './TypeEditor';
+import { VersionBadge } from './VersionBadge';
 const SettingsModal = lazy(() => import('./SettingsModal').then((m) => ({ default: m.SettingsModal })));
 
 function NavItem({
@@ -255,7 +256,7 @@ export function Sidebar({
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
           </button>
         </div>
-        <span className="version">Habitat 0.1</span>
+        <VersionBadge />
       </div>
 
       {showSettings && (
