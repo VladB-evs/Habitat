@@ -229,7 +229,7 @@ export function NewHabitatModal({ onClose }: { onClose: () => void }) {
         <div className="settings-body">
         <div className="settings-row col">
           <div className="s-hint">
-            A habitat is a fully separate database — its own objects, types, templates, and graph. It gets its own
+            A habitat is a fully separate database — its own objects, types, templates, boards and decks. It gets its own
             folder, named after it, wherever you choose to keep it.
           </div>
           <input

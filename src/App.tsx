@@ -2,25 +2,43 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, MotionConfig, animate, motion, useMotionTemplate, useMotionValue } from 'motion/react';
 import { api } from './api';
 import { AppProvider, useApp } from './store';
+import { openLink } from './links';
 import type { View } from './store';
 import { Onboarding } from './components/Habitats';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { DailyNotes } from './components/DailyNotes';
-import { CalendarView } from './components/CalendarView';
+import { TasksPage } from './components/TasksPage';
 import { TypeTable } from './components/TypeTable';
 import { ObjectPage } from './components/ObjectPage';
 import { TemplatePage } from './components/TemplatePage';
-const GraphView = lazy(() => import('./components/GraphView').then((m) => ({ default: m.GraphView })));
+const CanvasHome = lazy(() => import('./components/canvas/CanvasHome').then((m) => ({ default: m.CanvasHome })));
+const CanvasView = lazy(() => import('./components/canvas/CanvasView').then((m) => ({ default: m.CanvasView })));
+const StudyView = lazy(() => import('./components/study/StudyView').then((m) => ({ default: m.StudyView })));
+const DeckPage = lazy(() => import('./components/study/DeckPage').then((m) => ({ default: m.DeckPage })));
+const StudyNotePage = lazy(() => import('./components/study/StudyNotePage').then((m) => ({ default: m.StudyNotePage })));
 import { TagsView } from './components/TagsView';
 import { People } from './components/People';
 import { SearchPalette } from './components/SearchPalette';
+import { AskPanel } from './components/AskPanel';
 import { Icon } from './components/Icons';
 import { pageIn, snap, softSpring, spring } from './motion';
 import { PEOPLE_TYPE } from './util';
 
 const viewKey = (v: View) =>
-  v.kind === 'type' ? `type:${v.typeId}` : v.kind === 'object' ? `object:${v.id}` : v.kind === 'template' ? `tpl:${v.id}` : v.kind;
+  v.kind === 'type'
+    ? `type:${v.typeId}`
+    : v.kind === 'object'
+      ? `object:${v.id}`
+      : v.kind === 'template'
+        ? `tpl:${v.id}`
+        : v.kind === 'canvas'
+          ? `canvas:${v.id ?? 'all'}`
+          : v.kind === 'deck'
+            ? `deck:${v.id}`
+            : v.kind === 'studyNote'
+              ? `note:${v.id}`
+              : v.kind;
 
 function PaneView({ view }: { view: View }) {
   return (
@@ -28,10 +46,25 @@ function PaneView({ view }: { view: View }) {
       <motion.div key={viewKey(view)} className="pane-page" variants={pageIn} initial="hidden" animate="shown" exit="gone">
         {view.kind === 'dashboard' && <Dashboard />}
         {view.kind === 'daily' && <DailyNotes />}
-        {view.kind === 'calendar' && <CalendarView />}
-        {view.kind === 'graph' && (
+        {view.kind === 'tasks' && <TasksPage />}
+        {view.kind === 'canvas' && (
           <Suspense fallback={null}>
-            <GraphView />
+            {view.id ? <CanvasView key={view.id} id={view.id} /> : <CanvasHome />}
+          </Suspense>
+        )}
+        {view.kind === 'study' && (
+          <Suspense fallback={null}>
+            <StudyView />
+          </Suspense>
+        )}
+        {view.kind === 'deck' && (
+          <Suspense fallback={null}>
+            <DeckPage key={view.id} id={view.id} />
+          </Suspense>
+        )}
+        {view.kind === 'studyNote' && (
+          <Suspense fallback={null}>
+            <StudyNotePage key={view.id} id={view.id} />
           </Suspense>
         )}
         {view.kind === 'tags' && <TagsView />}
@@ -49,6 +82,9 @@ function PaneView({ view }: { view: View }) {
 function Shell() {
   const { panes, dir, active, setActive, split, closing, requestClose, endClose } = useApp();
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  /** No Apple Intelligence, no Ask — the button and the shortcut both stay away. */
+  const [askReady, setAskReady] = useState(false);
   const [sidebarHidden, setSidebarHidden] = useState(() => localStorage.getItem('habitat:sidebar') === 'hidden');
   /** A hidden sidebar peeks over the content while the pointer is on it. */
   const [peeking, setPeeking] = useState(false);
@@ -67,6 +103,25 @@ function Shell() {
   useEffect(() => {
     if (!isSplit) setRatio(1 / 2);
   }, [isSplit]);
+
+  /**
+   * Every link in the app, wherever it's rendered, hands off to the OS browser.
+   * One delegated listener rather than a handler per link — and it always cancels
+   * the default: a renderer that follows a link in place has navigated away from
+   * the app itself, with no way back.
+   */
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+      if (!a || e.defaultPrevented) return;
+      const href = a.getAttribute('href') ?? '';
+      if (href.startsWith('#')) return;
+      e.preventDefault();
+      openLink(href);
+    };
+    document.addEventListener('click', onClick);
+    return () => document.removeEventListener('click', onClick);
+  }, []);
 
   /**
    * Closing is animated first and committed after, rather than removing the
@@ -139,6 +194,10 @@ function Shell() {
         e.preventDefault();
         setPaletteOpen((o) => !o);
       }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j' && askReadyRef.current) {
+        e.preventDefault();
+        setAskOpen((o) => !o);
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
         e.preventDefault();
         setSidebarHidden((v) => {
@@ -149,6 +208,22 @@ function Shell() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Read inside the key handler, which is bound once and would otherwise close
+  // over the value from the first render.
+  const askReadyRef = useRef(false);
+  askReadyRef.current = askReady;
+
+  useEffect(() => {
+    let alive = true;
+    api.ai
+      .availability()
+      .then((state) => alive && setAskReady(state.available))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
   }, []);
 
   return (
@@ -172,6 +247,7 @@ function Shell() {
             <Sidebar
               pinned={!sidebarHidden}
               onSearch={() => setPaletteOpen(true)}
+              onAsk={askReady ? () => setAskOpen(true) : undefined}
               onCollapse={() => {
                 // While peeking the same button pins the sidebar open instead.
                 if (sidebarHidden) {
@@ -281,6 +357,7 @@ function Shell() {
       </div>
 
       {paletteOpen && <SearchPalette onClose={() => setPaletteOpen(false)} />}
+      {askOpen && <AskPanel onClose={() => setAskOpen(false)} />}
     </div>
   );
 }

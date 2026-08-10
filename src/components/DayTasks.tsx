@@ -30,10 +30,12 @@ export function DayTasks({ dateKey }: { dateKey: string }) {
     );
 
   const toggle = (t: Obj) => {
-    const status = t.props.status === 'Done' ? 'Todo' : 'Done';
-    const props = { ...t.props, status };
+    const done = t.props.status !== 'Done';
+    const props = { ...t.props, status: done ? 'Done' : 'Todo' };
     setTasks((list) => sortTasks(list.map((x) => (x.id === t.id ? { ...x, props } : x))));
-    api.objects.update(t.id, { props }).then(() => objectChanged(t.id));
+    // Through the main process rather than a plain prop write: for a repeating
+    // task only this day is ticked, and only it knows which days those are.
+    api.tasks.setDone({ id: t.id, dayKey: t.occurrence ?? dateKey, done }).then(() => objectChanged(t.id));
   };
 
   const add = async () => {
@@ -65,6 +67,11 @@ export function DayTasks({ dateKey }: { dateKey: string }) {
             <button className="day-task-title" onClick={(e) => openFrom(e, t.id)}>
               {t.title || 'Untitled'}
             </button>
+            {t.occurrence && (
+              <span className="repeat-mark" title="Repeats">
+                <Icon name="redo" size={10} />
+              </span>
+            )}
             {t.props.rolled && !done && <span className="rolled-badge">carried over</span>}
           </div>
         );
@@ -75,6 +82,7 @@ export function DayTasks({ dateKey }: { dateKey: string }) {
         </span>
         <input
           className="day-task-input"
+          spellCheck
           placeholder="Add a task…"
           value={newTask}
           onChange={(e) => setNewTask(e.target.value)}

@@ -11,6 +11,7 @@ import TextStyle from '@tiptap/extension-text-style';
 import { Color } from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
 import Underline from '@tiptap/extension-underline';
+import Link from '@tiptap/extension-link';
 import Table from '@tiptap/extension-table';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
@@ -28,6 +29,7 @@ import { loadEmoji } from '../emoji';
 import { SlashCommands } from '../slash';
 import { TagMention } from '../tagMention';
 import { Media, storeFiles } from '../media';
+import { isSafeUrl, linkify, openLink } from '../links';
 import { CodeBlockView } from './CodeBlockView';
 import { MathBar } from './MathBar';
 import { MentionChip } from './MentionChip';
@@ -173,7 +175,18 @@ function KeepWriting({ editor }: { editor: EditorType | null }) {
   );
 }
 
-export function Editor({ content, placeholder, onSave }: { content: any; placeholder?: string; onSave: (json: any) => void }) {
+export function Editor({
+  content,
+  placeholder,
+  onSave,
+  /** The object being edited, so a flashcard cut from this note remembers where it came from. */
+  objectId,
+}: {
+  content: any;
+  placeholder?: string;
+  onSave: (json: any) => void;
+  objectId?: string;
+}) {
   const { openObject } = useApp();
   const [wrap, setWrap] = useState<HTMLElement | null>(null);
   const openRef = useRef(openObject);
@@ -242,14 +255,31 @@ export function Editor({ content, placeholder, onSave }: { content: any; placeho
       Color,
       Highlight.configure({ multicolor: true }),
       Underline,
+      /**
+       * Links open through the main process, never in this window, so a note can
+       * never navigate the app away from itself. `validate` is the gate on what a
+       * stored href may be — imported and shared notes are not trusted content.
+       */
+      Link.configure({
+        openOnClick: false,
+        autolink: true,
+        linkOnPaste: true,
+        protocols: ['http', 'https', 'mailto', 'tel'],
+        validate: isSafeUrl,
+        HTMLAttributes: { rel: 'noreferrer nofollow', target: '_blank' },
+      }),
     ],
-    content: content || undefined,
+    // Bare URLs in notes written before links existed become clickable on the way
+    // in, without rewriting what's stored. See linkify().
+    content: content ? linkify(content) : undefined,
     onCreate: ({ editor }) => {
       editorRef.current = editor;
       // Warm the emoji table in the background so the first ':' is instant.
       loadEmoji();
     },
     editorProps: {
+      // Note bodies are prose, so they opt back in to the spell checker the body turns off.
+      attributes: { spellcheck: 'true' },
       // Object mentions handle their own clicks in the node view; tags still go through here.
       handleClickOn: (_view, _pos, node) => {
         if (node.type.name === 'tagMention' && node.attrs.id) {
@@ -282,7 +312,7 @@ export function Editor({ content, placeholder, onSave }: { content: any; placeho
       <BlockHandle editor={editor} container={wrap} />
       <MathBar editor={editor} />
       <TableMenu editor={editor} />
-      <SelectionMenu editor={editor} />
+      <SelectionMenu editor={editor} objectId={objectId} />
     </div>
   );
 }

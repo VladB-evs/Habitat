@@ -71,7 +71,13 @@ export function TemplatePage({ id }: { id: string }) {
       </div>
 
       <div className="obj-body">
-        <input className="obj-title" value={name} placeholder="Template name" onChange={(e) => saveName(e.target.value)} />
+        <input
+          className="obj-title"
+          spellCheck
+          value={name}
+          placeholder="Template name"
+          onChange={(e) => saveName(e.target.value)}
+        />
 
         <PropsPanel
           typeDefs={type?.properties ?? []}

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { PropDef } from '../types';
+import { anchorDate } from '../util';
 import { Cell, popPos } from './cells';
 import { Icon } from './Icons';
 import { PropEditor } from './PropEditor';
@@ -22,6 +23,8 @@ export function PropsPanel({
   onExtraChange: (defs: PropDef[]) => void;
 }) {
   const [editor, setEditor] = useState<{ initial?: PropDef; pos: { left: number; top: number } } | null>(null);
+  // What a repeat rule counts from, so "every month on the 14th" can say so.
+  const anchor = anchorDate([...typeDefs, ...extraProps], values);
 
   const saveExtra = (def: PropDef) => {
     const i = extraProps.findIndex((p) => p.id === def.id);
@@ -37,7 +40,7 @@ export function PropsPanel({
         <div className="obj-prop" key={p.id}>
           <label>{p.name}</label>
           <div className="prop-control">
-            <Cell def={p} value={values[p.id]} onChange={(v) => onValue(p.id, v)} />
+            <Cell def={p} value={values[p.id]} onChange={(v) => onValue(p.id, v)} anchor={anchor} />
           </div>
         </div>
       ))}
@@ -54,7 +57,7 @@ export function PropsPanel({
             </button>
           </label>
           <div className="prop-control">
-            <Cell def={p} value={values[p.id]} onChange={(v) => onValue(p.id, v)} />
+            <Cell def={p} value={values[p.id]} onChange={(v) => onValue(p.id, v)} anchor={anchor} />
           </div>
         </div>
       ))}

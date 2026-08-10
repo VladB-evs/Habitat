@@ -986,6 +986,7 @@ function TokenField({
       <input
         ref={ref}
         className="field auto-text"
+        spellCheck
         placeholder={placeholder}
         value={text}
         onChange={(e) => onChange(e.target.value)}

@@ -15,6 +15,8 @@ export function ObjectPage({ id }: { id: string }) {
   const [obj, setObj] = useState<Obj | null>(null);
   const [missing, setMissing] = useState(false);
   const [backlinks, setBacklinks] = useState<Obj[]>([]);
+  /** The boards this object has been placed on — a link outwards, like a backlink. */
+  const [boards, setBoards] = useState<{ id: string; name: string; icon: string; color: string }[]>([]);
   const [title, setTitle] = useState('');
   const [selfId, setSelfId] = useState<string | null>(null);
   /** Anchored under the type crumb when open. */
@@ -33,6 +35,7 @@ export function ObjectPage({ id }: { id: string }) {
       if (o.typeId === PEOPLE_TYPE) loadSelf();
     });
     api.backlinks(id).then((b) => alive && setBacklinks(b));
+    api.canvas.forObject(id).then((c) => alive && setBoards(c));
     // Someone editing this object elsewhere (the type table, a mention chip) shows up here.
     // The editor and title input own their own text, so only the surrounding data is refreshed.
     const off = onObjectChanged((changed) => {
@@ -194,6 +197,7 @@ export function ObjectPage({ id }: { id: string }) {
           <>
             <input
               className="obj-title"
+              spellCheck
               value={title}
               placeholder="Untitled"
               onChange={(e) => saveTitle(e.target.value)}
@@ -217,13 +221,29 @@ export function ObjectPage({ id }: { id: string }) {
             />
 
             <div className="obj-editor">
-              <Editor key={obj.id} content={obj.content} onSave={saveContent} />
+              <Editor key={obj.id} content={obj.content} onSave={saveContent} objectId={obj.id} />
             </div>
           </>
         )}
 
         {isTag && backlinks.length === 0 && (
           <div className="empty">Nothing is tagged with #{obj.title} yet.</div>
+        )}
+
+        {boards.length > 0 && (
+          <div className="obj-boards">
+            <h3>
+              <Icon name="canvas" size={13} /> On boards
+            </h3>
+            <div className="obj-board-chips">
+              {boards.map((b) => (
+                <button key={b.id} className="obj-board-chip" onClick={() => navigate({ kind: 'canvas', id: b.id })}>
+                  <Icon name="canvas" size={12} />
+                  {b.name}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {backlinks.length > 0 && (

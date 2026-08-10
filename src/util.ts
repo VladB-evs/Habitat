@@ -8,6 +8,16 @@ export function taskProp(type?: ObjType): PropDef | undefined {
   return type?.properties.find((p) => p.kind === 'select' && (p.options ?? []).includes('Done'));
 }
 
+/**
+ * The date a repeat rule counts from — whichever property actually schedules the
+ * object. A filled one wins, matching how the main process picks the same date.
+ */
+export function anchorDate(defs: PropDef[], props: Record<string, any>): string | null {
+  const of = (kind: PropDef['kind']) => defs.find((p) => p.kind === kind && props[p.id]);
+  const def = of('datetime') ?? of('date');
+  return def ? String(props[def.id]).slice(0, 10) : null;
+}
+
 /** The value a task goes back to when un-ticked. */
 export const openStatusOf = (p?: PropDef): string => p?.options?.find((o) => o !== 'Done') ?? 'Todo';
 
@@ -69,6 +79,15 @@ export function optionColor(value: string, theme: string): { bg: string; fg: str
   return theme === 'dark'
     ? { bg: `hsl(${hue} ${sat - 20}% 20%)`, fg: `hsl(${hue} ${sat}% 76%)`, border: `hsl(${hue} ${sat - 15}% 30%)` }
     : { bg: `hsl(${hue} ${sat + 20}% 93%)`, fg: `hsl(${hue} ${sat}% 32%)`, border: `hsl(${hue} ${sat}% 80%)` };
+}
+
+/** Clamp a popover position near an anchor element to the viewport. */
+export function popPos(anchor: HTMLElement, w = 260, h = 320) {
+  const r = anchor.getBoundingClientRect();
+  const left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12));
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 12) top = Math.max(12, r.top - h - 6);
+  return { left, top };
 }
 
 export function keyOf(d: Date): string {

@@ -7,8 +7,13 @@ import { clientUid } from './util';
 export type View =
   | { kind: 'dashboard' }
   | { kind: 'daily' }
-  | { kind: 'calendar' }
-  | { kind: 'graph' }
+  /** Tasks and the calendar are one page: two ways of reading the same things. */
+  | { kind: 'tasks' }
+  /** No id is the gallery of boards; an id is one board, open. */
+  | { kind: 'canvas'; id?: string }
+  | { kind: 'study' }
+  | { kind: 'deck'; id: string }
+  | { kind: 'studyNote'; id: string }
   | { kind: 'tags' }
   | { kind: 'people' }
   | { kind: 'type'; typeId: string }
@@ -59,8 +64,13 @@ export const useApp = () => useContext(Ctx);
 function initialView(): View {
   const h = window.location.hash.replace(/^#/, '');
   if (h.startsWith('/daily')) return { kind: 'daily' };
-  if (h.startsWith('/calendar')) return { kind: 'calendar' };
-  if (h.startsWith('/graph')) return { kind: 'graph' };
+  // /calendar is where the calendar used to live, and links to it still work.
+  if (h.startsWith('/tasks') || h.startsWith('/calendar')) return { kind: 'tasks' };
+  if (h.startsWith('/canvas/')) return { kind: 'canvas', id: h.slice(8) };
+  if (h.startsWith('/canvas')) return { kind: 'canvas' };
+  if (h.startsWith('/deck/')) return { kind: 'deck', id: h.slice(6) };
+  if (h.startsWith('/note/')) return { kind: 'studyNote', id: h.slice(6) };
+  if (h.startsWith('/study')) return { kind: 'study' };
   if (h.startsWith('/tags')) return { kind: 'tags' };
   if (h.startsWith('/people')) return { kind: 'people' };
   if (h.startsWith('/type/')) return { kind: 'type', typeId: h.slice(6) };

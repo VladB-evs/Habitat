@@ -2,6 +2,9 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, protocol, 
 const telegram = require('./telegram');
 const updater = require('./updater');
 const server = require('./server');
+const ai = require('./ai');
+const aiActions = require('./aiActions');
+const ask = require('./ask');
 const filesStore = require('./files');
 const path = require('path');
 const fs = require('fs');
@@ -49,6 +52,44 @@ function loadConfig() {
 function saveConfig(patch) {
   const c = { ...loadConfig(), ...patch };
   fs.writeFileSync(configPath(), JSON.stringify(c, null, 2));
+}
+
+/** Spell check is on unless the user turned it off. Which fields get checked is the renderer's call. */
+const spellcheckEnabled = () => loadConfig().spellcheck !== false;
+
+/**
+ * Right-click menu. Suggestions only reach the user through a menu we build ourselves —
+ * Chromium hands them over in `params` and expects the app to render them.
+ */
+function showContextMenu(params) {
+  const items = [];
+  const { misspelledWord, dictionarySuggestions, isEditable, selectionText, editFlags } = params;
+
+  if (misspelledWord) {
+    for (const word of dictionarySuggestions.slice(0, 5)) {
+      items.push({ label: word, click: () => win.webContents.replaceMisspelling(word) });
+    }
+    if (!dictionarySuggestions.length) items.push({ label: 'No spelling suggestions', enabled: false });
+    items.push({ type: 'separator' });
+    items.push({
+      label: 'Add to Dictionary',
+      click: () => win.webContents.session.addWordToSpellCheckerDictionary(misspelledWord),
+    });
+    items.push({ type: 'separator' });
+  }
+
+  if (isEditable) {
+    items.push({ role: 'cut', enabled: editFlags.canCut });
+    items.push({ role: 'copy', enabled: editFlags.canCopy });
+    items.push({ role: 'paste', enabled: editFlags.canPaste });
+    items.push({ type: 'separator' });
+    items.push({ role: 'selectAll' });
+  } else if (selectionText && selectionText.trim()) {
+    items.push({ role: 'copy' });
+  }
+
+  if (!items.length) return;
+  Menu.buildFromTemplate(items).popup({ window: win });
 }
 
 // HABITAT_TEST_FOLDER lets automated tests bypass the native folder dialog,
@@ -185,9 +226,12 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false,
-      spellcheck: false,
+      spellcheck: true,
     },
   });
+
+  win.webContents.session.setSpellCheckerEnabled(spellcheckEnabled());
+  win.webContents.on('context-menu', (_e, params) => showContextMenu(params));
 
   win.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -202,7 +246,7 @@ function createWindow() {
     win.loadFile(index, view ? { hash: view } : undefined);
   }
 
-  // Screenshot mode for automated visual checks: HABITAT_SHOT=/path.png [HABITAT_VIEW=/graph]
+  // Screenshot mode for automated visual checks: HABITAT_SHOT=/path.png [HABITAT_VIEW=/canvas]
   if (process.env.HABITAT_SHOT) {
     win.webContents.once('did-finish-load', () => {
       win.showInactive();
@@ -518,6 +562,108 @@ function boot() {
   ipcMain.handle('api:apply', () => applyServer());
   ipcMain.handle('api:status', () => server.status());
 
+  // ---------- on-device model ----------
+
+  ipcMain.handle('ai:availability', () => ai.availability());
+  ipcMain.handle('ai:actions', () => aiActions.list());
+  ipcMain.handle('ai:prewarm', () => {
+    ai.prewarm();
+    return true;
+  });
+
+  /**
+   * Runs one action and resolves once the model is done. The reply also arrives
+   * piecemeal on `ai:delta` so the editor can show it being written — a second
+   * of silence reads as a hang, and the whole point of the on-device model is
+   * that it answers immediately.
+   */
+  ipcMain.handle('ai:run', async (e, { id, action, text }) => {
+    const req = aiActions.build(action, String(text ?? ''));
+    if (!req) return { ok: false, error: 'Unknown action.' };
+    try {
+      const res = await ai.run({ id, ...req }, (delta, full) => {
+        if (!e.sender.isDestroyed()) e.sender.send('ai:delta', { id, delta, text: full });
+      });
+      return { ok: true, text: res.text, cancelled: !!res.cancelled };
+    } catch (err) {
+      return { ok: false, error: err.message, code: err.code };
+    }
+  });
+
+  ipcMain.handle('ai:cancel', (_e, id) => ai.cancel(id));
+
+  /**
+   * A question about the vault, answered from the vault.
+   *
+   * The retrieval is exact and happens here; the model only ever sees notes that
+   * are already in front of it. The sources come back with the answer so the
+   * user can open what it read — an answer you can't check is worth very little
+   * when it comes from a model this small.
+   */
+  ipcMain.handle('ai:ask', async (e, { id, question }) => {
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(
+      today.getDate()
+    ).padStart(2, '0')}`;
+
+    const built = ask.askRequest({
+      question,
+      today: todayKey,
+      types: api['types:list'](),
+      lookup: {
+        onDates: ({ from, to, typeId }) => api['objects:onDates']({ from, to, typeId }),
+        search: ({ words, typeId }) => api['objects:withText']({ words, typeId, limit: ask.MAX_SOURCES }),
+        ofType: (typeId) => api['objects:ofType']({ typeId, limit: ask.MAX_SOURCES }),
+      },
+    });
+    if (built.error) return { ok: false, error: built.error, dates: built.dates ?? null };
+
+    try {
+      const res = await ai.run({ id, ...built.request }, (delta, full) => {
+        if (!e.sender.isDestroyed()) e.sender.send('ai:delta', { id, delta, text: full });
+      });
+      return {
+        ok: true,
+        text: res.text,
+        cancelled: !!res.cancelled,
+        sources: built.sources,
+        dates: built.dates ?? null,
+      };
+    } catch (err) {
+      return { ok: false, error: err.message, code: err.code };
+    }
+  });
+
+  /**
+   * Plain English into the search bar's own syntax. The vault's types and tags
+   * go into the schema, so the model picks from what exists rather than being
+   * asked to remember it — and what comes back is the same string the user could
+   * have typed, which is what the palette then shows them.
+   */
+  ipcMain.handle('ai:search', async (_e, { text }) => {
+    const wanted = String(text ?? '').trim();
+    if (!wanted) return { ok: false, error: 'Nothing to look for.' };
+
+    const types = api['types:list']();
+    const tags = api['tags:list']();
+    try {
+      const res = await ai.run({ id: randomUUID(), ...aiActions.searchRequest({ text: wanted, types, tags }) });
+      let parsed;
+      try {
+        parsed = JSON.parse(res.text);
+      } catch {
+        return { ok: false, error: "That came back in a shape we couldn't read. Try rephrasing." };
+      }
+      const query = aiActions.searchQuery(parsed, { types, tags });
+      // Every field left out is a legitimate answer on its own, but all of them
+      // left out means nothing was understood.
+      if (!query) return { ok: false, error: "Couldn't turn that into a search." };
+      return { ok: true, query };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
+
 
 
   ipcMain.handle('telegram:test', async () => {
@@ -564,6 +710,15 @@ function boot() {
   });
 
   ipcMain.handle('settings:get', () => ({ dbPath: currentDbPath, ...habitatsState() }));
+
+  ipcMain.handle('spellcheck:get', () => spellcheckEnabled());
+
+  ipcMain.handle('spellcheck:set', (_e, enabled) => {
+    const on = !!enabled;
+    saveConfig({ spellcheck: on });
+    if (win) win.webContents.session.setSpellCheckerEnabled(on);
+    return on;
+  });
 
   ipcMain.handle('settings:chooseVault', async () => {
     const dir = await pickFolderDialog('Choose a vault folder');
@@ -841,6 +996,10 @@ function boot() {
 }
 
 app.on('before-quit', () => server.stop());
+
+// The model sidecar is a child process, and a child left running holds the model
+// in memory long after the app that wanted it is gone.
+app.on('before-quit', () => ai.stop());
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' || process.env.HABITAT_SHOT) app.quit();

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { DateField } from '../components/DateField';
 import type { WidgetDef, WidgetProps, WidgetSettingsProps } from './kit';
 
 const MIN = 60000;
@@ -85,21 +86,11 @@ function TimerSettings({ config, set }: WidgetSettingsProps) {
       </label>
       <label className="w-field">
         <span>From</span>
-        <input
-          className="field"
-          type="datetime-local"
-          value={config.from || ''}
-          onChange={(e) => set({ from: e.target.value })}
-        />
+        <DateField value={config.from || null} time onChange={(v) => set({ from: v ?? '' })} />
       </label>
       <label className="w-field">
         <span>To</span>
-        <input
-          className="field"
-          type="datetime-local"
-          value={config.to || ''}
-          onChange={(e) => set({ to: e.target.value })}
-        />
+        <DateField value={config.to || null} time onChange={(v) => set({ to: v ?? '' })} />
       </label>
       <div className="w-hint">
         Fill in <b>To</b> alone to count down to it (it counts up once the date passes), <b>From</b> alone to count up

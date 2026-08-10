@@ -5,6 +5,9 @@ const path = require('path');
 const { randomBytes, randomUUID } = require('crypto');
 const { DatabaseSync } = require('node:sqlite');
 const files = require('./files');
+const canvas = require('./canvas');
+const study = require('./study');
+const recur = require('./recur');
 
 let db;
 
@@ -80,7 +83,31 @@ CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_id);
  */
 const TIME_PROP = 'startsAt';
 const DURATION_PROP = 'duration';
+/**
+ * When something finishes. A task is given a length in minutes, but an event is
+ * given an end — a holiday or a flight runs to a moment, sometimes days later,
+ * and "1440 minutes" is nobody's idea of a week away.
+ */
+const END_PROP = 'endsAt';
 const DEFAULT_MINUTES = 60;
+
+/** Where a task says which event it belongs to. */
+const PART_OF_PROP = 'partOf';
+
+/**
+ * How something repeats, and what has happened to the individual days of a
+ * series. `repeat` is a rule string (see recur.js) on the object itself; the
+ * other two are bookkeeping the UI never shows as properties:
+ *
+ *   repeatDone — days of the series that have been ticked off
+ *   repeatSkip — days that were moved out of the series or deleted
+ *
+ * Occurrences are worked out on read, so a series stays one row and editing the
+ * rule changes every future occurrence at once.
+ */
+const REPEAT_PROP = 'repeat';
+const REPEAT_DONE_PROP = 'repeatDone';
+const REPEAT_SKIP_PROP = 'repeatSkip';
 
 /** The builtin types that happen at a time, wherever they get created. */
 const TIMED_TYPES = new Set(['task', 'meeting']);
@@ -94,21 +121,151 @@ function withTimeProps(typeId, defs) {
   const out = [...(defs || [])];
   if (!out.some((p) => p.id === TIME_PROP)) out.push({ id: TIME_PROP, name: 'Starts', kind: 'datetime' });
   if (!out.some((p) => p.id === DURATION_PROP)) out.push({ id: DURATION_PROP, name: 'Minutes', kind: 'number' });
+  if (!out.some((p) => p.id === REPEAT_PROP)) out.push({ id: REPEAT_PROP, name: 'Repeats', kind: 'repeat' });
   return out;
 }
+
+/** The rule on an object, or null when it happens once. */
+const ruleOf = (obj) => recur.parseRule(obj.props[REPEAT_PROP]);
+
+/** Days of a series the object itself no longer answers for. */
+const daySet = (obj, propId) => new Set(Array.isArray(obj.props[propId]) ? obj.props[propId] : []);
+
+/**
+ * The days a scheduled object lands on inside a window: just its own, or every
+ * occurrence of its series minus the ones that were moved out or deleted.
+ */
+function scheduledDays(obj, anchorKey, from, to) {
+  const rule = ruleOf(obj);
+  if (!rule) return anchorKey >= from && anchorKey <= to ? [anchorKey] : [];
+  const skipped = daySet(obj, REPEAT_SKIP_PROP);
+  return recur.occurrences(rule, anchorKey, from, to).filter((key) => !skipped.has(key));
+}
+
+/**
+ * The property that carries an object's place on the calendar. A filled one wins, so
+ * reading and moving always agree about which of several dates is "the" one; an empty
+ * one is still offered, so something unscheduled can be given a time.
+ */
+const scheduleDef = (defs, props, kind) =>
+  defs.find((p) => p.kind === kind && props[p.id]) || defs.find((p) => p.kind === kind);
+
+/**
+ * Take one day out of a series and give it its own object.
+ *
+ * What "move just this one" and "delete just this one" both need: the series
+ * records that the day is no longer its to answer for, and the day becomes a
+ * plain unrepeating copy that can be moved, edited or deleted on its own. Ticks
+ * already made on that day come with it, so nothing appears to un-finish.
+ */
+function detachOccurrence(obj, defs, dayKey) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey || '')) return null;
+  const skip = daySet(obj, REPEAT_SKIP_PROP);
+  if (skip.has(dayKey)) return null;
+  skip.add(dayKey);
+
+  const done = daySet(obj, REPEAT_DONE_PROP);
+  const master = { ...obj.props, [REPEAT_SKIP_PROP]: [...skip].sort() };
+  if (done.has(dayKey)) master[REPEAT_DONE_PROP] = [...done].filter((d) => d !== dayKey).sort();
+  updateObject({ id: obj.id, patch: { props: master } });
+
+  const props = { ...obj.props };
+  delete props[REPEAT_PROP];
+  delete props[REPEAT_DONE_PROP];
+  delete props[REPEAT_SKIP_PROP];
+
+  // Same clock time on its new day, whichever property carries the schedule.
+  const timeDef = scheduleDef(defs, obj.props, 'datetime');
+  const dayDef = scheduleDef(defs, obj.props, 'date');
+  if (timeDef && obj.props[timeDef.id]) props[timeDef.id] = dayKey + String(obj.props[timeDef.id]).slice(10);
+  else if (dayDef && obj.props[dayDef.id]) props[dayDef.id] = dayKey;
+
+  const doneProp = doneDef(obj, getType(obj.typeId));
+  if (doneProp && done.has(dayKey)) props[doneProp.id] = 'Done';
+
+  return createObject({
+    typeId: obj.typeId,
+    title: obj.title,
+    props,
+    extraProps: obj.extraProps || [],
+  });
+}
+
+/** A `datetime` property's value as a local Date, or null when it isn't one. */
+function readStamp(value) {
+  const raw = value == null ? '' : String(value);
+  if (raw.length < 16) return null;
+  const d = new Date(raw.length === 16 ? raw + ':00' : raw);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * For something that runs across days, midnight means "that day" rather than "at
+ * 12am": nobody typing a holiday from the 15th to the 22nd is scheduling a
+ * minute past twelve, and a run of days belongs in the all-day strip anyway.
+ *
+ * Only for runs, though. A single entry dragged to the top of the grid was put
+ * at midnight deliberately, and must stay where it was dropped.
+ */
+const startsAllDay = (d, span) => span > 1 && !!d && d.getHours() === 0 && d.getMinutes() === 0;
+
+/**
+ * How long something runs, in minutes: an explicit length, or the gap to its
+ * end, or the default. Capped at the end of its first day — a run of days is
+ * drawn as a span across them, not as a single block 40 hours tall.
+ */
+function minutesOf(props, startsAt) {
+  const explicit = Number(props[DURATION_PROP]);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.round(explicit);
+  const ends = readStamp(props[END_PROP]);
+  if (ends && startsAt && ends > startsAt) {
+    const mins = Math.round((ends - startsAt) / 60000);
+    const untilMidnight = 24 * 60 - (startsAt.getHours() * 60 + startsAt.getMinutes());
+    return Math.min(mins, untilMidnight);
+  }
+  return DEFAULT_MINUTES;
+}
+
+/** Every day an object covers: one, or the whole run from its start to its end. */
+function spanDays(props, firstKey) {
+  const ends = readStamp(props[END_PROP]);
+  if (!ends) return [firstKey];
+  const lastKey = localKey(ends);
+  if (lastKey <= firstKey) return [firstKey];
+  const out = [];
+  for (let key = firstKey; key <= lastKey && out.length < 400; key = shiftDay(key, 1)) out.push(key);
+  return out;
+}
+
+/** `YYYY-MM-DDTHH:mm`, the shape the datetime properties already store. */
+const stamp = (dayKey, minute) =>
+  `${dayKey}T${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
 
 /** A date's own day, not UTC's — 00:30 local must not land on the day before. */
 const localKey = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
+/** What "not done" is called for a given status property — its first other option. */
+const openStatusOf = (def) => (def.options || []).find((o) => o !== 'Done') || 'Todo';
+
+/** The property that says whether something is finished: a select offering "Done". */
+const doneDef = (obj, type) =>
+  [...(type ? type.properties : []), ...(obj.extraProps || [])].find(
+    (p) => p.kind === 'select' && (p.options || []).includes('Done')
+  );
+
 /**
  * Finished, for any type built the way a task is: a select property offering
  * "Done". The same rule the renderer uses, so a calendar entry fades exactly
  * when its checklist row does.
+ *
+ * A repeating object is finished one day at a time — ticking Tuesday's must not
+ * grey out the rest of the series — so with a `dayKey` the answer comes from the
+ * days ticked off rather than from the shared status.
  */
-function isDoneObject(obj, type) {
-  const defs = [...(type ? type.properties : []), ...(obj.extraProps || [])];
-  const def = defs.find((p) => p.kind === 'select' && (p.options || []).includes('Done'));
+function isDoneObject(obj, type, dayKey = null) {
+  if (dayKey && ruleOf(obj)) return daySet(obj, REPEAT_DONE_PROP).has(dayKey);
+  const def = doneDef(obj, type);
   return !!def && obj.props[def.id] === 'Done';
 }
 
@@ -215,7 +372,7 @@ function getObj(id, withContent = false) {
 }
 
 // Both @-mentions and #-tags are stored as mention-style nodes pointing at an
-// object id, so they produce the same links, backlinks, and graph edges.
+// object id, so they produce the same links and backlinks.
 function collectMentionIds(node, out) {
   if (!node) return out;
   const isMention = node.type === 'mention' || node.type === 'tagMention';
@@ -317,6 +474,55 @@ function rebuildSearchIndex() {
     FROM objects;
   `);
   return db.prepare('SELECT COUNT(*) AS c FROM objects_fts').get().c;
+}
+
+/** Every property across every type that holds a date — due dates, start times, finished-on. */
+function dateProperties() {
+  return db
+    .prepare('SELECT properties FROM types')
+    .all()
+    .flatMap((t) => {
+      try {
+        return JSON.parse(t.properties || '[]');
+      } catch {
+        return [];
+      }
+    })
+    .filter((p) => p.kind === 'date' || p.kind === 'datetime')
+    .map((p) => p.id);
+}
+
+const typeNameMap = () => new Map(db.prepare('SELECT id, name FROM types').all().map((t) => [t.id, t.name]));
+
+/**
+ * The shape the on-device model is fed: what a thing is, when it is, and its
+ * flattened text.
+ *
+ * `props` is summarised into a line rather than handed over as JSON, because
+ * "due: 2026-08-08 · status: To do" is something a small model can read and
+ * `{"due":"2026-08-08","status":"To do"}` is something it tends to quote back.
+ */
+function asContext(row, typeNames) {
+  let detail = '';
+  try {
+    const props = JSON.parse(row.props || '{}');
+    detail = Object.entries(props)
+      .filter(([, v]) => v !== '' && v !== null && v !== undefined && !Array.isArray(v))
+      .slice(0, 6)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join(' · ');
+  } catch {
+    /* a note with unreadable props still has its text */
+  }
+  return {
+    id: row.id,
+    typeId: row.type_id,
+    typeName: typeNames.get(row.type_id) || row.type_id,
+    title: row.title || '',
+    dateKey: row.date_key || null,
+    detail,
+    text: row.search_text || '',
+  };
 }
 
 /** Operators the query bar understands, e.g. `type:task tag:habitat due:week`. */
@@ -1110,9 +1316,65 @@ function setObjectType({ id, typeId }) {
 function deleteObject(id) {
   const gone = getObj(id);
   db.prepare('DELETE FROM links WHERE from_id = ? OR to_id = ?').run(id, id);
+  canvas.forgetObject(db, id);
+  study.forgetObject(db, id);
   db.prepare('DELETE FROM objects WHERE id = ?').run(id);
   if (gone) runAutomations('deleted', gone);
   return true;
+}
+
+/**
+ * The short form a board card shows: enough to draw it without loading a whole
+ * note's document into every tile. `null` when the object is gone, which is how
+ * a card that outlived its target says so.
+ */
+function objectCard(id) {
+  // With content, because a card large enough to read gets the note's text.
+  const obj = getObj(id, true);
+  if (!obj) return null;
+  const type = getType(obj.typeId);
+  const defs = [...(type ? type.properties : []), ...(obj.extraProps || [])];
+
+  /**
+   * Filled properties, already flattened to text. A board card decides how many
+   * of these it has room for, so they arrive in the order the type defines them
+   * and the empty ones are dropped here rather than being counted and skipped in
+   * the renderer.
+   */
+  const props = defs
+    .map((def) => {
+      const raw = obj.props[def.id];
+      const value = Array.isArray(raw) ? raw.filter(Boolean).join(', ') : raw;
+      if (value === undefined || value === null || value === '') return null;
+      if (def.kind === 'checkbox') return { id: def.id, name: def.name, kind: def.kind, value: value ? 'Yes' : 'No' };
+      if (def.kind === 'relation') {
+        // A relation stores ids; a card wants the names behind them.
+        const ids = Array.isArray(raw) ? raw : [raw];
+        const names = ids
+          .map((rid) => db.prepare('SELECT title FROM objects WHERE id = ?').get(String(rid))?.title)
+          .filter(Boolean);
+        if (!names.length) return null;
+        return { id: def.id, name: def.name, kind: def.kind, value: names.join(', ') };
+      }
+      return { id: def.id, name: def.name, kind: def.kind, value: String(value) };
+    })
+    .filter(Boolean);
+
+  return {
+    id: obj.id,
+    title: obj.title,
+    typeId: obj.typeId,
+    typeName: type?.name ?? '',
+    icon: type?.icon ?? 'box',
+    color: type?.color ?? '#9C9C97',
+    snippet: obj.snippet,
+    /** The note's own text, for cards big enough to be worth reading. */
+    body: plainText(obj.content ?? null).slice(0, 1200),
+    props,
+    dateKey: obj.dateKey,
+    done: isDoneObject(obj, type),
+    updatedAt: obj.updatedAt,
+  };
 }
 
 function formatDateKey(dateKey) {
@@ -1132,6 +1394,9 @@ function rolloverTasks() {
   const upd = db.prepare('UPDATE objects SET props = ?, updated_at = ? WHERE id = ?');
   for (const r of rows) {
     const p = JSON.parse(r.props || '{}');
+    // A series keeps its anchor: dragging "every Monday" forward each morning
+    // would rewrite the rule's whole future from a date that was never missed.
+    if (recur.parseRule(p[REPEAT_PROP])) continue;
     if (p.due && p.due < today && p.status !== 'Done') {
       p.due = today;
       p.rolled = true;
@@ -1161,7 +1426,19 @@ function seed() {
 // Validated categorical palette (light-mode hex is canonical; renderer maps to dark steps).
 const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
 
+// Study keeps to itself: its own tables, no object types of its own, nothing in
+// the sidebar's type list. So it gets the connection and nothing else.
+const studyApi = study.create(() => db);
+
 const api = {
+  // Boards and decks keep their own tables and their own modules; they are spread
+  // in here so every channel is still reachable from one place.
+  ...canvas.channels(() => db, {
+    objectCard,
+    fileRow: (hash) => db.prepare('SELECT * FROM files WHERE hash = ?').get(String(hash)) ?? null,
+  }),
+  ...studyApi,
+
   'types:list': () => db.prepare('SELECT * FROM types ORDER BY builtin DESC, created_at').all().map(parseType),
 
   'types:create': ({ name, icon, color }) => {
@@ -1251,35 +1528,141 @@ const api = {
 
       const timeDef = defs.find((p) => p.kind === 'datetime' && obj.props[p.id]);
       const dayDef = defs.find((p) => p.kind === 'date' && obj.props[p.id]);
-      const raw = timeDef ? String(obj.props[timeDef.id]) : null;
       // `datetime-local` values have no zone: read them as local time, which is
       // what the person who typed them meant.
-      const startsAt = raw && raw.length >= 16 ? new Date(raw.length === 16 ? raw + ':00' : raw) : null;
-      const timed = startsAt && !Number.isNaN(startsAt.getTime());
+      const startsAt = timeDef ? readStamp(obj.props[timeDef.id]) : null;
+      const timed = !!startsAt;
 
-      const dayKey = timed
+      const anchor = timed
         ? localKey(startsAt)
         : dayDef
           ? String(obj.props[dayDef.id]).slice(0, 10)
           : row.date_key || null;
-      if (!dayKey || dayKey < first || dayKey > last) continue;
+      if (!anchor) continue;
 
-      const minutes = Number(obj.props[DURATION_PROP]);
-      out.push({
-        id: obj.id,
-        typeId: obj.typeId,
-        typeName: type ? type.name : obj.typeId,
-        title: obj.title || 'Untitled',
-        dayKey,
-        allDay: !timed,
-        startMinute: timed ? startsAt.getHours() * 60 + startsAt.getMinutes() : null,
-        minutes: timed ? (Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_MINUTES) : null,
-        done: isDoneObject(obj, type),
-      });
+      const repeats = !!ruleOf(obj);
+      // A run of days — a holiday, a flight with a stopover — is one entry per
+      // day it covers, and the days after the first are all-day: the hours it
+      // started at say nothing about the middle of a week away.
+      const span = spanDays(obj.props, anchor);
+      // A series contributes one entry per occurrence in the window; everything
+      // else contributes its own day, or nothing when that falls outside.
+      for (const dayKey of scheduledDays(obj, anchor, first, last)) {
+        for (const [i, key] of span.entries()) {
+          const on = i === 0 ? dayKey : shiftDay(dayKey, i);
+          if (key !== span[i] || on < first || on > last) continue;
+          const head = timed && i === 0 && !startsAllDay(startsAt, span.length);
+          out.push({
+            id: obj.id,
+            typeId: obj.typeId,
+            typeName: type ? type.name : obj.typeId,
+            title: obj.title || 'Untitled',
+            dayKey: on,
+            allDay: !head,
+            startMinute: head ? startsAt.getHours() * 60 + startsAt.getMinutes() : null,
+            minutes: head ? minutesOf(obj.props, startsAt) : null,
+            done: isDoneObject(obj, type, on),
+            repeats,
+            /** Which day of a run this is, and how many there are: "2 of 5". */
+            spanDay: span.length > 1 ? i + 1 : null,
+            spanOf: span.length > 1 ? span.length : null,
+          });
+        }
+      }
     }
 
     out.sort((a, b) => a.dayKey.localeCompare(b.dayKey) || (a.startMinute ?? -1) - (b.startMinute ?? -1));
     return out;
+  },
+
+  /**
+   * Move something that's already on the calendar, or change how long it runs.
+   *
+   * The renderer knows pixels, not which property holds the time, so the choice is
+   * made here beside `calendar:range` — a drag and a read can't disagree about where
+   * an object sits. `startMinute` null means all-day.
+   *
+   * Refuses rather than improvises: an object with no datetime property can't be
+   * dropped onto the time grid, because inventing one would quietly change its type's
+   * shape from a gesture as small as a drag.
+   *
+   * Dragging one occurrence of a series moves only that day: the series drops the
+   * day and a copy takes it, which is what "move next Tuesday's standup" means.
+   * Pass `scope: 'all'` to shift the whole series instead.
+   */
+  'calendar:reschedule': ({ id, dayKey, startMinute = null, minutes = null, occurrence = null, scope = 'one' }) => {
+    const key = String(dayKey || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+
+    const row = db.prepare('SELECT * FROM objects WHERE id = ?').get(id);
+    if (!row) return null;
+    // A daily note is its date and a tag is only a label — neither is an appointment.
+    if (row.type_id === 'daily' || row.type_id === 'tag') return null;
+
+    const type = getType(row.type_id);
+    const obj = parseObj(row);
+    const defs = [...(type ? type.properties : []), ...obj.extraProps];
+    const props = { ...obj.props };
+
+    if (occurrence && scope !== 'all' && ruleOf(obj)) {
+      const detached = detachOccurrence(obj, defs, String(occurrence).slice(0, 10));
+      if (!detached) return null;
+      return api['calendar:reschedule']({ id: detached.id, dayKey: key, startMinute, minutes });
+    }
+
+    if (startMinute === null) {
+      const dayDef = scheduleDef(defs, obj.props, 'date');
+      if (!dayDef) return null;
+      props[dayDef.id] = key;
+    } else {
+      const timeDef = scheduleDef(defs, obj.props, 'datetime');
+      if (!timeDef) return null;
+      props[timeDef.id] = stamp(key, Math.max(0, Math.min(24 * 60 - 1, Math.round(startMinute))));
+      if (Number.isFinite(minutes) && minutes > 0) props[DURATION_PROP] = Math.round(minutes);
+    }
+
+    updateObject({ id, patch: { props } });
+    return getObj(id, true);
+  },
+
+  /**
+   * Make something at a spot on the grid. Only types that carry a datetime can be
+   * created this way — the same property `calendar:range` reads them back through.
+   */
+  'calendar:create': ({ typeId, title = '', dayKey, startMinute, minutes = DEFAULT_MINUTES, repeat = null }) => {
+    const key = String(dayKey || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
+
+    const type = getType(typeId);
+    if (!type) return null;
+    const timeDef = type.properties.find((p) => p.kind === 'datetime');
+    if (!timeDef) return null;
+
+    const props = { [timeDef.id]: stamp(key, Math.max(0, Math.min(24 * 60 - 1, Math.round(startMinute)))) };
+    if (Number.isFinite(minutes) && minutes > 0) props[DURATION_PROP] = Math.round(minutes);
+    // Normalised through the parser, so only a rule the calendar can read is stored.
+    const rule = recur.parseRule(repeat);
+    if (rule) props[REPEAT_PROP] = recur.formatRule(rule);
+    return createObject({ typeId, title: String(title).trim() || 'Untitled', props });
+  },
+
+  /**
+   * Take one day off a series without touching the rest of it — "skip this
+   * week's". The day becomes its own object first and is then deleted, so
+   * anything linked to that occurrence goes the way a deleted object goes
+   * rather than silently losing its target.
+   */
+  'calendar:skip': ({ id, dayKey }) => {
+    const row = db.prepare('SELECT * FROM objects WHERE id = ?').get(id);
+    if (!row) return false;
+    const obj = parseObj(row);
+    if (!ruleOf(obj)) return false;
+    const type = getType(row.type_id);
+    const defs = [...(type ? type.properties : []), ...obj.extraProps];
+    const detached = detachOccurrence(obj, defs, String(dayKey || '').slice(0, 10));
+    if (!detached) return false;
+    deleteObject(detached.id);
+    return true;
   },
 
   'objects:get': (id) => getObj(id, true),
@@ -1472,6 +1855,76 @@ const api = {
     return { daily, notes, skipped, tags: tagCache.size, links };
   },
 
+  /**
+   * Everything that falls on a span of days, whatever kind it is.
+   *
+   * `date_key` alone would only find daily notes and anything dragged onto the
+   * calendar. The dates that matter most — a task's due date, an event's start —
+   * live inside the props JSON under a per-type property id, so those are matched
+   * too. Without this, "do I have any tasks today" reads an empty day.
+   */
+  'objects:onDates': ({ from, to, typeId }) => {
+    const dateProps = dateProperties();
+    const where = ["(o.date_key BETWEEN ? AND ?)"];
+    const params = [from, to];
+    if (dateProps.length) {
+      where[0] =
+        `((o.date_key BETWEEN ? AND ?) OR EXISTS (
+            SELECT 1 FROM json_each(o.props)
+             WHERE json_each.key IN (${dateProps.map(() => '?').join(',')})
+               AND substr(json_each.value, 1, 10) BETWEEN ? AND ?))`;
+      params.push(...dateProps, from, to);
+    }
+    if (typeId) {
+      where.push('o.type_id = ?');
+      params.push(typeId);
+    }
+    const names = typeNameMap();
+    return db
+      .prepare(
+        `SELECT id, type_id, title, date_key, props, search_text FROM objects o
+          WHERE ${where.join(' AND ')}
+          ORDER BY (o.type_id = 'daily') DESC, o.date_key DESC, o.updated_at DESC
+          LIMIT 40`
+      )
+      .all(...params)
+      .map((r) => asContext(r, names));
+  },
+
+  /** The most recent objects of one type — "what have I been reading", "any tasks". */
+  'objects:ofType': ({ typeId, limit = 5 }) => {
+    const names = typeNameMap();
+    return db
+      .prepare('SELECT id, type_id, title, date_key, props, search_text FROM objects WHERE type_id = ? ORDER BY updated_at DESC LIMIT ?')
+      .all(typeId, Number(limit) || 5)
+      .map((r) => asContext(r, names));
+  },
+
+  /**
+   * The objects a set of words matches, optionally within one type. Ranked by
+   * the FTS index rather than re-scored here — bm25 already weights the title
+   * above the body, which is the ordering a person expects.
+   */
+  'objects:withText': ({ words, limit = 5, typeId }) => {
+    const expr = ftsExpr(Array.isArray(words) ? words : String(words || '').split(/\s+/), false);
+    const names = typeNameMap();
+    // A question that names only a type — "any movies" — has nothing to match on.
+    if (!expr) return typeId ? api['objects:ofType']({ typeId, limit }) : [];
+    // Same shape as searchObjects for the same reasons — see the note there:
+    // MATCH wants the table's own name, and CROSS JOIN keeps the index as the
+    // outer loop instead of re-running the match once per row.
+    return db
+      .prepare(
+        `SELECT o.id, o.type_id, o.title, o.date_key, o.props, o.search_text
+           FROM objects_fts CROSS JOIN objects o ON o.rowid = objects_fts.rowid
+          WHERE objects_fts MATCH ?${typeId ? ' AND o.type_id = ?' : ''}
+          ORDER BY bm25(objects_fts, 12.0, 1.0, 8.0)
+          LIMIT ?`
+      )
+      .all(...[expr, ...(typeId ? [typeId] : []), Number(limit) || 5])
+      .map((r) => asContext(r, names));
+  },
+
   'daily:list': () =>
     db
       .prepare("SELECT id, date_key, content, updated_at FROM objects WHERE type_id = 'daily' ORDER BY date_key DESC")
@@ -1484,32 +1937,235 @@ const api = {
       .all(id)
       .map((r) => parseObj(r)),
 
-  'graph:data': () => {
-    const nodes = db.prepare('SELECT id, title, type_id, date_key FROM objects').all().map((r) => ({
-      id: r.id,
-      title: r.title || 'Untitled',
-      typeId: r.type_id,
-    }));
-    const have = new Set(nodes.map((n) => n.id));
-    const edges = db
-      .prepare('SELECT DISTINCT from_id, to_id FROM links')
-      .all()
-      .filter((r) => have.has(r.from_id) && have.has(r.to_id))
-      .map((r) => ({ from: r.from_id, to: r.to_id }));
-    return { nodes, edges };
-  },
-
+  /**
+   * A task belongs to a day if it's due then or starts then — either one puts it in
+   * time, which is the same rule the checklist splits on. Only `due` rolls forward
+   * when it's missed: a start time is when something was meant to happen, and moving
+   * it would quietly rewrite history rather than remind anyone.
+   */
   'tasks:forDay': ({ dateKey }) => {
     if (dateKey === localToday()) rolloverTasks();
+    const startsOn = (o) => String(o.props[TIME_PROP] || '').slice(0, 10);
     return db
       .prepare("SELECT * FROM objects WHERE type_id = 'task'")
       .all()
       .map((r) => parseObj(r))
-      .filter((o) => o.props.due === dateKey)
+      .filter((o) => {
+        const anchor = startsOn(o) || o.props.due;
+        // A repeating task shows up on each of its days, with that day's own tick.
+        if (ruleOf(o)) return !!anchor && scheduledDays(o, anchor, dateKey, dateKey).length > 0;
+        return o.props.due === dateKey || startsOn(o) === dateKey;
+      })
+      .map((o) => {
+        if (!ruleOf(o)) return o;
+        // The status shared by the whole series can't speak for one of its days,
+        // so the day's own tick is what the list is handed.
+        const type = getType(o.typeId);
+        const def = doneDef(o, type);
+        if (!def) return { ...o, occurrence: dateKey };
+        const status = isDoneObject(o, type, dateKey) ? 'Done' : openStatusOf(def);
+        return { ...o, occurrence: dateKey, props: { ...o.props, [def.id]: status } };
+      })
       .sort(
         (a, b) =>
-          (a.props.status === 'Done' ? 1 : 0) - (b.props.status === 'Done' ? 1 : 0) || a.createdAt - b.createdAt
+          (a.props.status === 'Done' ? 1 : 0) - (b.props.status === 'Done' ? 1 : 0) ||
+          // Timed first and in order, then whatever only carries a date.
+          (startsOn(a) ? 0 : 1) - (startsOn(b) ? 0 : 1) ||
+          String(a.props[TIME_PROP] || '').localeCompare(String(b.props[TIME_PROP] || '')) ||
+          a.createdAt - b.createdAt
       );
+  },
+
+  /**
+   * The agenda: the next few weeks as days, each with what happens on it.
+   *
+   * Two shapes, told apart the way the rest of Habitat tells them apart. A type
+   * with a "Done" option makes **tasks** — things to work on and tick off. A type
+   * without one, but with a date, makes **events** — things that happen: a
+   * meeting, a flight, a week away. Events hold tasks, through the task's
+   * `partOf`, so an agenda and a booking reference live where they belong; a
+   * task inside an event is shown there and nowhere else.
+   *
+   * Also returns the two piles that aren't on any day: what is late, and what
+   * has never been given one.
+   */
+  'agenda:range': ({ from, days = 21 } = {}) => {
+    const today = localToday();
+    const first = /^\d{4}-\d{2}-\d{2}$/.test(String(from || '')) ? String(from).slice(0, 10) : today;
+    const last = shiftDay(first, Math.max(1, Math.min(180, Number(days) || 21)) - 1);
+
+    const types = new Map(db.prepare('SELECT * FROM types').all().map((r) => [r.id, parseType(r)]));
+    const titleOf = (id) => {
+      const r = db.prepare('SELECT title FROM objects WHERE id = ?').get(id);
+      return r ? r.title || 'Untitled' : null;
+    };
+
+    const byDay = new Map();
+    const dayList = [];
+    for (let key = first; key <= last; key = shiftDay(key, 1)) {
+      const day = { dayKey: key, events: [], tasks: [] };
+      byDay.set(key, day);
+      dayList.push(day);
+    }
+
+    const overdue = [];
+    const backlog = [];
+    /** Tasks waiting for the event they belong to, by event id. */
+    const nested = new Map();
+
+    const rows = db.prepare('SELECT * FROM objects').all();
+    const events = new Map();
+
+    for (const row of rows) {
+      if (row.type_id === 'daily' || row.type_id === 'tag') continue;
+      const type = types.get(row.type_id);
+      const obj = parseObj(row);
+      const defs = [...(type ? type.properties : []), ...obj.extraProps];
+      const status = doneDef(obj, type);
+
+      const timeDef = defs.find((p) => p.kind === 'datetime' && obj.props[p.id]);
+      const dayDef = defs.find((p) => p.kind === 'date' && obj.props[p.id]);
+      const startsAt = timeDef ? readStamp(obj.props[timeDef.id]) : null;
+      const anchor = startsAt
+        ? localKey(startsAt)
+        : dayDef
+          ? String(obj.props[dayDef.id]).slice(0, 10)
+          : null;
+      const rule = ruleOf(obj);
+
+      if (status) {
+        // A task: on a day, late, in an event, or waiting in the backlog.
+        const partOf = [].concat(obj.props[PART_OF_PROP] || []).filter(Boolean)[0] || null;
+        let when = anchor;
+        if (anchor && rule) {
+          const ahead = scheduledDays(obj, anchor, today, shiftDay(today, 366 * 5));
+          when = ahead[0] || scheduledDays(obj, anchor, anchor, today).pop() || anchor;
+        }
+        const done = isDoneObject(obj, type, when);
+        const card = {
+          id: obj.id,
+          typeId: obj.typeId,
+          typeName: type ? type.name : obj.typeId,
+          title: obj.title || 'Untitled',
+          when,
+          startMinute: startsAt ? startsAt.getHours() * 60 + startsAt.getMinutes() : null,
+          minutes: startsAt ? minutesOf(obj.props, startsAt) : null,
+          done,
+          repeats: !!rule,
+          overdue: !!when && when < today && !done,
+          rolled: !!obj.props.rolled,
+          partOf,
+        };
+
+        if (partOf) {
+          if (!nested.has(partOf)) nested.set(partOf, []);
+          nested.get(partOf).push(card);
+        } else if (!when) {
+          if (!done) backlog.push(card);
+        } else if (card.overdue) {
+          overdue.push(card);
+        } else if (byDay.has(when)) {
+          byDay.get(when).tasks.push(card);
+        }
+        continue;
+      }
+
+      // An event: something that happens, on every day it covers.
+      if (!anchor) continue;
+      const span = spanDays(obj.props, anchor);
+      const people = [].concat(obj.props.attendees || []).map(titleOf).filter(Boolean);
+
+      for (const occurrence of scheduledDays(obj, anchor, shiftDay(first, -span.length), last)) {
+        for (let i = 0; i < span.length; i++) {
+          const key = shiftDay(occurrence, i);
+          if (!byDay.has(key)) continue;
+          const head = !!startsAt && i === 0 && !startsAllDay(startsAt, span.length);
+          const entry = {
+            id: obj.id,
+            typeId: obj.typeId,
+            typeName: type ? type.name : obj.typeId,
+            title: obj.title || 'Untitled',
+            dayKey: key,
+            startMinute: head ? startsAt.getHours() * 60 + startsAt.getMinutes() : null,
+            minutes: head ? minutesOf(obj.props, startsAt) : null,
+            endMinute: null,
+            allDay: !head,
+            spanDay: span.length > 1 ? i + 1 : null,
+            spanOf: span.length > 1 ? span.length : null,
+            location: obj.props.location || '',
+            people,
+            repeats: !!rule,
+            /** Filled in below, and only on the first day of a run. */
+            tasks: [],
+          };
+          if (entry.startMinute !== null && entry.minutes) entry.endMinute = entry.startMinute + entry.minutes;
+          byDay.get(key).events.push(entry);
+          if (i === 0) {
+            if (!events.has(obj.id)) events.set(obj.id, []);
+            events.get(obj.id).push(entry);
+          }
+        }
+      }
+    }
+
+    // Tasks join their event once every event is known. An event's card carries
+    // all of them, so its checklist is whole — but one with a day of its own is
+    // also listed there, because "book the parking by Friday" is no use to you
+    // buried inside a holiday three weeks out. The day's copy says which event
+    // it belongs to, so the two readings can't be mistaken for two tasks.
+    for (const [eventId, cards] of nested) {
+      const hosts = events.get(eventId) || [];
+      for (const host of hosts) host.tasks = cards.map((c) => ({ ...c, eventName: host.title }));
+
+      for (const card of cards) {
+        if (card.done) continue;
+        const elsewhere = !hosts.length || !hosts.some((h) => h.dayKey === card.when);
+        const named = { ...card, eventName: hosts.length ? hosts[0].title : null };
+        if (card.overdue) overdue.push(named);
+        else if (card.when && elsewhere && byDay.has(card.when)) byDay.get(card.when).tasks.push(named);
+        else if (!card.when && !hosts.length) backlog.push(named);
+      }
+    }
+
+    const byTime = (a, b) => (a.startMinute ?? -1) - (b.startMinute ?? -1) || a.title.localeCompare(b.title);
+    for (const day of dayList) {
+      day.events.sort(byTime);
+      day.tasks.sort((a, b) => (a.done ? 1 : 0) - (b.done ? 1 : 0) || byTime(a, b));
+    }
+
+    return {
+      days: dayList,
+      overdue: overdue.sort((a, b) => (a.when || '').localeCompare(b.when || '')),
+      backlog: backlog.sort((a, b) => b.id.localeCompare(a.id)),
+    };
+  },
+
+  /**
+   * Tick something off, for a day.
+   *
+   * Ticking a repeating task means "today's is done", never "the series is
+   * over", so for a series the day is remembered and the shared status is left
+   * alone. Everything else just gets its status property set, exactly as
+   * clicking it in a table would.
+   */
+  'tasks:setDone': ({ id, dayKey = null, done = true }) => {
+    const row = db.prepare('SELECT * FROM objects WHERE id = ?').get(id);
+    if (!row) return null;
+    const obj = parseObj(row);
+    const type = getType(row.type_id);
+
+    if (dayKey && ruleOf(obj)) {
+      const days = daySet(obj, REPEAT_DONE_PROP);
+      if (done) days.add(String(dayKey).slice(0, 10));
+      else days.delete(String(dayKey).slice(0, 10));
+      updateObject({ id, patch: { props: { ...obj.props, [REPEAT_DONE_PROP]: [...days].sort() } } });
+      return getObj(id, true);
+    }
+
+    const def = doneDef(obj, type);
+    if (!def) return getObj(id, true);
+    updateObject({ id, patch: { props: { ...obj.props, [def.id]: done ? 'Done' : openStatusOf(def) } } });
+    return getObj(id, true);
   },
 
   'templates:list': ({ typeId }) =>
@@ -1970,6 +2626,16 @@ function initDb(file) {
     // WAL can fail on some filesystems or with stale lock files — the default journal still works.
   }
   db.exec(SCHEMA);
+  db.exec(canvas.SCHEMA);
+  db.exec(canvas.INDEXES);
+  db.exec(study.SCHEMA);
+  // Columns before indexes: a vault from an earlier build still has the old
+  // shape of these tables, and an index over a column that hasn't been added
+  // yet fails the statement and stops the app from opening at all.
+  ensureColumn('reviews', 'before', "before TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn('cards', 'note_id', 'note_id TEXT');
+  ensureColumn('study_notes', 'props', "props TEXT NOT NULL DEFAULT '{}'");
+  db.exec(study.INDEXES);
   ensureColumn('objects', 'extra_props', "extra_props TEXT NOT NULL DEFAULT '[]'");
   ensureColumn('objects', 'search_text', "search_text TEXT NOT NULL DEFAULT ''");
   const starredAdded = ensureColumn('types', 'starred', 'starred INTEGER NOT NULL DEFAULT 0');
@@ -2033,6 +2699,37 @@ function migrate() {
     const rows = db.prepare("SELECT id, content FROM objects WHERE content IS NOT NULL AND search_text = ''").all();
     const upd = db.prepare('UPDATE objects SET search_text = ? WHERE id = ?');
     for (const r of rows) upd.run(plainText(r.content), r.id);
+  });
+
+  /**
+   * Study briefly shipped a builtin Vocabulary type, so every word also became
+   * an object in the sidebar's type list. It shouldn't have: what is made in the
+   * Study tab belongs to the Study tab. The flashcards are the real record and
+   * they stay exactly as they are, history included — only the objects and the
+   * type go. The reverse "recall" cards go with them, since asking both ways is
+   * now something a deck opts into rather than the default.
+   */
+  runOnce('study-no-vocab-type', () => {
+    const orphaned = db.prepare("SELECT id, extra FROM cards WHERE obj_id IN (SELECT id FROM objects WHERE type_id = 'vocab')").all();
+    const reverse = orphaned.filter((c) => {
+      try {
+        return JSON.parse(c.extra || '{}').dir === 'recall';
+      } catch {
+        return false;
+      }
+    });
+    for (const c of reverse) {
+      db.prepare('DELETE FROM reviews WHERE card_id = ?').run(c.id);
+      db.prepare('DELETE FROM cards WHERE id = ?').run(c.id);
+    }
+    db.prepare("UPDATE cards SET obj_id = NULL WHERE obj_id IN (SELECT id FROM objects WHERE type_id = 'vocab')").run();
+    db.exec(
+      `DELETE FROM links WHERE from_id IN (SELECT id FROM objects WHERE type_id = 'vocab')
+          OR to_id IN (SELECT id FROM objects WHERE type_id = 'vocab');
+       DELETE FROM objects WHERE type_id = 'vocab';
+       DELETE FROM templates WHERE type_id = 'vocab';
+       DELETE FROM types WHERE id = 'vocab';`
+    );
   });
 
   /**
@@ -2112,6 +2809,86 @@ function migrate() {
       );
     }
   });
+
+  /**
+   * Repeating came later than timing, so the same types need the rule property
+   * back-filled. Separate from timed-props-v1 rather than folded into it: a
+   * vault that already ran that one would otherwise never be offered `repeat`.
+   */
+  runOnce('repeat-prop-v1', () => {
+    const upd = db.prepare('UPDATE types SET properties = ? WHERE id = ?');
+    for (const typeId of TIMED_TYPES) {
+      const type = getType(typeId);
+      if (!type || type.properties.some((p) => p.id === REPEAT_PROP)) continue;
+      upd.run(JSON.stringify([...type.properties, { id: REPEAT_PROP, name: 'Repeats', kind: 'repeat' }]), typeId);
+    }
+  });
+
+  /**
+   * An Event is a thing that happens — a meeting, a flight, a holiday. It isn't
+   * a to-do and can't be ticked off, which is exactly why it is its own type:
+   * anything with a "Done" option is a task everywhere else in Habitat.
+   *
+   * Tasks live inside events through `partOf`, so a team meeting can carry its
+   * agenda and a flight its booking details.
+   */
+  runOnce('event-type-v2', () => {
+    const defs = [
+      { id: TIME_PROP, name: 'Starts', kind: 'datetime' },
+      { id: END_PROP, name: 'Ends', kind: 'datetime' },
+      { id: 'location', name: 'Where', kind: 'text' },
+      { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: PEOPLE_TYPE },
+      { id: REPEAT_PROP, name: 'Repeats', kind: 'repeat' },
+    ];
+    const existing = getType('event');
+    if (existing) {
+      // An earlier build's Event had a length in minutes rather than an end.
+      const kept = existing.properties.filter((p) => !defs.some((d) => d.id === p.id) && p.id !== DURATION_PROP);
+      db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(JSON.stringify([...defs, ...kept]), 'event');
+      return;
+    }
+    // A vault deliberately emptied to "blank" keeps its empty type list.
+    const others = db.prepare("SELECT COUNT(*) AS c FROM types WHERE id NOT IN ('daily', ?)").get(PEOPLE_TYPE);
+    if (!others || !others.c) return;
+    db.prepare(
+      'INSERT INTO types (id, name, emoji, color, properties, builtin, starred, created_at) VALUES (?, ?, ?, ?, ?, 1, 1, ?)'
+    ).run('event', 'Event', 'calendar-days', '#7b5cd6', JSON.stringify(defs), now());
+  });
+
+  /**
+   * Where a task sits, and what it belongs to. Somewhere to be and someone to be
+   * there with are an event's business now, so Task hands both back — but only
+   * from the type. A task that had a value keeps it as a property of its own,
+   * because deleting what someone typed to tidy a schema is never worth it.
+   */
+  runOnce('task-partof-v1', () => {
+    const type = getType('task');
+    if (!type) return;
+
+    const retired = type.properties.filter((p) => p.id === 'location' || p.id === 'attendees');
+    const defs = type.properties.filter((p) => !retired.includes(p));
+    if (!defs.some((p) => p.id === 'partOf'))
+      defs.push({ id: 'partOf', name: 'Part of', kind: 'relation', targetTypeId: 'event' });
+    db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(JSON.stringify(defs), 'task');
+
+    if (!retired.length) return;
+    const upd = db.prepare('UPDATE objects SET extra_props = ? WHERE id = ?');
+    for (const row of db.prepare("SELECT id, props, extra_props FROM objects WHERE type_id = 'task'").all()) {
+      let props, extra;
+      try {
+        props = JSON.parse(row.props || '{}');
+        extra = JSON.parse(row.extra_props || '[]');
+      } catch {
+        continue;
+      }
+      const filled = retired.filter((p) => {
+        const v = props[p.id];
+        return v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length);
+      });
+      const add = filled.filter((p) => !extra.some((e) => e.id === p.id));
+      if (add.length) upd.run(JSON.stringify([...extra, ...add]), row.id);
+    }
+  });
 }
 
 /** Run a one-time data migration, remembered in the kv table. */
@@ -2157,6 +2934,17 @@ const FLAVOR_TYPES = {
       properties: [
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
+        { id: 'partOf', name: 'Part of', kind: 'relation', targetTypeId: 'event' },
+      ],
+    },
+    {
+      id: 'event', name: 'Event', icon: 'calendar-days', color: '#7b5cd6',
+      properties: [
+        { id: 'startsAt', name: 'Starts', kind: 'datetime' },
+        { id: 'endsAt', name: 'Ends', kind: 'datetime' },
+        { id: 'location', name: 'Where', kind: 'text' },
+        { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: 'people' },
+        { id: 'repeat', name: 'Repeats', kind: 'repeat' },
       ],
     },
     {
@@ -2191,6 +2979,17 @@ const FLAVOR_TYPES = {
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
         { id: 'project', name: 'Project', kind: 'relation', targetTypeId: 'project' },
+        { id: 'partOf', name: 'Part of', kind: 'relation', targetTypeId: 'event' },
+      ],
+    },
+    {
+      id: 'event', name: 'Event', icon: 'calendar-days', color: '#7b5cd6',
+      properties: [
+        { id: 'startsAt', name: 'Starts', kind: 'datetime' },
+        { id: 'endsAt', name: 'Ends', kind: 'datetime' },
+        { id: 'location', name: 'Where', kind: 'text' },
+        { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: 'people' },
+        { id: 'repeat', name: 'Repeats', kind: 'repeat' },
       ],
     },
     {
@@ -2216,6 +3015,17 @@ const FLAVOR_TYPES = {
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
         { id: 'course', name: 'Course', kind: 'relation', targetTypeId: 'course' },
+        { id: 'partOf', name: 'Part of', kind: 'relation', targetTypeId: 'event' },
+      ],
+    },
+    {
+      id: 'event', name: 'Event', icon: 'calendar-days', color: '#7b5cd6',
+      properties: [
+        { id: 'startsAt', name: 'Starts', kind: 'datetime' },
+        { id: 'endsAt', name: 'Ends', kind: 'datetime' },
+        { id: 'location', name: 'Where', kind: 'text' },
+        { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: 'people' },
+        { id: 'repeat', name: 'Repeats', kind: 'repeat' },
       ],
     },
   ],
@@ -2241,6 +3051,17 @@ const FLAVOR_TYPES = {
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
         { id: 'project', name: 'Project', kind: 'relation', targetTypeId: 'project' },
+        { id: 'partOf', name: 'Part of', kind: 'relation', targetTypeId: 'event' },
+      ],
+    },
+    {
+      id: 'event', name: 'Event', icon: 'calendar-days', color: '#7b5cd6',
+      properties: [
+        { id: 'startsAt', name: 'Starts', kind: 'datetime' },
+        { id: 'endsAt', name: 'Ends', kind: 'datetime' },
+        { id: 'location', name: 'Where', kind: 'text' },
+        { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: 'people' },
+        { id: 'repeat', name: 'Repeats', kind: 'repeat' },
       ],
     },
   ],
@@ -2320,8 +3141,8 @@ function seedFlavor(flavor) {
 
 // ---------- People ----------
 //
-// People is a type like any other — so @-mentions, relations, backlinks and the
-// graph all keep working — but it ships with a fixed set of properties and has
+// People is a type like any other — so @-mentions, relations and backlinks all
+// keep working — but it ships with a fixed set of properties and has
 // its own view instead of the generic table. PEOPLE_PROPS live on the type;
 // PEOPLE_FIELDS is a catalogue of extras any single person can be given. The
 // user's own card is the exception: it is its own entity, fixed once made and

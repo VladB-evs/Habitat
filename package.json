@@ -8,13 +8,14 @@
   "scripts": {
     "dev": "node scripts/dev-app-name.mjs && concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && HABITAT_DEV=1 electron .\"",
     "build": "vite build",
+    "build:ai": "node scripts/build-ai.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --test electron/*.test.mjs",
     "start": "node scripts/dev-app-name.mjs && npm run build && electron .",
     "app": "node scripts/dev-app-name.mjs && electron .",
     "mcp": "node mcp/server.mjs",
-    "dist": "npm run build && electron-builder --publish never",
-    "release": "npm run build && electron-builder --publish always",
+    "dist": "npm run build:ai && npm run build && electron-builder --publish never",
+    "release": "npm run build:ai && npm run build && electron-builder --publish always",
     "icon": "node scripts/make-icon.mjs && iconutil -c icns build/icon.iconset -o build/icon.icns"
   },
   "dependencies": {
@@ -22,6 +23,7 @@
     "@tiptap/extension-code-block-lowlight": "^2.27.2",
     "@tiptap/extension-color": "^2.27.2",
     "@tiptap/extension-highlight": "^2.27.2",
+    "@tiptap/extension-link": "^2.27.2",
     "@tiptap/extension-mathematics": "^2.27.2",
     "@tiptap/extension-mention": "^2.27.2",
     "@tiptap/extension-placeholder": "^2.27.2",
@@ -99,6 +101,12 @@
         }
       ],
       "artifactName": "${productName}-${version}.${ext}",
+      "extraResources": [
+        {
+          "from": "native",
+          "to": "native"
+        }
+      ],
       "identity": null,
       "gatekeeperAssess": false,
       "icon": "build/icon.icns"

@@ -52,9 +52,19 @@ function inlineNodes(line, { onTag, onLink } = {}) {
       continue;
     }
 
+    // [label](url) keeps its destination as a link mark. Anything that isn't a web,
+    // mail or phone address is flattened to its label — an imported note must not be
+    // able to smuggle in a scheme the app would later hand to the OS.
     const link = /^\[([^\]]*)\]\(([^)]+)\)/.exec(rest);
     if (link) {
-      buf += link[1] || link[2];
+      const href = link[2].trim();
+      const label = link[1] || href;
+      if (/^(https?:|mailto:|tel:)/i.test(href)) {
+        flush();
+        out.push({ type: 'text', text: label, marks: [{ type: 'link', attrs: { href } }] });
+      } else {
+        buf += label;
+      }
       rest = rest.slice(link[0].length);
       continue;
     }

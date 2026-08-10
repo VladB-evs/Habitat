@@ -3,17 +3,13 @@ import { api } from '../api';
 import { useApp } from '../store';
 import type { FileRef, Obj, PropDef } from '../types';
 import { fileUrl, isImage } from '../media';
-import { optionColor } from '../util';
+import { optionColor, popPos } from '../util';
+import { DateField } from './DateField';
 import { Icon } from './Icons';
+import { RepeatField } from './RepeatField';
 
-/** Clamp a popover position near an anchor element to the viewport. */
-export function popPos(anchor: HTMLElement, w = 260, h = 320) {
-  const r = anchor.getBoundingClientRect();
-  const left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12));
-  let top = r.bottom + 6;
-  if (top + h > window.innerHeight - 12) top = Math.max(12, r.top - h - 6);
-  return { left, top };
-}
+// Lived here first; still re-exported so the popover callers don't all have to move.
+export { popPos };
 
 function TextCell({
   value,
@@ -39,6 +35,7 @@ function TextCell({
   const input = (
     <input
       className={'cell-input' + (name ? ' name' : '')}
+      spellCheck={!number}
       value={v}
       placeholder={shown}
       inputMode={number ? 'decimal' : undefined}
@@ -396,7 +393,18 @@ function FileCell({ value, onChange }: { value: any; onChange: (v: any) => void 
   );
 }
 
-export function Cell({ def, value, onChange }: { def: PropDef; value: any; onChange: (v: any) => void }) {
+export function Cell({
+  def,
+  value,
+  onChange,
+  anchor,
+}: {
+  def: PropDef;
+  value: any;
+  onChange: (v: any) => void;
+  /** The object's own date, for a repeat rule that is counted from it. */
+  anchor?: string | null;
+}) {
   switch (def.kind) {
     case 'text':
       return <TextCell value={value} onCommit={onChange} />;
@@ -404,6 +412,7 @@ export function Cell({ def, value, onChange }: { def: PropDef; value: any; onCha
       return (
         <textarea
           className="cell-input area"
+          spellCheck
           rows={2}
           defaultValue={value ?? ''}
           onBlur={(e) => e.target.value !== (value ?? '') && onChange(e.target.value)}
@@ -422,16 +431,9 @@ export function Cell({ def, value, onChange }: { def: PropDef; value: any; onCha
     case 'multiselect':
       return <SelectCell def={def} value={value} onChange={onChange} multi />;
     case 'date':
-      return <input type="date" className="cell-input" value={value ?? ''} onChange={(e) => onChange(e.target.value || null)} />;
+      return <DateField value={value} onChange={onChange} />;
     case 'datetime':
-      return (
-        <input
-          type="datetime-local"
-          className="cell-input"
-          value={value ?? ''}
-          onChange={(e) => onChange(e.target.value || null)}
-        />
-      );
+      return <DateField value={value} onChange={onChange} time />;
     case 'rating':
       return <RatingCell value={value} onChange={onChange} />;
     case 'progress':
@@ -448,6 +450,8 @@ export function Cell({ def, value, onChange }: { def: PropDef; value: any; onCha
       return <FileCell value={value} onChange={onChange} />;
     case 'relation':
       return <RelationCell def={def} value={Array.isArray(value) ? value : []} onChange={onChange} />;
+    case 'repeat':
+      return <RepeatField value={value} onChange={onChange} anchor={anchor} />;
     default:
       return null;
   }

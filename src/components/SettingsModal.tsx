@@ -165,6 +165,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                         </button>
                       </div>
                     </div>
+                    <SpellCheck />
                     <UpdateSettings />
                   </div>
                 </section>
@@ -332,6 +333,34 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Underlines misspellings in titles, notes and text properties. Right-click one for suggestions. */
+function SpellCheck() {
+  const [on, setOn] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    api.spellcheck.get().then(setOn);
+  }, []);
+
+  if (on === null) return null;
+
+  const flip = () => {
+    setOn(!on);
+    api.spellcheck.set(!on);
+  };
+
+  return (
+    <div className="set-item">
+      <div>
+        <div className="set-name">Spell check</div>
+        <div className="set-note">Underlines misspellings as you write. Right-click a word for suggestions.</div>
+      </div>
+      <button className={'toggle' + (on ? ' on' : '')} onClick={flip} aria-label="Spell check" aria-pressed={on}>
+        <span className="knob" />
+      </button>
     </div>
   );
 }

@@ -1,14 +1,33 @@
 import type {
   CalEntry,
+  CanvasDoc,
+  CanvasEdge,
+  CanvasItem,
+  CanvasItemData,
+  CanvasMeta,
+  CanvasSummary,
+  Card,
+  CardKind,
   DailyMeta,
   DashLayout,
-  GraphData,
+  Deck,
+  DeckConfig,
+  DeckCounts,
   FileRef,
+  NewCanvasItem,
+  ObjectCard,
+  ParsedCard,
+  Rating,
+  Side,
+  StudyNote,
+  StudyOverview,
+  StudyQueue,
   Obj,
   ObjType,
   Person,
   PersonFieldGroup,
   PropDef,
+  Agenda,
   SettingsInfo,
   Stats,
   TagObj,
@@ -16,12 +35,14 @@ import type {
   UserVar,
 } from './types';
 import type { Automation, HttpApiConfig, TelegramConfig, UpdateState } from './types';
+import type { AiAction, AiAnswer, AiAvailability, AiDelta, AiResult } from './types';
 
 declare global {
   interface Window {
     habitat: {
       invoke: (channel: string, payload?: any) => Promise<any>;
       onUpdateState?: (fn: (state: UpdateState) => void) => () => void;
+      onAiDelta?: (fn: (msg: AiDelta) => void) => () => void;
     };
   }
 }
@@ -73,17 +94,150 @@ export const api = {
   },
   tasks: {
     forDay: (dateKey: string): Promise<Obj[]> => inv('tasks:forDay', { dateKey }),
+    /**
+     * Tick something off. `dayKey` matters for a repeating task: it marks that
+     * day done rather than ending the series.
+     */
+    setDone: (p: { id: string; dayKey?: string | null; done: boolean }): Promise<Obj | null> =>
+      inv('tasks:setDone', p),
+    /** Days, each with what happens on it, plus what's late and what's unplanned. */
+    agenda: (from: string, days = 21): Promise<Agenda> => inv('agenda:range', { from, days }),
   },
   /** Everything happening between two day keys, across every type. */
   calendar: (from: string, to: string): Promise<CalEntry[]> => inv('calendar:range', { from, to }),
+  /**
+   * Drag on the grid: `startMinute` null parks it in the all-day strip. Dragging
+   * one day of a series moves only that day unless `scope` says otherwise, and
+   * the object it returns is then the new one that day became.
+   */
+  reschedule: (p: {
+    id: string;
+    dayKey: string;
+    startMinute?: number | null;
+    minutes?: number | null;
+    occurrence?: string | null;
+    scope?: 'one' | 'all';
+  }): Promise<Obj | null> => inv('calendar:reschedule', p),
+  scheduleNew: (p: {
+    typeId: string;
+    title: string;
+    dayKey: string;
+    startMinute: number;
+    minutes?: number;
+    repeat?: string | null;
+  }): Promise<Obj | null> => inv('calendar:create', p),
+  /** Drop one day from a series and leave the rest of it running. */
+  skipOccurrence: (p: { id: string; dayKey: string }): Promise<boolean> => inv('calendar:skip', p),
   daily: {
     get: (dateKey: string): Promise<Obj | null> => inv('daily:get', { dateKey }),
     create: (dateKey: string, content: any): Promise<Obj> => inv('daily:create', { dateKey, content }),
     list: (): Promise<DailyMeta[]> => inv('daily:list'),
   },
   backlinks: (id: string): Promise<Obj[]> => inv('backlinks:list', id),
-  graph: (): Promise<GraphData> => inv('graph:data'),
   stats: (): Promise<Stats> => inv('stats:get'),
+  /**
+   * Boards. Geometry is written through `moveItems` in one batch per drag rather
+   * than a call per card, so dragging a selection of forty stays one round trip.
+   */
+  canvas: {
+    list: (): Promise<CanvasSummary[]> => inv('canvas:list'),
+    create: (p?: { name?: string; icon?: string; color?: string }): Promise<CanvasMeta> => inv('canvas:create', p ?? {}),
+    get: (id: string): Promise<CanvasDoc | null> => inv('canvas:get', id),
+    patch: (id: string, patch: Partial<Pick<CanvasMeta, 'name' | 'icon' | 'color' | 'view'>>): Promise<CanvasMeta | null> =>
+      inv('canvas:patch', { id, patch }),
+    remove: (id: string): Promise<boolean> => inv('canvas:delete', id),
+    addItems: (canvasId: string, items: NewCanvasItem[]): Promise<CanvasItem[]> => inv('canvas:addItems', { canvasId, items }),
+    moveItems: (canvasId: string, items: { id: string; x: number; y: number; w: number; h: number }[]): Promise<boolean> =>
+      inv('canvas:moveItems', { canvasId, items }),
+    patchItem: (id: string, patch: Partial<Pick<CanvasItem, 'x' | 'y' | 'w' | 'h'>> & { data?: CanvasItemData }): Promise<CanvasItem | null> =>
+      inv('canvas:patchItem', { id, patch }),
+    removeItems: (canvasId: string, ids: string[]): Promise<boolean> => inv('canvas:removeItems', { canvasId, ids }),
+    /** Ids in the order they should stack, bottom first. */
+    order: (canvasId: string, ids: string[]): Promise<boolean> => inv('canvas:order', { canvasId, ids }),
+    addEdge: (p: {
+      canvasId: string;
+      from: string;
+      to: string;
+      fromSide?: Side;
+      toSide?: Side;
+      label?: string;
+      color?: string | null;
+    }): Promise<CanvasEdge | null> => inv('canvas:addEdge', p),
+    patchEdge: (id: string, patch: Partial<Omit<CanvasEdge, 'id' | 'from' | 'to'>>): Promise<CanvasEdge | null> =>
+      inv('canvas:patchEdge', { id, patch }),
+    removeEdge: (id: string): Promise<boolean> => inv('canvas:removeEdge', id),
+    /** Undo's one move: put the board back exactly as it was, ids intact. */
+    replace: (canvasId: string, items: CanvasItem[], edges: CanvasEdge[]): Promise<boolean> =>
+      inv('canvas:replace', { canvasId, items, edges }),
+    /** The boards an object appears on, for its page's backlinks area. */
+    forObject: (id: string): Promise<{ id: string; name: string; icon: string; color: string }[]> => inv('canvas:forObject', id),
+  },
+  /**
+   * Flashcards and their schedule. The scheduler lives in the main process, so
+   * what a button will do is decided in one place — the renderer only ever shows
+   * the intervals it is handed back.
+   */
+  study: {
+    overview: (): Promise<StudyOverview> => inv('study:overview'),
+    decks: (): Promise<Deck[]> => inv('study:decks'),
+    deckCreate: (p: { name?: string; icon?: string; color?: string; lang?: string; config?: DeckConfig }): Promise<Deck> =>
+      inv('study:deckCreate', p),
+    deckPatch: (id: string, patch: Partial<Pick<Deck, 'name' | 'icon' | 'color' | 'lang'>> & { config?: DeckConfig }): Promise<Deck | null> =>
+      inv('study:deckPatch', { id, patch }),
+    deckDelete: (id: string): Promise<boolean> => inv('study:deckDelete', id),
+    /** What to show next. No `deckId` studies every deck at once. */
+    queue: (p?: { deckId?: string; limit?: number }): Promise<StudyQueue> => inv('study:queue', p ?? {}),
+    answer: (p: { id: string; rating: Rating; ms?: number }): Promise<{ card: Card; counts: DeckCounts } | null> =>
+      inv('study:answer', p),
+    /** Take back the most recent answer, wherever it was given. */
+    undo: (): Promise<Card | null> => inv('study:undo'),
+    cards: (p?: { deckId?: string; q?: string; limit?: number }): Promise<Card[]> => inv('study:cards', p ?? {}),
+    cardCreate: (p: { deckId: string; front: string; back: string; hint?: string; kind?: CardKind; objId?: string }): Promise<Card | null> =>
+      inv('study:cardCreate', p),
+    cardPatch: (
+      id: string,
+      patch: Partial<Pick<Card, 'front' | 'back' | 'hint' | 'deckId' | 'suspended'>> & { reset?: boolean }
+    ): Promise<Card | null> => inv('study:cardPatch', { id, patch }),
+    cardDelete: (id: string): Promise<boolean> => inv('study:cardDelete', id),
+    /**
+     * Text into cards. `dry: true` returns what it found without writing, which
+     * is what the import preview is built on.
+     */
+    cardsFromText: (p: { deckId?: string; text: string; objId?: string; noteId?: string; dry?: boolean }): Promise<ParsedCard[] | Card[]> =>
+      inv('study:cardsFromText', p),
+    /**
+     * A word. One card unless the deck asks both ways — nothing is written to
+     * the vault, and no object type is created.
+     */
+    vocabAdd: (p: {
+      term: string;
+      meaning: string;
+      reading?: string;
+      example?: string;
+      language?: string;
+      deckId?: string;
+    }): Promise<{ deck: Deck; cards: Card[] } | null> => inv('study:vocabAdd', p),
+    languages: (): Promise<string[]> => inv('study:languages'),
+    /** Class notes, kept inside Study rather than as objects in the vault. */
+    notes: (): Promise<StudyNote[]> => inv('study:notes'),
+    noteGet: (id: string): Promise<StudyNote | null> => inv('study:noteGet', id),
+    noteCreate: (p?: { title?: string; body?: string; deckId?: string }): Promise<StudyNote> => inv('study:noteCreate', p ?? {}),
+    /** Properties merge; setting one to an empty string removes it. */
+    notePatch: (id: string, patch: Partial<Pick<StudyNote, 'title' | 'body' | 'deckId' | 'props'>>): Promise<StudyNote | null> =>
+      inv('study:notePatch', { id, patch }),
+    noteDelete: (id: string): Promise<boolean> => inv('study:noteDelete', id),
+    /**
+     * What a note could become, or — without `dry` — what it becomes. A second
+     * pass only adds lines the note hasn't already turned into cards.
+     */
+    noteToCards: (p: {
+      noteId: string;
+      deckId?: string;
+      deckName?: string;
+      dry?: boolean;
+    }): Promise<{ cards: ParsedCard[] | Card[]; deck: Deck | null }> => inv('study:noteToCards', p),
+    history: (days?: number): Promise<{ day: string; n: number; again: number }[]> => inv('study:history', { days }),
+  },
   dashboard: {
     /** `null` when the user has never customised it — callers install the default layout. */
     get: (): Promise<DashLayout | null> => inv('dashboard:get'),
@@ -94,6 +248,10 @@ export const api = {
     get: (): Promise<SettingsInfo> => inv('settings:get'),
     chooseVault: (): Promise<{ dbPath: string; changed: boolean; existed: boolean } | null> => inv('settings:chooseVault'),
     reveal: (): Promise<boolean> => inv('settings:reveal'),
+  },
+  spellcheck: {
+    get: (): Promise<boolean> => inv('spellcheck:get'),
+    set: (enabled: boolean): Promise<boolean> => inv('spellcheck:set', enabled),
   },
   window: {
     /** macOS only: hide the close/minimise/zoom buttons while the sidebar is collapsed. */
@@ -222,5 +380,33 @@ export const api = {
     }): Promise<boolean> => inv('habitats:onboard', p),
     remove: (id: string): Promise<{ ok: boolean; onboarding?: boolean; activeId?: string } | null> =>
       inv('habitats:delete', { id }),
+  },
+  /**
+   * Apple's on-device model. Everything here runs locally and offline; nothing
+   * is sent anywhere. What it can't do is hold much at once, so `run` refuses
+   * long selections rather than failing halfway.
+   */
+  ai: {
+    availability: (): Promise<AiAvailability> => inv('ai:availability'),
+    actions: (): Promise<AiAction[]> => inv('ai:actions'),
+    /** Loads the model ahead of the first click. Fire and forget. */
+    prewarm: (): Promise<boolean> => inv('ai:prewarm'),
+    run: (p: { id: string; action: string; text: string }): Promise<AiResult> => inv('ai:run', p),
+    cancel: (id: string): Promise<boolean> => inv('ai:cancel', id),
+    /**
+     * A question about the vault, answered from it. Which notes were read is
+     * decided here in code — never by the model — and comes back as `sources`
+     * so the answer can be checked against what it was built from.
+     */
+    ask: (p: { id: string; question: string }): Promise<AiAnswer> => inv('ai:ask', p),
+    /**
+     * Plain English into the search bar's own operator syntax, e.g. "tasks about
+     * the calendar due this week" → `type:task due:week calendar`. Returns the
+     * query rather than the results, so the palette can show its working.
+     */
+    search: (text: string): Promise<{ ok: boolean; query?: string; error?: string }> =>
+      inv('ai:search', { text }),
+    /** Watch a run being written. Returns an unsubscribe. */
+    onDelta: (fn: (msg: AiDelta) => void): (() => void) => window.habitat.onAiDelta?.(fn) ?? (() => {}),
   },
 };

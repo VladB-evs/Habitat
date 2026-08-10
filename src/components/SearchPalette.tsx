@@ -43,6 +43,52 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
   const [index, setIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  /** Offered only where Apple Intelligence actually exists. */
+  const [aiReady, setAiReady] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState('');
+  /** What was typed before the model rewrote it, so the change can be undone. */
+  const [asked, setAsked] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    api.ai
+      .availability()
+      .then((state) => alive && setAiReady(state.available))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  /**
+   * Hands the query to the model and puts its operators in the box — rather than
+   * running a hidden search of its own. The user sees exactly what was
+   * understood, can fix a wrong guess by editing one word, and learns the syntax
+   * by watching it get written.
+   */
+  const interpret = async () => {
+    const text = q.trim();
+    if (!text || aiBusy) return;
+    setAiBusy(true);
+    setAiError('');
+    const res = await api.ai.search(text);
+    setAiBusy(false);
+    if (res.ok && res.query) {
+      setAsked(text);
+      setQ(res.query);
+      inputRef.current?.focus();
+    } else {
+      setAiError(res.error || "Couldn't turn that into a search.");
+    }
+  };
+
+  const undoInterpret = () => {
+    setQ(asked);
+    setAsked('');
+    inputRef.current?.focus();
+  };
+
   useEffect(() => {
     let alive = true;
     api.objects.search(q, { content: true }).then((r) => {
@@ -78,6 +124,13 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') onClose();
+    // ⌘↵ rather than ↵: the plain key opens what's highlighted, and that has to
+    // keep working while you type.
+    if (e.key === 'Enter' && e.metaKey) {
+      e.preventDefault();
+      interpret();
+      return;
+    }
     if (e.key === 'ArrowDown') {
       e.preventDefault();
       setIndex((i) => (total ? (i + 1) % total : 0));
@@ -106,9 +159,31 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
           placeholder="Search your Habitat…"
           value={q}
           autoFocus
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            // Editing by hand makes the model's version yours, so there is
+            // nothing left to undo.
+            setAsked('');
+            setAiError('');
+          }}
           onKeyDown={onKey}
         />
+
+        {(aiBusy || asked || aiError) && (
+          <div className={'palette-ai' + (aiError ? ' bad' : '')}>
+            <Icon name="sparkles" size={12} />
+            {aiBusy && <span>Reading your request…</span>}
+            {!aiBusy && aiError && <span>{aiError}</span>}
+            {!aiBusy && !aiError && asked && (
+              <>
+                <span className="palette-ai-from">from “{asked}”</span>
+                <button className="palette-ai-undo" onClick={undoInterpret}>
+                  undo
+                </button>
+              </>
+            )}
+          </div>
+        )}
         <div className="palette-results">
           {results.map((o, i) => (
             <button
@@ -159,6 +234,7 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
         <div className="palette-hint">
           <span>↑↓ navigate</span>
           <span>↵ open</span>
+          {aiReady && <span>⌘↵ ask for filters</span>}
           <span>esc close</span>
         </div>
       </motion.div>

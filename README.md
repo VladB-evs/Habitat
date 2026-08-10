@@ -42,8 +42,14 @@ up. Settings → General shows the exact path and the habitat's code.
 - **Property** — text, number, select, multi-select, date, rating, progress, relation and more.
   Select values get a stable colour derived from the value itself.
 - **Link** — created from `@`-mentions in any editor and from relation properties. Backlinks sit at
-  the bottom of every object page; the Graph view draws the whole web.
+  the bottom of every object page.
 - **Daily Note** — one object per day, keyed by date.
+- **Canvas** — freeform boards. Drop objects from the vault, sticky notes, images, files and links
+  onto an infinite surface and draw connectors between any two. A board holds references, so
+  deleting a card never touches the object behind it.
+- **Study** — decks of flashcards on a spaced-repetition schedule (SM-2 with learning steps).
+  Vocabulary entries are ordinary objects that double as cards, one each way; any selection in a
+  note can be cut into a card without leaving the page.
 - **People** — the address book, with its own view instead of a table: a card for you, upcoming
   birthdays, and a person page with contact details. Still ordinary objects, so `@`-mentions,
   relations and backlinks all work.

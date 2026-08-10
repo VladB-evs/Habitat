@@ -20,6 +20,7 @@ export const KIND_LABELS: Record<PropKind, string> = {
   color: 'Color',
   file: 'Files',
   relation: 'Relation',
+  repeat: 'Repeats',
 };
 
 /** Kinds that carry a list of choices. */

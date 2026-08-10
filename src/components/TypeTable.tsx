@@ -5,7 +5,7 @@ import { dialogIn, snap, spring } from '../motion';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
 import type { Obj, PropDef, Template } from '../types';
-import { clientUid, fmtMonthYear, keyOf, monthCells, monthStartKey, openStatusOf, taskProp, todayKey, typeColor } from '../util';
+import { anchorDate, clientUid, fmtMonthYear, keyOf, monthCells, monthStartKey, openStatusOf, taskProp, todayKey, typeColor } from '../util';
 import type { TypeView, ViewMode } from '../viewModel';
 import {
   CREATED_FIELD,
@@ -19,12 +19,26 @@ import {
   viewFields,
 } from '../viewModel';
 import { Cell, TextCell, popPos } from './cells';
+import { DateField } from './DateField';
+import { fmtClock, fromValue } from '../dateParse';
 import { Icon, TypeIcon } from './Icons';
 import { SplitControls } from './SplitControls';
 import { PropEditor } from './PropEditor';
 import { BoardView, GalleryView } from './typeViews';
 import { TypeEditor } from './TypeEditor';
 import { ViewBar } from './ViewBar';
+
+/**
+ * The date on a checklist row, which may be a plain day or a start time — the
+ * badge shows the hour only when there is one.
+ */
+function fmtWhenBadge(value: string): string {
+  const key = value.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return value;
+  const day = new Date(key + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const when = fromValue(value);
+  return when && when.minutes !== null ? `${day} · ${fmtClock(when.minutes)}` : day;
+}
 
 /**
  * Defined at module scope on purpose: nesting these inside TypeTable made React
@@ -84,11 +98,7 @@ function ChecklistRow({
       <button className="row-open" onClick={onOpen} aria-label="Open" title="Open (⌘-click opens beside)">
         <Icon name="arrow-up-right" size={13} />
       </button>
-      {due && !done && (
-        <span className="checklist-due">
-          {new Date(due + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-        </span>
-      )}
+      {due && !done && <span className="checklist-due">{fmtWhenBadge(due)}</span>}
       <button className="row-del" onClick={onDelete} aria-label="Delete">
         <Icon name="trash" size={14} />
       </button>
@@ -133,6 +143,7 @@ function QuickAdd({
       </span>
       <input
         className="day-task-input"
+        spellCheck
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -142,7 +153,15 @@ function QuickAdd({
   );
 }
 
-export function TypeTable({ typeId }: { typeId: string }) {
+/**
+ * A type's own page: its objects in whichever view is set, with the filters,
+ * sorting and templates that belong to the type.
+ *
+ * `embedded` drops the page header — the Tasks page shows this as one of its
+ * modes and already has a header of its own, but the view bar underneath still
+ * belongs to the table.
+ */
+export function TypeTable({ typeId, embedded = false }: { typeId: string; embedded?: boolean }) {
   const { types, reloadTypes, openObject, openFrom, openBeside, navigate, theme } = useApp();
   const type = types.find((t) => t.id === typeId);
   const [objs, setObjs] = useState<Obj[]>([]);
@@ -215,6 +234,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
   const doneProp = taskProp(type);
   const openStatus = openStatusOf(doneProp);
   const dueProp = type.properties.find((p) => p.kind === 'date');
+  const startProp = type.properties.find((p) => p.kind === 'datetime');
   const allInlineNames = [
     ...new Set(objs.flatMap((o) => (o.extraProps ?? []).filter((p) => p.kind !== 'relation').map((p) => p.name))),
   ];
@@ -244,16 +264,37 @@ export function TypeTable({ typeId }: { typeId: string }) {
     return String(o.props[calField.key] ?? '').slice(0, 10);
   };
 
+  /**
+   * When a task sits in time — a due date, a start time, or both. Either one is
+   * enough: something starting at 09:30 is scheduled whether or not it also has a
+   * day it's due by.
+   */
+  const dueOf = (o: Obj) => (dueProp ? String(o.props[dueProp.id] ?? '') : '');
+  const startOf = (o: Obj) => (startProp ? String(o.props[startProp.id] ?? '') : '');
+  /** The earliest of the two, for sorting and for the badge on the row. */
+  const whenOf = (o: Obj) => [dueOf(o), startOf(o)].filter(Boolean).sort()[0] ?? '';
+  const isScheduled = (o: Obj) => !!whenOf(o);
+  /**
+   * The row's badge: the nearest date it carries, but the hour instead when a start
+   * time falls on that same day — otherwise "due today, starts at 2" reads as a bare
+   * "Aug 8" and the time it's actually happening is nowhere on the row.
+   */
+  const badgeOf = (o: Obj): string | null => {
+    const when = whenOf(o);
+    if (!when) return null;
+    const start = startOf(o);
+    return start.length > 10 && start.slice(0, 10) === when.slice(0, 10) ? start : when;
+  };
+  /** The checklist splits in two as long as there's some way to date a row. */
+  const canSchedule = !!dueProp || !!startProp;
+
   const byDoneThenDate = (a: Obj, b: Obj) =>
-    Number(!!isDone(a)) - Number(!!isDone(b)) ||
-    String(dueProp ? a.props[dueProp.id] ?? '' : '').localeCompare(String(dueProp ? b.props[dueProp.id] ?? '' : '')) ||
-    a.createdAt - b.createdAt;
+    Number(!!isDone(a)) - Number(!!isDone(b)) || whenOf(a).localeCompare(whenOf(b)) || a.createdAt - b.createdAt;
 
   // The checklist keeps its own order (done last, then by date) unless a sort is set.
   const checklist = doneProp ? (view.sort ? visible : open([...filtered].sort(byDoneThenDate))) : [];
-  const hasDue = (o: Obj) => !!(dueProp && o.props[dueProp.id]);
-  const scheduled = checklist.filter(hasDue);
-  const unscheduled = checklist.filter((o) => !hasDue(o));
+  const scheduled = checklist.filter(isScheduled);
+  const unscheduled = checklist.filter((o) => !isScheduled(o));
 
   const toggleDone = (o: Obj) => {
     if (!doneProp) return;
@@ -303,19 +344,29 @@ export function TypeTable({ typeId }: { typeId: string }) {
 
   /**
    * Dragging between the two checklist columns is how a task gets (un)scheduled:
-   * dropping on "Unscheduled" clears the date, dropping on "Scheduled" asks for one.
+   * dropping on "Unscheduled" takes it out of time, dropping on "Scheduled" asks
+   * for a day. Unscheduling clears the start time as well as the due date —
+   * leaving one behind would bounce the row straight back to the other column.
    */
   const dropOn = (zone: 'scheduled' | 'unscheduled') => (e: React.DragEvent) => {
     e.preventDefault();
     setDropZone(null);
     const id = e.dataTransfer.getData('text/habitat-obj');
     const o = objs.find((x) => x.id === id);
-    if (!o || !dueProp) return;
-    const current = o.props[dueProp.id] ?? null;
+    if (!o || !canSchedule) return;
     if (zone === 'unscheduled') {
-      if (current) updateCell(o, dueProp.id, null);
+      if (!isScheduled(o)) return;
+      const props = { ...o.props };
+      if (dueProp) props[dueProp.id] = null;
+      if (startProp) props[startProp.id] = null;
+      setObjs((list) => list.map((x) => (x.id === o.id ? { ...x, props } : x)));
+      api.objects.update(o.id, { props }).then(() => objectChanged(o.id));
+    } else if (dueProp) {
+      setDatePrompt({ id, value: dueOf(o) || todayKey() });
     } else {
-      setDatePrompt({ id, value: current || todayKey() });
+      // Only a start time to give it, so put it at the top of today rather than
+      // asking for a day the type has nowhere to keep.
+      updateCell(o, startProp!.id, `${todayKey()}T09:00`);
     }
   };
 
@@ -429,7 +480,8 @@ export function TypeTable({ typeId }: { typeId: string }) {
   };
 
   return (
-    <div className="page">
+    <div className={'page' + (embedded ? ' embedded' : '')}>
+      {!embedded && (
       <header className="page-head">
         <div className="page-title">
           <span className="type-emoji big">
@@ -499,6 +551,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
           <SplitControls />
         </div>
       </header>
+      )}
 
       <ViewBar
         type={type}
@@ -512,8 +565,8 @@ export function TypeTable({ typeId }: { typeId: string }) {
       />
 
       {mode === 'checklist' && doneProp ? (
-        <div className={'checklist-page' + (dueProp ? ' split' : '')}>
-          {dueProp ? (
+        <div className={'checklist-page' + (canSchedule ? ' split' : '')}>
+          {canSchedule ? (
             <>
               <section
                 className={'checklist-col' + (dropZone === 'scheduled' ? ' drop-hint' : '')}
@@ -527,7 +580,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
                     key={o.id}
                     o={o}
                     done={!!isDone(o)}
-                    due={dueProp ? o.props[dueProp.id] ?? null : null}
+                    due={badgeOf(o)}
                     picked={selected.has(o.id)}
                     onSelect={() => toggleOne(o.id)}
                     onToggle={() => toggleDone(o)}
@@ -562,7 +615,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
                     key={o.id}
                     o={o}
                     done={!!isDone(o)}
-                    due={dueProp ? o.props[dueProp.id] ?? null : null}
+                    due={badgeOf(o)}
                     picked={selected.has(o.id)}
                     onSelect={() => toggleOne(o.id)}
                     onToggle={() => toggleDone(o)}
@@ -574,7 +627,7 @@ export function TypeTable({ typeId }: { typeId: string }) {
                     onDelete={() => removeRow(o)}
                   />
                 ))}
-                {unscheduled.length === 0 && <div className="col-empty">Nothing here — everything has a date.</div>}
+                {unscheduled.length === 0 && <div className="col-empty">Nothing here — everything sits in time.</div>}
                 <QuickAdd
                   value={newItem}
                   onChange={setNewItem}
@@ -762,7 +815,12 @@ export function TypeTable({ typeId }: { typeId: string }) {
                 </td>
                 {type.properties.map((p) => (
                   <td key={p.id}>
-                    <Cell def={p} value={o.props[p.id]} onChange={(v) => updateCell(o, p.id, v)} />
+                    <Cell
+                      def={p}
+                      value={o.props[p.id]}
+                      onChange={(v) => updateCell(o, p.id, v)}
+                      anchor={anchorDate([...type.properties, ...o.extraProps], o.props)}
+                    />
                   </td>
                 ))}
                 <td className="td-end">
@@ -811,14 +869,9 @@ export function TypeTable({ typeId }: { typeId: string }) {
                   <option value="__clear">Clear</option>
                 </select>
               ) : p.kind === 'date' ? (
-                <input
-                  key={p.id}
-                  type="date"
-                  className="bulk-field"
-                  title={`Set ${p.name}`}
-                  value=""
-                  onChange={(e) => bulkSet(p.id, e.target.value || null)}
-                />
+                <span key={p.id} className="bulk-field" title={`Set ${p.name}`}>
+                  <DateField value={null} placeholder={`${p.name}…`} onChange={(v) => bulkSet(p.id, v)} />
+                </span>
               ) : (
                 <select
                   key={p.id}
@@ -1024,20 +1077,10 @@ export function TypeTable({ typeId }: { typeId: string }) {
         >
           <motion.div className="date-prompt" variants={dialogIn} initial="hidden" animate="shown">
             <h3>Schedule for</h3>
-            <input
-              type="date"
-              className="field"
+            <DateField
               value={datePrompt.value}
-              autoFocus
-              onChange={(e) => setDatePrompt({ ...datePrompt, value: e.target.value })}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') setDatePrompt(null);
-                if (e.key === 'Enter' && datePrompt.value) {
-                  const o = objs.find((x) => x.id === datePrompt.id);
-                  if (o && dueProp) updateCell(o, dueProp.id, datePrompt.value);
-                  setDatePrompt(null);
-                }
-              }}
+              placeholder="Pick a day…"
+              onChange={(v) => setDatePrompt({ ...datePrompt, value: v ?? '' })}
             />
             <div className="popover-actions">
               <button className="btn subtle" onClick={() => setDatePrompt(null)}>

@@ -8,3 +8,7 @@ release/
 *.db
 *.db-wal
 *.db-shm
+
+# Built by scripts/build-ai.mjs
+native/
+swift/.build/

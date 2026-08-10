@@ -37,6 +37,11 @@ function inlineNode(node, ctx) {
     const marks = new Set((node.marks || []).map((m) => m.type));
     // textStyle (colour) has no Markdown of its own — the text survives, the colour doesn't.
     for (const [name, open, close] of MARK_WRAP) if (marks.has(name)) text = open + text + close;
+    // The link wraps whatever the other marks made of the text, so `**[bold](url)**`
+    // keeps both. A link whose text is already the URL stays bare — that round-trips
+    // through the importer's autolinking without growing brackets each time.
+    const href = (node.marks || []).find((m) => m.type === 'link')?.attrs?.href;
+    if (href) return text === href ? text : `[${text}](${href})`;
     return text;
   }
   if (node.type === 'hardBreak') return '  \n';

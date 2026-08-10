@@ -6,7 +6,8 @@ import { api } from '../api';
 import { getObject, objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
 import type { Obj, ObjType, PropDef } from '../types';
-import { ago, openStatusOf, taskProp, typeColor } from '../util';
+import { REPEAT_DONE_PROP, REPEAT_PROP, doneDays, parseRule } from '../repeat';
+import { ago, openStatusOf, taskProp, todayKey, typeColor } from '../util';
 import { motion } from 'motion/react';
 import { popIn } from '../motion';
 import { Icon, TypeIcon } from './Icons';
@@ -66,7 +67,10 @@ export function MentionChip({ node, updateAttributes, editor, getPos }: NodeView
   const color = typeColor(type?.color, theme);
   const done1 = taskProp(type);
   const isTask = !!done1;
-  const done = !!done1 && obj?.props?.[done1.id] === 'Done';
+  // A repeating task is finished a day at a time, so the chip speaks for today.
+  const repeats = !!parseRule(obj?.props?.[REPEAT_PROP]);
+  const today = todayKey();
+  const done = repeats ? doneDays(obj?.props).includes(today) : !!done1 && obj?.props?.[done1.id] === 'Done';
   const missing = loaded && !obj;
 
   const scheduleOpen = () => {
@@ -104,9 +108,17 @@ export function MentionChip({ node, updateAttributes, editor, getPos }: NodeView
 
   const toggle = async () => {
     if (!obj || !done1) return;
-    const props = { ...obj.props, [done1.id]: done ? openStatusOf(done1) : 'Done' };
-    setObj({ ...obj, props }); // optimistic, so the chip flips under the cursor
-    await api.objects.update(id, { props });
+    if (repeats) {
+      const days = new Set(doneDays(obj.props));
+      if (done) days.delete(today);
+      else days.add(today);
+      setObj({ ...obj, props: { ...obj.props, [REPEAT_DONE_PROP]: [...days] } });
+      await api.tasks.setDone({ id, dayKey: today, done: !done });
+    } else {
+      const props = { ...obj.props, [done1.id]: done ? openStatusOf(done1) : 'Done' };
+      setObj({ ...obj, props }); // optimistic, so the chip flips under the cursor
+      await api.objects.update(id, { props });
+    }
     objectChanged(id);
   };
 
@@ -168,6 +180,7 @@ export function MentionChip({ node, updateAttributes, editor, getPos }: NodeView
           <input
             ref={inputRef}
             className="m-rename"
+            spellCheck
             value={draft}
             placeholder="Task name…"
             size={Math.max(10, draft.length + 2)}

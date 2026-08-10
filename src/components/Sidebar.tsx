@@ -81,11 +81,14 @@ function NewTypeForm({ onDone }: { onDone: () => void }) {
 
 export function Sidebar({
   onSearch,
+  onAsk,
   onCollapse,
   /** False while the sidebar is only peeking — the button then pins it open. */
   pinned = true,
 }: {
   onSearch: () => void;
+  /** Absent where Apple Intelligence isn't available, which hides the button. */
+  onAsk?: () => void;
   onCollapse: () => void;
   pinned?: boolean;
 }) {
@@ -95,8 +98,9 @@ export function Sidebar({
   const [showNewHabitat, setShowNewHabitat] = useState(false);
   const [habMenu, setHabMenu] = useState(false);
   const [info, setInfo] = useState<SettingsInfo | null>(null);
-  // Daily notes, people and tags have their own nav entries above.
-  const visibleTypes = types.filter((t) => t.id !== 'daily' && t.id !== 'tag' && t.id !== PEOPLE_TYPE);
+  // Daily notes, tasks, people and tags all have their own nav entries above.
+  const upstairs = new Set(['daily', 'tag', 'task', PEOPLE_TYPE]);
+  const visibleTypes = types.filter((t) => !upstairs.has(t.id));
 
   useEffect(() => {
     api.settings.get().then(setInfo);
@@ -184,13 +188,27 @@ export function Sidebar({
           <kbd>⌘K</kbd>
         </button>
 
+        {onAsk && (
+          <button className="search-btn ask" onClick={onAsk}>
+            <Icon name="sparkles" />
+            <span>Ask</span>
+            <kbd>⌘J</kbd>
+          </button>
+        )}
+
         <nav className="sidebar-nav">
           <NavItem icon="grid" label="Dashboard" active={view.kind === 'dashboard'} onClick={() => navigate({ kind: 'dashboard' })} />
           <NavItem icon="calendar" label="Daily Notes" active={view.kind === 'daily'} onClick={() => navigate({ kind: 'daily' })} />
-          <NavItem icon="clock" label="Calendar" active={view.kind === 'calendar'} onClick={() => navigate({ kind: 'calendar' })} />
+          <NavItem icon="circle-check" label="Tasks" active={view.kind === 'tasks'} onClick={() => navigate({ kind: 'tasks' })} />
           <NavItem icon="people" label="People" active={view.kind === 'people'} onClick={() => navigate({ kind: 'people' })} />
           <NavItem icon="hash" label="Tags" active={view.kind === 'tags'} onClick={() => navigate({ kind: 'tags' })} />
-          <NavItem icon="graph" label="Graph" active={view.kind === 'graph'} onClick={() => navigate({ kind: 'graph' })} />
+          <NavItem icon="canvas" label="Canvas" active={view.kind === 'canvas'} onClick={() => navigate({ kind: 'canvas' })} />
+          <NavItem
+            icon="study"
+            label="Study"
+            active={view.kind === 'study' || view.kind === 'deck'}
+            onClick={() => navigate({ kind: 'study' })}
+          />
         </nav>
 
         <div className="sidebar-section">
