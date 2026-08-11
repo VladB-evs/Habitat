@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { ask } from '../confirm';
 import { useApp } from '../store';
 import type { TelegramConfig } from '../types';
 import { Icon } from './Icons';
@@ -71,7 +72,7 @@ export function TelegramSettings() {
   };
 
   const unpair = async () => {
-    if (!confirm('Unpair this chat? Nothing will be accepted until you pair again.')) return;
+    if (!(await ask('Unpair this chat? Nothing will be accepted until you pair again.'))) return;
     setCfg(await api.telegram.unpair());
     setResult('Unpaired.');
   };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../api';
+import { ask } from '../confirm';
 import type { DailyMeta, Obj } from '../types';
 import { addDays, ago, fmtMonthYear, monthCells, monthStartKey, relBadge, todayKey } from '../util';
 import { dealtIn, snap, spring, stagger } from '../motion';
@@ -8,6 +9,7 @@ import { DayTasks } from './DayTasks';
 import { Editor } from './Editor';
 import { Icon } from './Icons';
 import { SplitControls } from './SplitControls';
+import { PageActions } from './PageActions';
 
 function docText(n: any): string {
   let s = typeof n?.text === 'string' ? n.text : '';
@@ -67,7 +69,7 @@ export function DailyNotes() {
   };
 
   const deleteDaily = async (m: DailyMeta) => {
-    if (!confirm(`Delete the journal entry for ${new Date(m.dateKey + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}? This also removes its links.`))
+    if (!(await ask(`Delete the journal entry for ${new Date(m.dateKey + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}? This also removes its links.`)))
       return;
     await api.objects.remove(m.id);
     if (m.dateKey === dateKey) {
@@ -90,6 +92,7 @@ export function DailyNotes() {
     <div className="daily-page">
       <div className="daily-head">
         <span className="month-label">{fmtMonthYear(dateKey)}</span>
+        <PageActions>
         <div className="daily-nav">
           <div className="seg mini">
             <button className={mode === 'day' ? 'on' : ''} onClick={() => setMode('day')}>
@@ -117,6 +120,7 @@ export function DailyNotes() {
           )}
           <SplitControls />
         </div>
+        </PageActions>
       </div>
 
       {mode === 'list' ? (

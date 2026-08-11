@@ -62,6 +62,24 @@
   --hl-variable: #945e80;
 }
 
+/* ---------- layout tokens ----------
+   Theme-independent, and the seam the mobile sheet turns rather than overriding
+   rule by rule. `--safe-*` resolve to 0 everywhere except a notched device. */
+:root {
+  --sidebar-w: 240px;
+  /* Smallest comfortable target for a control. A mouse is precise; a fingertip
+     is about 9mm, so coarse pointers get the platform's 44px. */
+  --hit: 28px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+:root[data-coarse] {
+  --hit: 44px;
+}
+
 html,
 body,
 #root {
@@ -75,6 +93,27 @@ body {
   background: var(--bg);
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
+  /* A webview rubber-bands the whole document when an inner list hits its end;
+     the app is a fixed shell, so there is nothing behind it worth revealing. */
+  overscroll-behavior: none;
+  /* Rotating the phone must not rescale the type. */
+  -webkit-text-size-adjust: 100%;
+}
+
+/* The grey flash a webview paints over anything tappable. Feedback comes from
+   the app's own :active states instead. */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* No double-tap-to-zoom delay on things you tap, without disabling pinch zoom
+   for the page as a whole. */
+button,
+a,
+[role='button'],
+input[type='checkbox'],
+label {
+  touch-action: manipulation;
 }
 
 ::selection {
@@ -91,10 +130,13 @@ body {
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--text-3);
-  border: 2px solid transparent;
-  background-clip: padding-box;
+
+@media (hover: hover) {
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-3);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
@@ -155,13 +197,16 @@ kbd {
 
 .app {
   display: flex;
-  height: 100vh;
+  /* Dynamic viewport height: a mobile webview's chrome grows and shrinks as you
+     scroll, and `100vh` would leave the shell taller than the screen. Identical
+     to `100vh` on the desktop. */
+  height: 100dvh;
 }
 
 .drag-strip {
   position: fixed;
   top: 0;
-  left: 240px;
+  left: var(--sidebar-w);
   right: 0;
   height: 20px;
   -webkit-app-region: drag;
@@ -199,6 +244,9 @@ kbd {
   position: relative;
   z-index: 15;
   background: transparent;
+  /* Part of the drag's own contract, not a mobile override: without it a touch
+     device scrolls the pane instead of handing the gesture to the divider. */
+  touch-action: none;
 }
 
 .split-divider::before {
@@ -230,8 +278,10 @@ kbd {
   height: 1px;
 }
 
-.split-divider:hover::before {
-  background: var(--accent);
+@media (hover: hover) {
+  .split-divider:hover::before {
+    background: var(--accent);
+  }
 }
 
 .pane-scroll {
@@ -316,8 +366,10 @@ kbd {
   transition: opacity 0.14s ease;
 }
 
-.pane.dimmed:hover .pane-scroll {
-  opacity: 0.85;
+@media (hover: hover) {
+  .pane.dimmed:hover .pane-scroll {
+    opacity: 0.85;
+  }
 }
 
 .pane-name {
@@ -368,7 +420,7 @@ kbd {
 }
 
 .row-open {
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   flex-shrink: 0;
   padding: 4px;
   border-radius: 5px;
@@ -376,14 +428,18 @@ kbd {
   display: inline-flex;
 }
 
-.day-task:hover .row-open,
-.day-task:hover .row-del {
-  opacity: 1;
+@media (hover: hover) {
+  .day-task:hover .row-open,
+  .day-task:hover .row-del {
+    opacity: 1;
+  }
 }
 
-.row-open:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .row-open:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 .checklist-col.drop-hint {
@@ -456,9 +512,14 @@ kbd {
   cursor: pointer;
 }
 
-.emoji-cell.sel,
-.emoji-cell:hover {
+.emoji-cell.sel {
   background: var(--bg-3);
+}
+
+@media (hover: hover) {
+  .emoji-cell:hover {
+    background: var(--bg-3);
+  }
 }
 
 .emoji-caption {
@@ -560,17 +621,19 @@ kbd {
   margin-left: auto;
   margin-right: 10px;
   flex-shrink: 0;
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
 }
 
-.sidebar:hover .collapse-btn {
-  opacity: 1;
+@media (hover: hover) {
+  .sidebar:hover .collapse-btn {
+    opacity: 1;
+  }
 }
 
 /* ---------- sidebar ---------- */
 
 .sidebar {
-  width: 240px;
+  width: var(--sidebar-w);
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -631,9 +694,11 @@ kbd {
   margin-bottom: 14px;
 }
 
-.search-btn:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .search-btn:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .search-btn kbd {
@@ -659,9 +724,11 @@ kbd {
   text-align: left;
 }
 
-.nav-item:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .nav-item:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .nav-item.active {
@@ -742,8 +809,10 @@ button.version {
   transition: color 0.12s ease;
 }
 
-button.version:hover {
-  color: var(--text-2);
+@media (hover: hover) {
+  button.version:hover {
+    color: var(--text-2);
+  }
 }
 
 .version-update,
@@ -755,9 +824,11 @@ button.version.version-update {
   font-weight: 500;
 }
 
-button.version.version-update:hover {
-  color: var(--accent);
-  opacity: 0.75;
+@media (hover: hover) {
+  button.version.version-update:hover {
+    color: var(--accent);
+    opacity: 0.75;
+  }
 }
 
 .new-type-form {
@@ -795,9 +866,11 @@ button.version.version-update:hover {
   color: var(--text-3);
 }
 
-.icon-choice:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .icon-choice:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .icon-choice.sel {
@@ -855,8 +928,10 @@ button.version.version-update:hover {
   border: 1px solid transparent;
 }
 
-.btn:hover {
-  background: var(--border);
+@media (hover: hover) {
+  .btn:hover {
+    background: var(--border);
+  }
 }
 
 .btn.primary {
@@ -864,8 +939,10 @@ button.version.version-update:hover {
   color: var(--on-accent);
 }
 
-.btn.primary:hover {
-  filter: brightness(1.08);
+@media (hover: hover) {
+  .btn.primary:hover {
+    filter: brightness(1.08);
+  }
 }
 
 .btn.subtle {
@@ -874,9 +951,11 @@ button.version.version-update:hover {
   color: var(--text-2);
 }
 
-.btn.subtle:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .btn.subtle:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 .btn.danger {
@@ -892,9 +971,11 @@ button.version.version-update:hover {
   color: var(--text-2);
 }
 
-.icon-btn:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .icon-btn:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .icon-btn.active {
@@ -986,9 +1067,11 @@ button.version.version-update:hover {
   text-align: left;
 }
 
-.quick-card:hover {
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .quick-card:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .quick-card .q-icon {
@@ -1035,9 +1118,11 @@ button.version.version-update:hover {
   text-align: left;
 }
 
-.tile:hover {
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .tile:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .tile-bar {
@@ -1090,9 +1175,11 @@ button.version.version-update:hover {
   cursor: pointer;
 }
 
-.card:hover {
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .card:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .card-title {
@@ -1152,8 +1239,10 @@ button.version.version-update:hover {
   text-align: left;
 }
 
-.row:hover {
-  background: var(--bg-2);
+@media (hover: hover) {
+  .row:hover {
+    background: var(--bg-2);
+  }
 }
 
 .row-emoji {
@@ -1214,9 +1303,11 @@ button.version.version-update:hover {
   border: 1px solid var(--border-2);
 }
 
-.today-btn:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .today-btn:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 .day-strip {
@@ -1240,9 +1331,11 @@ button.version.version-update:hover {
   transition: border-color 0.12s ease, color 0.12s ease;
 }
 
-.day-pill:hover {
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .day-pill:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .day-pill.sel {
@@ -1344,12 +1437,16 @@ button.version.version-update:hover {
   border-radius: 10px;
 }
 
-.daily-list-row:hover {
-  background: var(--bg-2);
+@media (hover: hover) {
+  .daily-list-row:hover {
+    background: var(--bg-2);
+  }
 }
 
-.daily-list-row:hover .row-del {
-  opacity: 1;
+@media (hover: hover) {
+  .daily-list-row:hover .row-del {
+    opacity: 1;
+  }
 }
 
 .daily-list-main {
@@ -1424,9 +1521,11 @@ button.version.version-update:hover {
   overflow: hidden;
 }
 
-.cal-cell:hover {
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .cal-cell:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .cal-cell.out {
@@ -1505,9 +1604,11 @@ button.version.version-update:hover {
   font-weight: 500;
 }
 
-.th-btn:hover {
-  background: var(--bg-2);
-  color: var(--text);
+@media (hover: hover) {
+  .th-btn:hover {
+    background: var(--bg-2);
+    color: var(--text);
+  }
 }
 
 .sort-ind {
@@ -1535,8 +1636,10 @@ button.version.version-update:hover {
   cursor: auto;
 }
 
-.db-table tr:hover td {
-  background: color-mix(in srgb, var(--bg-2) 55%, transparent);
+@media (hover: hover) {
+  .db-table tr:hover td {
+    background: color-mix(in srgb, var(--bg-2) 55%, transparent);
+  }
 }
 
 /*
@@ -1616,7 +1719,7 @@ button.version.version-update:hover {
 /* Floats over the row's right edge on hover: in a narrow pane it must not take
    width from the title, which is what was clipping names. */
 .open-pill {
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   position: absolute;
   right: 8px;
   top: 50%;
@@ -1636,8 +1739,10 @@ button.version.version-update:hover {
   white-space: nowrap;
 }
 
-tr:hover .open-pill {
-  opacity: 1;
+@media (hover: hover) {
+  tr:hover .open-pill {
+    opacity: 1;
+  }
 }
 
 .open-pill {
@@ -1665,9 +1770,11 @@ tr:hover .open-pill {
   );
 }
 
-.open-pill:hover {
-  color: var(--text);
-  border-color: var(--text-3);
+@media (hover: hover) {
+  .open-pill:hover {
+    color: var(--text);
+    border-color: var(--text-3);
+  }
 }
 
 .cell-select {
@@ -1700,8 +1807,10 @@ tr:hover .open-pill {
   cursor: pointer;
 }
 
-.select-btn:hover {
-  background: var(--bg-3);
+@media (hover: hover) {
+  .select-btn:hover {
+    background: var(--bg-3);
+  }
 }
 
 .select-btn.empty .select-val {
@@ -1830,7 +1939,7 @@ input[type='date'].cell-input {
 }
 
 .url-go {
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   flex-shrink: 0;
   margin-right: 6px;
   padding: 4px;
@@ -1838,14 +1947,18 @@ input[type='date'].cell-input {
   color: var(--text-3);
 }
 
-tr:hover .url-go,
-.obj-prop:hover .url-go {
-  opacity: 1;
+@media (hover: hover) {
+  tr:hover .url-go,
+  .obj-prop:hover .url-go {
+    opacity: 1;
+  }
 }
 
-.url-go:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .url-go:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 .relation-cell {
@@ -1875,44 +1988,54 @@ tr:hover .url-go,
   text-overflow: ellipsis;
 }
 
-.chip:hover {
-  border-color: var(--text-3);
+@media (hover: hover) {
+  .chip:hover {
+    border-color: var(--text-3);
+  }
 }
 
 .chip-add {
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   display: inline-flex;
   padding: 3px;
   border-radius: 5px;
   color: var(--text-3);
 }
 
-tr:hover .chip-add,
-.relation-cell:hover .chip-add,
-.obj-prop:hover .chip-add {
-  opacity: 1;
+@media (hover: hover) {
+  tr:hover .chip-add,
+  .relation-cell:hover .chip-add,
+  .obj-prop:hover .chip-add {
+    opacity: 1;
+  }
 }
 
-.chip-add:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .chip-add:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .row-del {
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   padding: 5px;
   border-radius: 5px;
   color: var(--text-3);
   display: inline-flex;
 }
 
-tr:hover .row-del {
-  opacity: 1;
+@media (hover: hover) {
+  tr:hover .row-del {
+    opacity: 1;
+  }
 }
 
-.row-del:hover {
-  color: #e66767;
-  background: var(--bg-3);
+@media (hover: hover) {
+  .row-del:hover {
+    color: #e66767;
+    background: var(--bg-3);
+  }
 }
 
 .td-end {
@@ -1937,9 +2060,11 @@ tr:hover .row-del {
   text-align: left;
 }
 
-.add-row:hover {
-  background: var(--bg-2);
-  color: var(--text-2);
+@media (hover: hover) {
+  .add-row:hover {
+    background: var(--bg-2);
+    color: var(--text-2);
+  }
 }
 
 /* ---------- popovers ---------- */
@@ -1998,9 +2123,14 @@ tr:hover .row-del {
   color: var(--text);
 }
 
-.menu-item:hover,
 .menu-item.sel {
   background: var(--bg-3);
+}
+
+@media (hover: hover) {
+  .menu-item:hover {
+    background: var(--bg-3);
+  }
 }
 
 .menu-item.danger {
@@ -2088,9 +2218,11 @@ tr:hover .row-del {
   border-radius: 7px;
 }
 
-.crumb:hover {
-  background: var(--bg-2);
-  color: var(--text);
+@media (hover: hover) {
+  .crumb:hover {
+    background: var(--bg-2);
+    color: var(--text);
+  }
 }
 
 /* The crumb navigates to the type; the chevron beside it changes the type. Two
@@ -2110,9 +2242,11 @@ tr:hover .row-del {
   cursor: pointer;
 }
 
-.crumb-more:hover {
-  background: var(--bg-2);
-  color: var(--text);
+@media (hover: hover) {
+  .crumb-more:hover {
+    background: var(--bg-2);
+    color: var(--text);
+  }
 }
 
 .move-note {
@@ -2219,9 +2353,11 @@ tr:hover .row-del {
   margin-bottom: 8px;
 }
 
-.backlink-card:hover {
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .backlink-card:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .backlink-card .bl-title {
@@ -2254,8 +2390,10 @@ tr:hover .row-del {
   min-width: 0;
 }
 
-.logo.switcher:hover {
-  background: var(--bg-3);
+@media (hover: hover) {
+  .logo.switcher:hover {
+    background: var(--bg-3);
+  }
 }
 
 .logo-name {
@@ -2339,9 +2477,11 @@ tr:hover .row-del {
   background: var(--bg-2);
 }
 
-.flavor-card:hover {
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .flavor-card:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .flavor-card.sel {
@@ -2380,9 +2520,11 @@ tr:hover .row-del {
   text-decoration: none;
 }
 
-.onboard-open:hover {
-  color: var(--text);
-  text-decoration: underline;
+@media (hover: hover) {
+  .onboard-open:hover {
+    color: var(--text);
+    text-decoration: underline;
+  }
 }
 
 .onboard-inner .field-error {
@@ -2548,9 +2690,11 @@ tr:hover .row-del {
   color: var(--text-3);
 }
 
-.prefs-tab:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .prefs-tab:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 .prefs-tab.on {
@@ -2733,8 +2877,10 @@ tr:hover .row-del {
   color: var(--text-3);
 }
 
-.set-guide:hover {
-  color: var(--accent);
+@media (hover: hover) {
+  .set-guide:hover {
+    color: var(--accent);
+  }
 }
 
 /* ---------- local API ---------- */
@@ -2937,9 +3083,11 @@ tr:hover .row-del {
   cursor: pointer;
 }
 
-.auto-add:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .auto-add:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 .auto-check {
@@ -3206,12 +3354,16 @@ code.var-ref-name {
   opacity: 0.55;
 }
 
-.day-task:hover {
-  background: var(--bg-3);
+@media (hover: hover) {
+  .day-task:hover {
+    background: var(--bg-3);
+  }
 }
 
-.day-task.add:hover {
-  background: transparent;
+@media (hover: hover) {
+  .day-task.add:hover {
+    background: transparent;
+  }
 }
 
 .tick {
@@ -3227,8 +3379,10 @@ code.var-ref-name {
   transition: background 0.12s, border-color 0.12s;
 }
 
-.tick:hover {
-  border-color: var(--accent);
+@media (hover: hover) {
+  .tick:hover {
+    border-color: var(--accent);
+  }
 }
 
 .tick.on {
@@ -3343,26 +3497,32 @@ code.var-ref-name {
   text-align: left;
 }
 
-.add-prop:hover {
-  color: var(--text-2);
-  background: var(--bg-2);
+@media (hover: hover) {
+  .add-prop:hover {
+    color: var(--text-2);
+    background: var(--bg-2);
+  }
 }
 
 .prop-edit {
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   display: inline-flex;
   padding: 3px;
   border-radius: 5px;
   color: var(--text-3);
 }
 
-.obj-prop:hover .prop-edit {
-  opacity: 1;
+@media (hover: hover) {
+  .obj-prop:hover .prop-edit {
+    opacity: 1;
+  }
 }
 
-.prop-edit:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .prop-edit:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 /* ---------- editor (TipTap) ---------- */
@@ -3501,10 +3661,12 @@ code.var-ref-name {
   opacity: 0.75;
 }
 
-.block-grip:hover {
-  background: var(--bg-3);
-  color: var(--text-2);
-  opacity: 1;
+@media (hover: hover) {
+  .block-grip:hover {
+    background: var(--bg-3);
+    color: var(--text-2);
+    opacity: 1;
+  }
 }
 
 .block-grip:active {
@@ -3618,13 +3780,18 @@ code.var-ref-name {
   display: flex;
   align-items: center;
   gap: 4px;
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   transition: opacity 0.12s ease;
 }
 
-.editor .code-block:hover .code-tools,
 .editor .code-tools:focus-within {
   opacity: 1;
+}
+
+@media (hover: hover) {
+  .editor .code-block:hover .code-tools {
+    opacity: 1;
+  }
 }
 
 .code-lang {
@@ -3709,9 +3876,11 @@ code.var-ref-name {
   cursor: text;
 }
 
-.Tiptap-mathematics-render--editable:hover {
-  background: var(--bg-3);
-  border-radius: 4px;
+@media (hover: hover) {
+  .Tiptap-mathematics-render--editable:hover {
+    background: var(--bg-3);
+    border-radius: 4px;
+  }
 }
 
 .Tiptap-mathematics-editor {
@@ -3759,10 +3928,16 @@ code.var-ref-name {
   color: var(--text-3);
 }
 
-.math-more:hover,
 .math-more.on {
   background: var(--bg-3);
   color: var(--text);
+}
+
+@media (hover: hover) {
+  .math-more:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .math-panel {
@@ -3813,9 +3988,11 @@ code.var-ref-name {
   padding: 0 3px;
 }
 
-.math-key:hover {
-  background: var(--bg-3);
-  color: var(--mention-fg);
+@media (hover: hover) {
+  .math-key:hover {
+    background: var(--bg-3);
+    color: var(--mention-fg);
+  }
 }
 
 .editor .ProseMirror p.is-editor-empty:first-child::before {
@@ -3864,8 +4041,10 @@ code.var-ref-name {
   color: color-mix(in srgb, var(--mention-fg) 55%, transparent);
 }
 
-.mention:hover {
-  background: color-mix(in srgb, var(--mention-fg) 22%, transparent);
+@media (hover: hover) {
+  .mention:hover {
+    background: color-mix(in srgb, var(--mention-fg) 22%, transparent);
+  }
 }
 
 /* The type icon keeps its own colour, so a Person reads differently from a Movie. */
@@ -3900,9 +4079,11 @@ code.var-ref-name {
   padding: 0;
 }
 
-.m-tick:hover {
-  border-color: var(--mention-fg);
-  background: color-mix(in srgb, var(--mention-fg) 20%, transparent);
+@media (hover: hover) {
+  .m-tick:hover {
+    border-color: var(--mention-fg);
+    background: color-mix(in srgb, var(--mention-fg) 20%, transparent);
+  }
 }
 
 .m-tick.on {
@@ -4030,9 +4211,11 @@ code.var-ref-name {
   background: var(--bg-3);
 }
 
-.mc-actions button:hover {
-  color: var(--text);
-  background: var(--border);
+@media (hover: hover) {
+  .mc-actions button:hover {
+    color: var(--text);
+    background: var(--border);
+  }
 }
 
 .mc-gone {
@@ -4051,8 +4234,10 @@ code.var-ref-name {
   white-space: nowrap;
 }
 
-.tag-chip:hover {
-  background: color-mix(in srgb, var(--tag-fg) 24%, transparent);
+@media (hover: hover) {
+  .tag-chip:hover {
+    background: color-mix(in srgb, var(--tag-fg) 24%, transparent);
+  }
 }
 
 .tag-title {
@@ -4089,13 +4274,18 @@ code.var-ref-name {
 /* Stays out of the way until you hover the row or start selecting. */
 .pick-box {
   flex-shrink: 0;
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   transition: opacity 0.12s;
 }
 
-.day-task:hover .pick-box,
 .pick-box:checked {
   opacity: 1;
+}
+
+@media (hover: hover) {
+  .day-task:hover .pick-box {
+    opacity: 1;
+  }
 }
 
 .day-task.picked {
@@ -4189,8 +4379,10 @@ code.var-ref-name {
   text-overflow: ellipsis;
 }
 
-.cal-task:hover {
-  background: color-mix(in srgb, var(--accent) 30%, transparent);
+@media (hover: hover) {
+  .cal-task:hover {
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+  }
 }
 
 .cal-more {
@@ -4203,9 +4395,11 @@ code.var-ref-name {
   color: var(--text-3);
 }
 
-.cal-more:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .cal-more:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 .cal-task.done {
@@ -4221,8 +4415,10 @@ code.var-ref-name {
   border-radius: 0;
 }
 
-.checklist-page .day-task:hover {
-  background: var(--bg-2);
+@media (hover: hover) {
+  .checklist-page .day-task:hover {
+    background: var(--bg-2);
+  }
 }
 
 .checklist-page .day-task.add {
@@ -4290,13 +4486,17 @@ code.var-ref-name {
   padding: 4px 8px 4px 4px;
 }
 
-.tag-card:hover {
-  border-color: var(--border-2);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .tag-card:hover {
+    border-color: var(--border-2);
+    background: var(--bg-3);
+  }
 }
 
-.tag-card:hover .row-del {
-  opacity: 1;
+@media (hover: hover) {
+  .tag-card:hover .row-del {
+    opacity: 1;
+  }
 }
 
 .tag-card-main {
@@ -4381,9 +4581,11 @@ code.var-ref-name {
   color: var(--text-2);
 }
 
-.sel-btn:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .sel-btn:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .sel-btn.on {
@@ -4422,8 +4624,10 @@ code.var-ref-name {
   background: var(--bg);
 }
 
-.sel-swatch:hover {
-  border-color: var(--text-3);
+@media (hover: hover) {
+  .sel-swatch:hover {
+    border-color: var(--text-3);
+  }
 }
 
 .sel-swatch.on {
@@ -4499,9 +4703,11 @@ code.var-ref-name {
   text-align: left;
 }
 
-.sel-ai-item:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .sel-ai-item:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .sel-ai-note {
@@ -4584,9 +4790,11 @@ code.var-ref-name {
   border: 1px solid var(--border-2);
 }
 
-.sel-ai-btn:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .sel-ai-btn:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .sel-ai-btn.primary {
@@ -4595,10 +4803,12 @@ code.var-ref-name {
   color: #fff;
 }
 
-.sel-ai-btn.primary:hover {
-  background: var(--accent);
-  filter: brightness(1.08);
-  color: #fff;
+@media (hover: hover) {
+  .sel-ai-btn.primary:hover {
+    background: var(--accent);
+    filter: brightness(1.08);
+    color: #fff;
+  }
 }
 
 /* Translucent highlights need something behind them to read against. */
@@ -4677,9 +4887,14 @@ code.var-ref-name {
   color: var(--text);
 }
 
-.result-row.sel,
-.result-row:hover {
+.result-row.sel {
   background: var(--bg-3);
+}
+
+@media (hover: hover) {
+  .result-row:hover {
+    background: var(--bg-3);
+  }
 }
 
 .result-emoji {
@@ -4766,9 +4981,11 @@ code.var-ref-name {
   border: 1px solid var(--border-2);
 }
 
-.ask-stop:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .ask-stop:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .ask-body {
@@ -4794,9 +5011,11 @@ code.var-ref-name {
   text-align: left;
 }
 
-.ask-example:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .ask-example:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 /* Which notes it decided to read, said before the answer rather than after —
@@ -4854,9 +5073,11 @@ code.var-ref-name {
   border: 1px solid var(--border-2);
 }
 
-.ask-source:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .ask-source:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .ask-note {
@@ -4895,9 +5116,11 @@ code.var-ref-name {
   border: 1px solid var(--border-2);
 }
 
-.palette-ai-undo:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .palette-ai-undo:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 /* A type's colour as a small round swatch — backlink groups, dashboard tallies. */
@@ -4931,9 +5154,14 @@ code.var-ref-name {
   transition: opacity 0.12s ease;
 }
 
-.dash:hover .dash-edit,
 .dash-edit:focus-visible {
   opacity: 1;
+}
+
+@media (hover: hover) {
+  .dash:hover .dash-edit {
+    opacity: 1;
+  }
 }
 
 /* 6 columns wide, 92px row units — widgets span whole units in both axes.
@@ -5083,13 +5311,18 @@ code.var-ref-name {
   border: 1px solid var(--border-2);
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   backdrop-filter: blur(8px);
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   transition: opacity 0.1s ease;
 }
 
-.w-wrap:hover .w-tools,
 .w-resizing .w-tools {
   opacity: 1;
+}
+
+@media (hover: hover) {
+  .w-wrap:hover .w-tools {
+    opacity: 1;
+  }
 }
 
 .w-kind {
@@ -5111,9 +5344,11 @@ code.var-ref-name {
   color: var(--text-2);
 }
 
-.w-tool:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .w-tool:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .w-tool.on {
@@ -5131,9 +5366,11 @@ code.var-ref-name {
   z-index: 7;
   border-radius: 5px;
   cursor: nwse-resize;
+  /* The grid scrolls; this corner must not hand its drag to the scroller. */
+  touch-action: none;
   background: var(--bg-2);
   border: 1px solid var(--border-2);
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   transition: opacity 0.1s ease;
 }
 
@@ -5149,19 +5386,34 @@ code.var-ref-name {
   border-radius: 0 0 3px 0;
 }
 
-.w-wrap:hover .w-resize,
 .w-resizing .w-resize {
   opacity: 1;
 }
 
-.w-resize:hover,
+@media (hover: hover) {
+  .w-wrap:hover .w-resize {
+    opacity: 1;
+  }
+}
+
 .w-resizing .w-resize {
   border-color: var(--accent);
 }
 
-.w-resize:hover::after,
+@media (hover: hover) {
+  .w-resize:hover {
+    border-color: var(--accent);
+  }
+}
+
 .w-resizing .w-resize::after {
   border-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .w-resize:hover::after {
+    border-color: var(--accent);
+  }
 }
 
 .w-size {
@@ -5373,9 +5625,11 @@ code.var-ref-name {
   color: var(--text-2);
 }
 
-.picker-tabs button:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .picker-tabs button:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .picker-tabs button.on {
@@ -5408,9 +5662,11 @@ code.var-ref-name {
   text-align: left;
 }
 
-.pk:hover:not(:disabled) {
-  border-color: var(--border-2);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .pk:hover:not(:disabled) {
+    border-color: var(--border-2);
+    background: var(--bg-3);
+  }
 }
 
 .pk:disabled {
@@ -5474,10 +5730,12 @@ code.var-ref-name {
   opacity: 0;
 }
 
-.pk:hover:not(:disabled) .pk-plus {
-  opacity: 1;
-  color: var(--text);
-  background: var(--bg-2);
+@media (hover: hover) {
+  .pk:hover:not(:disabled) .pk-plus {
+    opacity: 1;
+    color: var(--text);
+    background: var(--bg-2);
+  }
 }
 
 .dash-blank {
@@ -5684,8 +5942,10 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.self-card:hover {
-  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-2));
+@media (hover: hover) {
+  .self-card:hover {
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border-2));
+  }
 }
 
 .self-card.empty {
@@ -5770,9 +6030,11 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.bday-card:hover {
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .bday-card:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .bday-card.today {
@@ -5845,9 +6107,11 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.filter-chip:hover {
-  border-color: var(--border-2);
-  color: var(--text);
+@media (hover: hover) {
+  .filter-chip:hover {
+    border-color: var(--border-2);
+    color: var(--text);
+  }
 }
 
 .filter-chip.on {
@@ -5904,9 +6168,11 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.person-card:hover {
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .person-card:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .person-card-main {
@@ -5993,8 +6259,10 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.person-row:hover {
-  background: var(--bg-2);
+@media (hover: hover) {
+  .person-row:hover {
+    background: var(--bg-2);
+  }
 }
 
 .person-row-name {
@@ -6112,10 +6380,12 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.quick-action:hover {
-  color: var(--text);
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .quick-action:hover {
+    color: var(--text);
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .person-props {
@@ -6171,8 +6441,10 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.bday-widget-row:hover {
-  background: var(--bg-2);
+@media (hover: hover) {
+  .bday-widget-row:hover {
+    background: var(--bg-2);
+  }
 }
 
 .bday-widget-row .row-title {
@@ -6233,8 +6505,10 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.view-chip-x:hover {
-  opacity: 1;
+@media (hover: hover) {
+  .view-chip-x:hover {
+    opacity: 1;
+  }
 }
 
 .view-add {
@@ -6250,10 +6524,12 @@ code.var-ref-name {
   white-space: nowrap;
 }
 
-.view-add:hover {
-  color: var(--text-2);
-  background: var(--bg-2);
-  border-color: var(--border);
+@media (hover: hover) {
+  .view-add:hover {
+    color: var(--text-2);
+    background: var(--bg-2);
+    border-color: var(--border);
+  }
 }
 
 .view-add.on {
@@ -6307,9 +6583,11 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.gallery-card:hover {
-  background: var(--bg-3);
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .gallery-card:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
 }
 
 .gallery-card.add {
@@ -6323,9 +6601,11 @@ code.var-ref-name {
   font-size: 13px;
 }
 
-.gallery-card.add:hover {
-  color: var(--text-2);
-  background: var(--bg-2);
+@media (hover: hover) {
+  .gallery-card.add:hover {
+    color: var(--text-2);
+    background: var(--bg-2);
+  }
 }
 
 .gallery-title {
@@ -6377,8 +6657,10 @@ code.var-ref-name {
   white-space: nowrap;
 }
 
-.gallery-card.add:hover .card-prop {
-  background: var(--bg-2);
+@media (hover: hover) {
+  .gallery-card.add:hover .card-prop {
+    background: var(--bg-2);
+  }
 }
 
 /* ---------- board ---------- */
@@ -6437,8 +6719,10 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.board-card:hover {
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .board-card:hover {
+    border-color: var(--border-2);
+  }
 }
 
 .board-card:active {
@@ -6472,9 +6756,11 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.board-add:hover {
-  color: var(--text-2);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .board-add:hover {
+    color: var(--text-2);
+    background: var(--bg-3);
+  }
 }
 
 /* ---------- automations: scoped rules, preview, tokens, recipes ---------- */
@@ -6561,9 +6847,11 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.token-btn:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .token-btn:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 .token-menu .menu-item {
@@ -6611,8 +6899,10 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.recipe:hover:not(:disabled) {
-  background: var(--bg-3);
+@media (hover: hover) {
+  .recipe:hover:not(:disabled) {
+    background: var(--bg-3);
+  }
 }
 
 .recipe:disabled {
@@ -6679,10 +6969,12 @@ code.var-ref-name {
   cursor: pointer;
 }
 
-.palette-op:hover {
-  color: var(--text);
-  border-color: var(--border-2);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .palette-op:hover {
+    color: var(--text);
+    border-color: var(--border-2);
+    background: var(--bg-3);
+  }
 }
 
 /* ============================================================
@@ -6713,18 +7005,22 @@ code.var-ref-name {
   height: 24px;
   border-radius: 6px;
   color: var(--text-3);
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   cursor: grab;
   transition: opacity 0.12s ease;
 }
 
-.media-block:hover .media-grip {
-  opacity: 1;
+@media (hover: hover) {
+  .media-block:hover .media-grip {
+    opacity: 1;
+  }
 }
 
-.media-grip:hover {
-  color: var(--text);
-  background: var(--bg-2);
+@media (hover: hover) {
+  .media-grip:hover {
+    color: var(--text);
+    background: var(--bg-2);
+  }
 }
 
 .media-grip:active {
@@ -6767,8 +7063,10 @@ figcaption {
   opacity: 0;
 }
 
-.media-block:hover .media-caption::placeholder {
-  opacity: 1;
+@media (hover: hover) {
+  .media-block:hover .media-caption::placeholder {
+    opacity: 1;
+  }
 }
 
 /* Non-image attachments read as a compact card. */
@@ -6783,8 +7081,10 @@ figcaption {
   cursor: default;
 }
 
-.media-file:hover {
-  border-color: var(--border-2);
+@media (hover: hover) {
+  .media-file:hover {
+    border-color: var(--border-2);
+  }
 }
 
 .media-file-icon {
@@ -6833,7 +7133,7 @@ figcaption {
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   border: 1px solid var(--border-2);
   backdrop-filter: blur(10px);
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   transition: opacity 0.12s ease;
 }
 
@@ -6844,8 +7144,10 @@ figcaption {
   backdrop-filter: none;
 }
 
-.media-block:hover .media-tools {
-  opacity: 1;
+@media (hover: hover) {
+  .media-block:hover .media-tools {
+    opacity: 1;
+  }
 }
 
 .media-scales {
@@ -6863,9 +7165,11 @@ figcaption {
   cursor: pointer;
 }
 
-.media-scale:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .media-scale:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 .media-scale.on {
@@ -6930,17 +7234,21 @@ figcaption {
   border-radius: 50%;
   color: var(--text-2);
   background: color-mix(in srgb, var(--bg) 85%, transparent);
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   cursor: pointer;
 }
 
-.file-chip:hover .file-chip-x {
-  opacity: 1;
+@media (hover: hover) {
+  .file-chip:hover .file-chip-x {
+    opacity: 1;
+  }
 }
 
-.file-chip-x:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .file-chip-x:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 /* ============================================================
@@ -7031,11 +7339,18 @@ figcaption {
   overflow: hidden;
 }
 
-.ag-day.empty:hover .ag-day-body,
 .ag-day.empty:focus-within .ag-day-body {
   opacity: 1;
   height: auto;
   overflow: visible;
+}
+
+@media (hover: hover) {
+  .ag-day.empty:hover .ag-day-body {
+    opacity: 1;
+    height: auto;
+    overflow: visible;
+  }
 }
 
 .ag-day.over {
@@ -7091,8 +7406,10 @@ figcaption {
   cursor: pointer;
 }
 
-.ag-task:hover {
-  background: var(--bg-3);
+@media (hover: hover) {
+  .ag-task:hover {
+    background: var(--bg-3);
+  }
 }
 
 .ag-task-title {
@@ -7141,19 +7458,26 @@ figcaption {
   cursor: default;
 }
 
-.ag-task.add:hover {
-  background: none;
+@media (hover: hover) {
+  .ag-task.add:hover {
+    background: none;
+  }
 }
 
 /* The per-day adder stays out of the way until the day is pointed at. */
 .ag-task.add.quiet {
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   transition: opacity 0.12s ease;
 }
 
-.ag-day:hover .ag-task.add.quiet,
 .ag-task.add.quiet:focus-within {
   opacity: 1;
+}
+
+@media (hover: hover) {
+  .ag-day:hover .ag-task.add.quiet {
+    opacity: 1;
+  }
 }
 
 .ag-add-input {
@@ -7179,9 +7503,11 @@ figcaption {
   border-radius: 7px;
 }
 
-.ag-add-btn:hover {
-  color: var(--text);
-  background: var(--bg-3);
+@media (hover: hover) {
+  .ag-add-btn:hover {
+    color: var(--text);
+    background: var(--bg-3);
+  }
 }
 
 /* ---- an event: a block, in its type's colour, holding its tasks ---- */
@@ -7418,8 +7744,10 @@ figcaption {
   white-space: nowrap;
 }
 
-.cal-chip:hover {
-  background: color-mix(in srgb, var(--c) 30%, transparent);
+@media (hover: hover) {
+  .cal-chip:hover {
+    background: color-mix(in srgb, var(--c) 30%, transparent);
+  }
 }
 
 .cal-scroll {
@@ -7508,8 +7836,10 @@ figcaption {
   transition: background 0.12s ease;
 }
 
-.cal-event:hover {
-  background: color-mix(in srgb, var(--c) 34%, var(--bg));
+@media (hover: hover) {
+  .cal-event:hover {
+    background: color-mix(in srgb, var(--c) 34%, var(--bg));
+  }
 }
 
 /* Half an hour has room for one line only — the time gives way to the title. */
@@ -7580,8 +7910,10 @@ figcaption {
   text-align: left;
 }
 
-.repeat-preset:hover {
-  background: var(--bg-3);
+@media (hover: hover) {
+  .repeat-preset:hover {
+    background: var(--bg-3);
+  }
 }
 
 .repeat-preset.on {
@@ -7633,8 +7965,10 @@ figcaption {
   border-radius: 7px;
 }
 
-.repeat-day:hover {
-  background: var(--bg-3);
+@media (hover: hover) {
+  .repeat-day:hover {
+    background: var(--bg-3);
+  }
 }
 
 .repeat-day.on {
@@ -7677,8 +8011,10 @@ figcaption {
   text-align: left;
 }
 
-.date-btn:hover {
-  background: var(--bg-3);
+@media (hover: hover) {
+  .date-btn:hover {
+    background: var(--bg-3);
+  }
 }
 
 .date-btn > svg {
@@ -7732,9 +8068,11 @@ figcaption {
   color: var(--text-2);
 }
 
-.date-preset:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .date-preset:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .date-cols {
@@ -7781,8 +8119,10 @@ figcaption {
   border: 1px solid transparent;
 }
 
-.date-cell:hover {
-  background: var(--bg-3);
+@media (hover: hover) {
+  .date-cell:hover {
+    background: var(--bg-3);
+  }
 }
 
 .date-cell.out {
@@ -7828,9 +8168,11 @@ figcaption {
   text-align: left;
 }
 
-.date-time:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .date-time:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 .date-time.on {
@@ -7854,9 +8196,11 @@ figcaption {
   color: var(--text-3);
 }
 
-.date-clear:hover {
-  background: var(--bg-3);
-  color: var(--text);
+@media (hover: hover) {
+  .date-clear:hover {
+    background: var(--bg-3);
+    color: var(--text);
+  }
 }
 
 /* Above the command palette and modal dialogs (z 90) — a picker opened from
@@ -7981,8 +8325,10 @@ figcaption {
   cursor: pointer;
 }
 
-.editor .ProseMirror a:hover {
-  text-decoration-thickness: 2px;
+@media (hover: hover) {
+  .editor .ProseMirror a:hover {
+    text-decoration-thickness: 2px;
+  }
 }
 
 /* ---------- canvas ---------- */
@@ -8034,8 +8380,10 @@ figcaption {
   background: none;
 }
 
-.cv-name:hover {
-  background: var(--bg-3);
+@media (hover: hover) {
+  .cv-name:hover {
+    background: var(--bg-3);
+  }
 }
 
 .cv-name-input {
@@ -8108,9 +8456,11 @@ figcaption {
   --card-border: color-mix(in srgb, var(--tint) 42%, var(--border));
 }
 
-.cv-item:hover {
-  border-color: var(--border-2);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.07), 0 12px 28px -14px rgba(0, 0, 0, 0.5);
+@media (hover: hover) {
+  .cv-item:hover {
+    border-color: var(--border-2);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.07), 0 12px 28px -14px rgba(0, 0, 0, 0.5);
+  }
 }
 
 .cv-item.selected {
@@ -8253,10 +8603,16 @@ figcaption {
   box-shadow: none;
 }
 
-.cv-item.k-text:hover,
 .cv-item.k-text.selected {
   border-color: color-mix(in srgb, var(--accent) 55%, transparent);
   background: color-mix(in srgb, var(--bg-2) 60%, transparent);
+}
+
+@media (hover: hover) {
+  .cv-item.k-text:hover {
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    background: color-mix(in srgb, var(--bg-2) 60%, transparent);
+  }
 }
 
 /* images and files */
@@ -8377,14 +8733,22 @@ figcaption {
   cursor: crosshair;
 }
 
-.cv-item:hover .cv-port,
 .cv-item.selected .cv-port {
   opacity: 1;
   transform: scale(1);
 }
 
-.cv-port:hover {
-  transform: scale(1.35);
+@media (hover: hover) {
+  .cv-item:hover .cv-port {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (hover: hover) {
+  .cv-port:hover {
+    transform: scale(1.35);
+  }
 }
 
 .cv-port.p-top {
@@ -8594,8 +8958,10 @@ figcaption {
   transition: transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.cv-swatch:hover {
-  transform: scale(1.22);
+@media (hover: hover) {
+  .cv-swatch:hover {
+    transform: scale(1.22);
+  }
 }
 
 .cv-swatch.plain {
@@ -8621,8 +8987,10 @@ figcaption {
   width: 130px;
 }
 
-.icon-btn.danger:hover {
-  color: #e34948;
+@media (hover: hover) {
+  .icon-btn.danger:hover {
+    color: #e34948;
+  }
 }
 
 /* ---- bottom dock ---- */
@@ -8669,10 +9037,12 @@ figcaption {
   min-width: 52px;
 }
 
-.cv-tool:hover:not(:disabled) {
-  background: var(--bg-3);
-  color: var(--text);
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .cv-tool:hover:not(:disabled) {
+    background: var(--bg-3);
+    color: var(--text);
+    transform: translateY(-1px);
+  }
 }
 
 .cv-tool:active:not(:disabled) {
@@ -8835,9 +9205,11 @@ figcaption {
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.cv-tile:hover {
-  border-color: var(--border-2);
-  box-shadow: 0 12px 30px -18px rgba(0, 0, 0, 0.6);
+@media (hover: hover) {
+  .cv-tile:hover {
+    border-color: var(--border-2);
+    box-shadow: 0 12px 30px -18px rgba(0, 0, 0, 0.6);
+  }
 }
 
 .cv-tile-open {
@@ -8909,8 +9281,10 @@ figcaption {
   transition: opacity 0.15s ease;
 }
 
-.cv-tile:hover .cv-tile-menu {
-  opacity: 1;
+@media (hover: hover) {
+  .cv-tile:hover .cv-tile-menu {
+    opacity: 1;
+  }
 }
 
 .cv-tile-pop {
@@ -8991,10 +9365,12 @@ figcaption {
   transition: color 0.14s ease, border-color 0.14s ease, transform 0.14s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.obj-board-chip:hover {
-  color: var(--text);
-  border-color: var(--border-2);
-  transform: translateY(-1px);
+@media (hover: hover) {
+  .obj-board-chip:hover {
+    color: var(--text);
+    border-color: var(--border-2);
+    transform: translateY(-1px);
+  }
 }
 
 /* ---------- study ---------- */
@@ -9069,9 +9445,11 @@ figcaption {
   transition: box-shadow 0.18s ease, border-color 0.18s ease;
 }
 
-.sr-start:hover:not(:disabled) {
-  box-shadow: 0 14px 34px -20px color-mix(in srgb, var(--accent) 80%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+@media (hover: hover) {
+  .sr-start:hover:not(:disabled) {
+    box-shadow: 0 14px 34px -20px color-mix(in srgb, var(--accent) 80%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  }
 }
 
 .sr-start.quiet {
@@ -9205,9 +9583,11 @@ figcaption {
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.sr-deck:hover {
-  border-color: var(--border-2);
-  box-shadow: 0 12px 30px -20px rgba(0, 0, 0, 0.6);
+@media (hover: hover) {
+  .sr-deck:hover {
+    border-color: var(--border-2);
+    box-shadow: 0 12px 30px -20px rgba(0, 0, 0, 0.6);
+  }
 }
 
 .sr-deck-open {
@@ -9302,8 +9682,10 @@ figcaption {
   background: var(--accent);
 }
 
-.sr-deck-go.ready:hover {
-  filter: brightness(1.06);
+@media (hover: hover) {
+  .sr-deck-go.ready:hover {
+    filter: brightness(1.06);
+  }
 }
 
 .sr-empty,
@@ -9579,8 +9961,10 @@ figcaption {
   gap: 5px;
 }
 
-.sr-source:hover {
-  color: var(--accent);
+@media (hover: hover) {
+  .sr-source:hover {
+    color: var(--accent);
+  }
 }
 
 .sr-badge {
@@ -9658,21 +10042,32 @@ figcaption {
   font-variant-numeric: tabular-nums;
 }
 
-.sr-grade.again:hover {
-  border-color: #e34948;
-  background: color-mix(in srgb, #e34948 10%, var(--bg-2));
+@media (hover: hover) {
+  .sr-grade.again:hover {
+    border-color: #e34948;
+    background: color-mix(in srgb, #e34948 10%, var(--bg-2));
+  }
 }
-.sr-grade.hard:hover {
-  border-color: #d95926;
-  background: color-mix(in srgb, #d95926 10%, var(--bg-2));
+
+@media (hover: hover) {
+  .sr-grade.hard:hover {
+    border-color: #d95926;
+    background: color-mix(in srgb, #d95926 10%, var(--bg-2));
+  }
 }
-.sr-grade.good:hover {
-  border-color: #199e70;
-  background: color-mix(in srgb, #199e70 10%, var(--bg-2));
+
+@media (hover: hover) {
+  .sr-grade.good:hover {
+    border-color: #199e70;
+    background: color-mix(in srgb, #199e70 10%, var(--bg-2));
+  }
 }
-.sr-grade.easy:hover {
-  border-color: #3987e5;
-  background: color-mix(in srgb, #3987e5 10%, var(--bg-2));
+
+@media (hover: hover) {
+  .sr-grade.easy:hover {
+    border-color: #3987e5;
+    background: color-mix(in srgb, #3987e5 10%, var(--bg-2));
+  }
 }
 
 .sr-done {
@@ -9759,9 +10154,11 @@ figcaption {
   transition: background 0.14s ease, border-color 0.14s ease;
 }
 
-.sr-row:hover {
-  background: var(--bg-2);
-  border-color: var(--border);
+@media (hover: hover) {
+  .sr-row:hover {
+    background: var(--bg-2);
+    border-color: var(--border);
+  }
 }
 
 .sr-row.suspended {
@@ -9812,12 +10209,14 @@ figcaption {
 .sr-row-tools {
   display: flex;
   gap: 1px;
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   transition: opacity 0.14s ease;
 }
 
-.sr-row:hover .sr-row-tools {
-  opacity: 1;
+@media (hover: hover) {
+  .sr-row:hover .sr-row-tools {
+    opacity: 1;
+  }
 }
 
 /* ---- import + settings dialogs ---- */
@@ -10054,8 +10453,10 @@ figcaption {
   background: var(--bg-3);
 }
 
-.sel-card-btn:hover {
-  color: var(--text);
+@media (hover: hover) {
+  .sel-card-btn:hover {
+    color: var(--text);
+  }
 }
 
 .sel-card-btn.primary {
@@ -10227,8 +10628,10 @@ figcaption {
   font-weight: 560;
 }
 
-.sr-link-btn:hover {
-  color: var(--accent);
+@media (hover: hover) {
+  .sr-link-btn:hover {
+    color: var(--accent);
+  }
 }
 
 .sr-newdeck {
@@ -10310,9 +10713,11 @@ figcaption {
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.sr-note:hover {
-  border-color: var(--border-2);
-  box-shadow: 0 12px 28px -20px rgba(0, 0, 0, 0.6);
+@media (hover: hover) {
+  .sr-note:hover {
+    border-color: var(--border-2);
+    box-shadow: 0 12px 28px -20px rgba(0, 0, 0, 0.6);
+  }
 }
 
 .sr-note-head {
@@ -10494,8 +10899,10 @@ figcaption {
   transition: background 0.14s ease, border-color 0.14s ease;
 }
 
-.sr-note-prop-row input:hover {
-  background: var(--bg-2);
+@media (hover: hover) {
+  .sr-note-prop-row input:hover {
+    background: var(--bg-2);
+  }
 }
 
 .sr-note-prop-row input:focus {
@@ -10556,16 +10963,20 @@ figcaption {
   position: absolute;
   bottom: 8px;
   right: 8px;
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   transition: opacity 0.15s ease;
 }
 
-.sr-note:hover .sr-note-del {
-  opacity: 1;
+@media (hover: hover) {
+  .sr-note:hover .sr-note-del {
+    opacity: 1;
+  }
 }
 
-.sr-note-del:hover {
-  color: #e34948;
+@media (hover: hover) {
+  .sr-note-del:hover {
+    color: #e34948;
+  }
 }
 
 /* Deck tile menu. */
@@ -10578,15 +10989,20 @@ figcaption {
   top: 8px;
   right: 8px;
   z-index: 2;
-  opacity: 0;
+  opacity: var(--reveal-idle, 0);
   background: color-mix(in srgb, var(--bg) 75%, transparent);
   backdrop-filter: blur(8px);
   transition: opacity 0.15s ease;
 }
 
-.sr-deck:hover .sr-deck-menu,
 .sr-deck-menu:focus-visible {
   opacity: 1;
+}
+
+@media (hover: hover) {
+  .sr-deck:hover .sr-deck-menu {
+    opacity: 1;
+  }
 }
 
 .sr-deck-pop {
@@ -10614,6 +11030,8 @@ figcaption {
   background: color-mix(in srgb, #e34948 12%, transparent);
 }
 
-.modal .btn.danger:hover {
-  background: color-mix(in srgb, #e34948 20%, transparent);
+@media (hover: hover) {
+  .modal .btn.danger:hover {
+    background: color-mix(in srgb, #e34948 20%, transparent);
+  }
 }

@@ -3,6 +3,7 @@ import type { Editor } from '@tiptap/react';
 import { NodeSelection } from '@tiptap/pm/state';
 import { popPos } from './components/cells';
 import { Icon } from './components/Icons';
+import { useLayout } from './layout';
 
 /**
  * The grip in the left margin, Notion-style: hover a block and it appears
@@ -34,6 +35,26 @@ function topLevel(el: Element | null, root: HTMLElement): HTMLElement | null {
   return (node as HTMLElement) ?? null;
 }
 
+/**
+ * Select a whole block. Lifted out of the component because both ways in need
+ * it — the grip, which knows its block from the hover state, and the long
+ * press, which has only just found one under a finger.
+ */
+function selectBlockIn(editor: Editor, el: HTMLElement) {
+  const { state, view } = editor;
+  try {
+    const inside = view.posAtDOM(el, 0);
+    const $pos = state.doc.resolve(inside);
+    const at = $pos.depth ? $pos.before(1) : inside;
+    const selection = NodeSelection.create(state.doc, at);
+    view.dispatch(state.tr.setSelection(selection));
+    return { at, selection };
+  } catch {
+    // Nothing selectable there — the document moved under us.
+    return null;
+  }
+}
+
 const TURN_INTO = [
   { id: 'text', label: 'Text', icon: 'doc', run: (c: any) => c.setParagraph() },
   { id: 'h1', label: 'Heading 1', icon: 'h1', run: (c: any) => c.setNode('heading', { level: 1 }) },
@@ -46,6 +67,11 @@ const TURN_INTO = [
 ];
 
 export function BlockHandle({ editor, container }: { editor: Editor | null; container: HTMLElement | null }) {
+  // The grip is a hover affordance, and a touch device has no hover to give it:
+  // a webview synthesises a mouse move on tap, which would make the grip flash
+  // beside whatever you just touched. It stays off there, and a long-press on
+  // the block opens the same menu instead.
+  const { coarse } = useLayout();
   const [hover, setHover] = useState<Hover | null>(null);
   const [menu, setMenu] = useState<{ left: number; top: number; pos: number } | null>(null);
   const hoverRef = useRef<Hover | null>(null);
@@ -54,7 +80,7 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
   const menuOpen = menu !== null;
 
   useEffect(() => {
-    if (!editor || !container) return;
+    if (!editor || !container || coarse) return;
     const dom = editor.view.dom as HTMLElement;
 
     /**
@@ -136,29 +162,75 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
       document.removeEventListener('mousemove', onMove);
       editor.off('transaction', onChange);
     };
-  }, [editor, container, menuOpen]);
+  }, [editor, container, menuOpen, coarse]);
 
-  if (!editor || !hover) return null;
+  /**
+   * The touch way in. With no hover there is nothing to reveal the grip, so the
+   * block's own menu is opened by holding the block itself — the same menu, the
+   * same actions, reached by the gesture a phone already uses for "tell me more
+   * about this thing".
+   */
+  useEffect(() => {
+    if (!editor || !container || !coarse) return;
+    const dom = editor.view.dom as HTMLElement;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let from: { x: number; y: number } | null = null;
 
-  /** Select the whole block — both the grip's drag and its menu act on that. */
-  const selectBlock = () => {
-    const { state, view } = editor;
-    try {
-      const inside = view.posAtDOM(hover.el, 0);
-      const $pos = state.doc.resolve(inside);
-      const at = $pos.depth ? $pos.before(1) : inside;
-      const selection = NodeSelection.create(state.doc, at);
-      view.dispatch(state.tr.setSelection(selection));
-      return { at, selection };
-    } catch {
-      // Nothing selectable there — the document moved under us.
-      return null;
-    }
-  };
+    const cancel = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      from = null;
+    };
+
+    const down = (e: PointerEvent) => {
+      // A mouse has the grip already; this is only for fingers and pens.
+      if (e.pointerType === 'mouse') return;
+      const at = { x: e.clientX, y: e.clientY };
+      from = at;
+      timer = setTimeout(() => {
+        timer = null;
+        const el = topLevel(document.elementFromPoint(at.x, at.y), dom);
+        if (!el) return;
+        const picked = selectBlockIn(editor, el);
+        if (!picked) return;
+        setMenu({ ...popPos(el, 230, 380), pos: picked.at });
+      }, 480);
+    };
+
+    // Scrolling has to win. Any real travel means the finger is panning the
+    // page, not holding a block.
+    const move = (e: PointerEvent) => {
+      if (!from) return;
+      if (Math.abs(e.clientX - from.x) > 8 || Math.abs(e.clientY - from.y) > 8) cancel();
+    };
+
+    // Otherwise the press raises the system's own text-selection callout over
+    // our menu.
+    const noCallout = (e: Event) => e.preventDefault();
+
+    dom.addEventListener('pointerdown', down);
+    dom.addEventListener('pointermove', move);
+    dom.addEventListener('pointerup', cancel);
+    dom.addEventListener('pointercancel', cancel);
+    dom.addEventListener('contextmenu', noCallout);
+    return () => {
+      cancel();
+      dom.removeEventListener('pointerdown', down);
+      dom.removeEventListener('pointermove', move);
+      dom.removeEventListener('pointerup', cancel);
+      dom.removeEventListener('pointercancel', cancel);
+      dom.removeEventListener('contextmenu', noCallout);
+    };
+  }, [editor, container, coarse]);
+
+  // The menu outlives the hover: on touch there is no hover to have opened it.
+  if (!editor || (!hover && !menu)) return null;
+
+  const selectBlock = () => (hover ? selectBlockIn(editor, hover.el) : null);
 
   const onDragStart = (e: React.DragEvent) => {
     const picked = selectBlock();
-    if (!picked) return e.preventDefault();
+    if (!picked || !hover) return e.preventDefault();
     // Hand ProseMirror the slice it is about to move; its own drop handling
     // does the rest, including where the drop marker goes.
     editor.view.dragging = { slice: picked.selection.content(), move: true };
@@ -187,18 +259,20 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
 
   return (
     <>
-      <button
-        className="block-grip"
-        style={{ top: hover.top }}
-        draggable
-        onDragStart={onDragStart}
-        onDragEnd={onDragEnd}
-        onClick={openMenu}
-        title="Drag to move · click for options"
-        aria-label="Block options"
-      >
-        <Icon name="grip" size={15} />
-      </button>
+      {hover && (
+        <button
+          className="block-grip"
+          style={{ top: hover.top }}
+          draggable
+          onDragStart={onDragStart}
+          onDragEnd={onDragEnd}
+          onClick={openMenu}
+          title="Drag to move · click for options"
+          aria-label="Block options"
+        >
+          <Icon name="grip" size={15} />
+        </button>
+      )}
 
       {menu && (
         <>

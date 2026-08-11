@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { objectChanged, onObjectChanged } from '../objects';
+import { useLayout } from '../layout';
 import { useApp } from '../store';
 import type { CalEntry, ObjType } from '../types';
 import { addDays, fmtMonthYear, keyOf, todayKey, typeColor } from '../util';
@@ -115,9 +116,17 @@ export interface CalendarNav {
 }
 
 export function useCalendarNav(): CalendarNav {
-  const [mode, setModeState] = useState<'day' | 'week'>(
+  const { narrow } = useLayout();
+  const [saved, setModeState] = useState<'day' | 'week'>(
     () => (localStorage.getItem('habitat:cal-mode') as 'day' | 'week') || 'week'
   );
+  /**
+   * Seven columns of a 390px screen are 50px each — narrower than the text of a
+   * single event. A phone gets the day view whatever the saved preference says,
+   * and the preference is left alone so the desktop still opens on the week you
+   * chose.
+   */
+  const mode = narrow ? 'day' : saved;
   const [anchor, setAnchor] = useState(todayKey());
 
   const setMode = (m: 'day' | 'week') => {

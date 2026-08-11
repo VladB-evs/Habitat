@@ -17,12 +17,15 @@ function TextCell({
   number,
   name,
   placeholder,
+  mode,
 }: {
   value: any;
   onCommit: (v: any) => void;
   number?: boolean;
   name?: boolean;
   placeholder?: string;
+  /** Which soft keyboard to ask for. Also turns off autocorrect. */
+  mode?: 'url' | 'email' | 'tel';
 }) {
   const [v, setV] = useState(value == null ? '' : String(value));
   useEffect(() => setV(value == null ? '' : String(value)), [value]);
@@ -35,10 +38,14 @@ function TextCell({
   const input = (
     <input
       className={'cell-input' + (name ? ' name' : '')}
-      spellCheck={!number}
+      // An address is not prose: autocorrect turning it into words is worse
+      // than useless, and the soft keyboard should offer @ and / directly.
+      spellCheck={!number && !mode}
+      autoCapitalize={mode ? 'off' : undefined}
+      autoCorrect={mode ? 'off' : undefined}
       value={v}
       placeholder={shown}
-      inputMode={number ? 'decimal' : undefined}
+      inputMode={number ? 'decimal' : mode}
       onChange={(e) => setV(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => {
@@ -67,7 +74,7 @@ function UrlCell({ value, onCommit }: { value: any; onCommit: (v: any) => void }
   };
   return (
     <div className="url-cell">
-      <TextCell value={value} onCommit={onCommit} placeholder="" />
+      <TextCell value={value} onCommit={onCommit} placeholder="" mode="url" />
       {value ? (
         <button className="url-go" onClick={open} aria-label="Open link">
           <Icon name="arrow-up-right" size={13} />
@@ -266,15 +273,17 @@ function LinkCell({
   onCommit,
   href,
   label,
+  mode,
 }: {
   value: any;
   onCommit: (v: any) => void;
   href: (v: string) => string;
   label: string;
+  mode?: 'url' | 'email' | 'tel';
 }) {
   return (
     <div className="url-cell">
-      <TextCell value={value} onCommit={onCommit} placeholder="" />
+      <TextCell value={value} onCommit={onCommit} placeholder="" mode={mode} />
       {value ? (
         <button className="url-go" onClick={() => window.open(href(String(value)))} aria-label={label}>
           <Icon name="arrow-up-right" size={13} />
@@ -423,9 +432,9 @@ export function Cell({
     case 'url':
       return <UrlCell value={value} onCommit={onChange} />;
     case 'email':
-      return <LinkCell value={value} onCommit={onChange} href={(v) => 'mailto:' + v} label="Send mail" />;
+      return <LinkCell value={value} onCommit={onChange} href={(v) => 'mailto:' + v} label="Send mail" mode="email" />;
     case 'phone':
-      return <LinkCell value={value} onCommit={onChange} href={(v) => 'tel:' + v.replace(/\s+/g, '')} label="Call" />;
+      return <LinkCell value={value} onCommit={onChange} href={(v) => 'tel:' + v.replace(/\s+/g, '')} label="Call" mode="tel" />;
     case 'select':
       return <SelectCell def={def} value={value} onChange={onChange} />;
     case 'multiselect':

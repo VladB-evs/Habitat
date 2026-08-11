@@ -12,3 +12,11 @@ release/
 # Built by scripts/build-ai.mjs
 native/
 swift/.build/
+
+# Capacitor: the iOS project is committed on purpose — it carries Info.plist,
+# entitlements and the signing config, and CI cannot build reproducibly without
+# it. Only its build output and the local build variables are ignored.
+ios/App/build/
+ios/App/Pods/
+ios/App/output/
+.env.local

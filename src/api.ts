@@ -39,7 +39,8 @@ import type { AiAction, AiAnswer, AiAvailability, AiDelta, AiResult } from './ty
 
 declare global {
   interface Window {
-    habitat: {
+    /** Absent outside Electron — a browser tab goes through the dev bridge below. */
+    habitat?: {
       invoke: (channel: string, payload?: any) => Promise<any>;
       onUpdateState?: (fn: (state: UpdateState) => void) => () => void;
       onAiDelta?: (fn: (msg: AiDelta) => void) => () => void;
@@ -48,7 +49,51 @@ declare global {
   }
 }
 
-const inv = (channel: string, payload?: any) => window.habitat.invoke(channel, payload);
+/**
+ * The one seam between the UI and the vault.
+ *
+ * Inside Electron this is the preload bridge. Opened in a plain browser —
+ * which is how the app gets checked at a phone-sized viewport, since a
+ * BrowserWindow cannot be resized to 390px usefully — it falls back to the
+ * dev bridge in electron/devbridge.js over HTTP.
+ *
+ * The Capacitor build lands here too: one more branch, pointing at whatever
+ * the native shell exposes. Nothing above this line has to know.
+ */
+const env = (import.meta as any).env ?? {};
+
+/**
+ * Where the vault is.
+ *
+ * Unset — a browser tab on this machine — it is the dev bridge on localhost.
+ * Set at build time it is a Habitat running elsewhere, which is how the iOS
+ * build works: a webview has no Node and no SQLite, so the phone talks to the
+ * Mac over the network and the Mac's bridge wants a token.
+ *
+ *   VITE_HABITAT_BRIDGE=http://192.168.1.20:37380
+ *   VITE_HABITAT_TOKEN=…
+ *
+ * Both are printed by `npm run bridge`.
+ */
+const DEV_BRIDGE: string = env.VITE_HABITAT_BRIDGE || 'http://127.0.0.1:37380';
+const BRIDGE_TOKEN: string = env.VITE_HABITAT_TOKEN || '';
+
+const viaBridge = async (channel: string, payload?: any) => {
+  const res = await fetch(DEV_BRIDGE, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(BRIDGE_TOKEN ? { authorization: `Bearer ${BRIDGE_TOKEN}` } : {}),
+    },
+    body: JSON.stringify({ channel, payload }),
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error || `dev bridge: ${res.status}`);
+  return body?.value ?? null;
+};
+
+const inv = (channel: string, payload?: any) =>
+  window.habitat ? window.habitat.invoke(channel, payload) : viaBridge(channel, payload);
 
 export const api = {
   types: {
@@ -297,7 +342,7 @@ export const api = {
     check: (): Promise<UpdateState> => inv('update:check'),
     /** Quits and relaunches into the downloaded version. */
     install: (): Promise<boolean> => inv('update:install'),
-    onState: (fn: (s: UpdateState) => void) => window.habitat.onUpdateState?.(fn) ?? (() => {}),
+    onState: (fn: (s: UpdateState) => void) => window.habitat?.onUpdateState?.(fn) ?? (() => {}),
   },
   http: {
     config: (): Promise<HttpApiConfig> => inv('api:config'),
@@ -319,7 +364,7 @@ export const api = {
     signOut: (): Promise<SyncStatus> => inv('sync:signOut'),
     config: (): Promise<SyncConfig> => inv('sync:config'),
     saveConfig: (patch: Partial<SyncConfig>): Promise<SyncConfig> => inv('sync:saveConfig', patch),
-    onState: (fn: (s: SyncStatus) => void): (() => void) => window.habitat.onSyncState?.(fn) ?? (() => {}),
+    onState: (fn: (s: SyncStatus) => void): (() => void) => window.habitat?.onSyncState?.(fn) ?? (() => {}),
   },
   telegram: {
     get: (): Promise<TelegramConfig> => inv('telegram:get'),
@@ -423,6 +468,6 @@ export const api = {
     search: (text: string): Promise<{ ok: boolean; query?: string; error?: string }> =>
       inv('ai:search', { text }),
     /** Watch a run being written. Returns an unsubscribe. */
-    onDelta: (fn: (msg: AiDelta) => void): (() => void) => window.habitat.onAiDelta?.(fn) ?? (() => {}),
+    onDelta: (fn: (msg: AiDelta) => void): (() => void) => window.habitat?.onAiDelta?.(fn) ?? (() => {}),
   },
 };

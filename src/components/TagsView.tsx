@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { ask } from '../confirm';
 import { useApp } from '../store';
 import type { TagObj } from '../types';
 import { typeColor } from '../util';
 import { Icon } from './Icons';
 import { SplitControls } from './SplitControls';
+import { PageActions } from './PageActions';
 
 export function TagsView() {
   const { types, openFrom, theme } = useApp();
@@ -32,7 +34,7 @@ export function TagsView() {
     const warning = t.uses > 0
       ? `\n\nIt will be removed from ${where}. The objects themselves are kept — only the tag goes away.`
       : '';
-    if (!confirm(`Delete the tag “${t.title}”?${warning}`)) return;
+    if (!(await ask(`Delete the tag “${t.title}”?${warning}`))) return;
     await api.tags.remove(t.id);
     reload();
   };
@@ -47,7 +49,9 @@ export function TagsView() {
           <h1>Tags</h1>
           <span className="count-badge">{tags?.length ?? 0}</span>
         </div>
-        <SplitControls />
+        <PageActions>
+          <SplitControls />
+        </PageActions>
       </header>
 
       <div className="tags-page">

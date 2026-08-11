@@ -81,12 +81,26 @@ export function optionColor(value: string, theme: string): { bg: string; fg: str
     : { bg: `hsl(${hue} ${sat + 20}% 93%)`, fg: `hsl(${hue} ${sat}% 32%)`, border: `hsl(${hue} ${sat}% 80%)` };
 }
 
-/** Clamp a popover position near an anchor element to the viewport. */
+/**
+ * The area actually visible, which is not the window once a soft keyboard is
+ * up: `window.innerHeight` still counts the rows the keyboard is covering, so
+ * anything clamped against it gets placed underneath the keyboard. The visual
+ * viewport is the part the user can really see, in the same client coordinates
+ * that `getBoundingClientRect` returns.
+ */
+export function viewport() {
+  const v = typeof visualViewport !== 'undefined' ? visualViewport : null;
+  if (!v) return { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+  return { left: v.offsetLeft, top: v.offsetTop, width: v.width, height: v.height };
+}
+
+/** Clamp a popover position near an anchor element to the visible viewport. */
 export function popPos(anchor: HTMLElement, w = 260, h = 320) {
   const r = anchor.getBoundingClientRect();
-  const left = Math.max(12, Math.min(r.left, window.innerWidth - w - 12));
+  const v = viewport();
+  const left = Math.max(v.left + 12, Math.min(r.left, v.left + v.width - w - 12));
   let top = r.bottom + 6;
-  if (top + h > window.innerHeight - 12) top = Math.max(12, r.top - h - 6);
+  if (top + h > v.top + v.height - 12) top = Math.max(v.top + 12, r.top - h - 6);
   return { left, top };
 }
 

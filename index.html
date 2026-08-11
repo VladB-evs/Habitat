@@ -2,7 +2,11 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `viewport-fit=cover` lets the app paint under the notch and home indicator;
+         the safe-area insets in styles.css keep content out from under them. Pinch
+         zoom stays enabled on purpose — `touch-action: manipulation` on controls
+         removes the double-tap delay without taking zoom away from anyone. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Habitat</title>
   </head>
   <!-- Spell check is opt-in per field (spellcheck inherits): prose gets it, search boxes and code do not. -->

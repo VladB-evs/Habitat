@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { ask } from '../confirm';
 import { useApp } from '../store';
 import type { Template } from '../types';
 import { typeColor } from '../util';
@@ -46,7 +47,7 @@ export function TemplatePage({ id }: { id: string }) {
   };
 
   const del = async () => {
-    if (!confirm(`Delete the template “${tpl.name || 'Untitled'}”?`)) return;
+    if (!(await ask(`Delete the template “${tpl.name || 'Untitled'}”?`))) return;
     await api.templates.remove(id);
     if (canBack) back();
     else if (type) navigate({ kind: 'type', typeId: type.id });

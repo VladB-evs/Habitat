@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../../api';
+import { ask } from '../../confirm';
 import { dialogIn, spring } from '../../motion';
 import { useApp } from '../../store';
 import type { Card, Deck, ParsedCard } from '../../types';
@@ -150,7 +151,7 @@ function DeckSettings({
           <button
             className="btn danger"
             onClick={async () => {
-              if (!confirm(`Delete “${deck.name}” and its ${deck.counts?.total ?? 0} cards? Your notes are kept.`)) return;
+              if (!(await ask(`Delete “${deck.name}” and its ${deck.counts?.total ?? 0} cards? Your notes are kept.`))) return;
               await api.study.deckDelete(deck.id);
               onDeleted();
             }}
@@ -252,7 +253,7 @@ export function DeckPage({ id }: { id: string }) {
       <div className="sr-deck-bar">
         <div className="sr-search">
           <Icon name="search" size={13} />
-          <input placeholder="Search cards…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input placeholder="Search cards…" enterKeyHint="search" autoCapitalize="off" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         <span className="sr-deck-summary">
           <span className="sr-tally new">{c.new}</span> new

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
+import { ask } from '../confirm';
 import type { HttpApiConfig } from '../types';
 import { Icon } from './Icons';
 
@@ -73,7 +74,7 @@ export function ApiSettings() {
   };
 
   const regenerate = async () => {
-    if (!confirm('Replace the token? Anything using the old one stops working.')) return;
+    if (!(await ask('Replace the token? Anything using the old one stops working.'))) return;
     const token = crypto.randomUUID().replace(/-/g, '');
     await apply({ token });
     setNotice('New token — update anything that used the old one.');

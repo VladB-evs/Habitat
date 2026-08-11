@@ -1,6 +1,7 @@
 import { ReactRenderer } from '@tiptap/react';
 import type { MentionListHandle } from './components/MentionList';
 import MentionList from './components/MentionList';
+import { viewport } from './util';
 
 /**
  * Pins a caret popup below the cursor, flipping it above when the bottom of the
@@ -14,15 +15,20 @@ export function placePopup(popup: HTMLElement | null, clientRect: (() => DOMRect
   const gap = 6;
   const edge = 8;
 
-  const roomBelow = window.innerHeight - r.bottom - edge;
-  const roomAbove = r.top - edge;
-  const top =
-    roomBelow >= h || roomBelow >= roomAbove
-      ? Math.min(r.bottom + gap, window.innerHeight - h - edge)
-      : r.top - h - gap;
+  // Measured against the visible viewport, not the window: with a soft keyboard
+  // up the window still counts the rows the keyboard is sitting on, and a menu
+  // clamped to it lands underneath the keyboard. These are the caret popups, so
+  // the keyboard is always up when they matter.
+  const v = viewport();
+  const vTop = v.top + edge;
+  const vBottom = v.top + v.height - edge;
 
-  popup.style.left = Math.max(edge, Math.min(r.left, window.innerWidth - w - edge)) + 'px';
-  popup.style.top = Math.max(edge, top) + 'px';
+  const roomBelow = vBottom - r.bottom;
+  const roomAbove = r.top - vTop;
+  const top = roomBelow >= h || roomBelow >= roomAbove ? Math.min(r.bottom + gap, vBottom - h) : r.top - h - gap;
+
+  popup.style.left = Math.max(v.left + edge, Math.min(r.left, v.left + v.width - w - edge)) + 'px';
+  popup.style.top = Math.max(vTop, top) + 'px';
 }
 
 /**
@@ -47,11 +53,20 @@ export function suggestionRenderer(
 
     const place = (clientRect: (() => DOMRect | null) | null | undefined) => placePopup(popup, clientRect);
 
+    // The caret hasn't moved but the room around it has: the keyboard sliding
+    // up is exactly the moment a popup placed a frame earlier ends up behind
+    // it. Held so the same rect can be re-measured against the new viewport.
+    let lastRect: (() => DOMRect | null) | null | undefined = null;
+    const reflow = () => place(lastRect);
+
     const cleanup = () => {
+      visualViewport?.removeEventListener('resize', reflow);
+      visualViewport?.removeEventListener('scroll', reflow);
       popup?.remove();
       component?.destroy();
       popup = null;
       component = null;
+      lastRect = null;
     };
 
     return {
@@ -62,11 +77,15 @@ export function suggestionRenderer(
         popup.appendChild(component.element);
         document.body.appendChild(popup);
         setVisible(props.items);
+        lastRect = props.clientRect;
         place(props.clientRect);
+        visualViewport?.addEventListener('resize', reflow);
+        visualViewport?.addEventListener('scroll', reflow);
       },
       onUpdate: (props: any) => {
         component?.updateProps({ ...props, ...extraProps });
         setVisible(props.items);
+        lastRect = props.clientRect;
         place(props.clientRect);
       },
       onKeyDown: (props: any) => {

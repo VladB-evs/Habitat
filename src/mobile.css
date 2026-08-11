@@ -1,0 +1,944 @@
+/* ============================================================
+   Habitat — touch and narrow-screen adaptations
+
+   Loaded after styles.css. Every rule in this file is scoped under
+   :root[data-narrow], :root[data-coarse] or :root[data-short], set by
+   src/layout.tsx. Nothing here applies to a desktop window with a mouse.
+
+   The rule for this file: adapt by turning the tokens in styles.css
+   (--hit, --sidebar-w, --safe-*) wherever that is enough, and only write
+   an override when the desktop rule is genuinely wrong rather than merely
+   sized for a bigger screen. It stays readable that way; the desktop sheet
+   is 10k lines precisely because nothing enforced that there.
+   ============================================================ */
+
+/* ---------- controls that used to wait for a hover ----------
+   Around twenty controls across the app sit at `opacity: 0` until their row or
+   card is hovered — delete, open, the widget tools, the code block's copy
+   button. On a touch device that hover never arrives, so the action simply does
+   not exist.
+
+   Rather than twenty overrides, the idle opacity is a token: the base rules say
+   `opacity: var(--reveal-idle, 0)` and this turns it up. Faint rather than full
+   so a list still reads as its contents, with the controls as a quieter layer —
+   which is what the hover was buying on the desktop in the first place. */
+
+:root[data-coarse] {
+  --reveal-idle: 0.55;
+}
+
+/* An empty agenda day collapses to a line and opens on hover; the "add a task"
+   row inside it is the only way to fill that day, so on touch the day stays
+   open. */
+:root[data-coarse] .ag-day.empty .ag-day-body {
+  opacity: 1;
+  height: auto;
+  overflow: visible;
+}
+
+/* Two of the revealed controls turn out to be duplicates rather than actions.
+   Both a table row and a checklist row already open their object when you click
+   the space between their controls, and on a touch device that *is* the primary
+   gesture — so the Open pill and the Open arrow have nothing left to offer, and
+   surfacing them would only crowd the row. They stay hidden here, which is why
+   no row ends up needing an overflow menu. */
+:root[data-coarse] .open-pill,
+:root[data-coarse] .row-open {
+  display: none;
+}
+
+/* ---------- touch targets ----------
+   Applied on coarse pointers only, so the desktop stays pixel-identical. The
+   button keeps its drawn size — the padding grows the *hit* area, not the ink. */
+
+:root[data-coarse] .icon-btn {
+  min-width: var(--hit);
+  min-height: var(--hit);
+}
+
+:root[data-coarse] .nav-item {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+/* A 6px divider is a mouse target. The bar it draws stays 1px — only the part
+   that listens for the drag grows. */
+:root[data-coarse] .split-divider {
+  flex-basis: 22px;
+}
+
+:root[data-coarse] .dir-col .split-divider::before {
+  top: 10.5px;
+}
+
+:root[data-coarse] .dir-row .split-divider::before {
+  left: 10.5px;
+}
+
+/* ============================================================
+   Making room for the keyboard
+
+   `100dvh` does not shrink when a keyboard opens — it accounts for browser
+   chrome, not for the keyboard — so a shell sized in dvh keeps its full height
+   and hides its lower half behind it. `--vvh` is the height actually visible,
+   republished by src/layout.tsx on every visual-viewport change.
+
+   With the shell resized, everything anchored to its bottom follows for free:
+   the action pill rides up above the keyboard, and the lower pane of a split
+   stays on screen instead of being typed into blind.
+   ============================================================ */
+
+:root[data-narrow] .app {
+  height: var(--vvh, 100dvh);
+  /* The containing block for everything that floats over the app, below. */
+  position: relative;
+}
+
+/* The shell's own furniture — drawer, its button, the edge strips — is
+   positioned against `.app` rather than `position: fixed`, which resolves
+   against the *layout* viewport and does not shrink for a keyboard. Those rules
+   live with each component below; this is the note explaining why they all say
+   `absolute` when `fixed` would look more natural.
+
+   Overlays that genuinely are fixed — they cover the app rather than living in
+   it — get told about the keyboard instead. */
+:root[data-narrow] .palette-backdrop,
+:root[data-narrow] .modal-layer {
+  height: var(--vvh, 100dvh);
+}
+
+/* The keyboard already takes the bottom of the screen; the home indicator is
+   behind it, so its inset would only be dead space. */
+:root[data-keyboard] .pane-action-slot,
+:root[data-keyboard] .drawer-fab {
+  bottom: 12px;
+}
+
+/* ============================================================
+   Pages that assume two dimensions
+
+   Anything laid out in fixed columns overflows sideways at 390px, and the page
+   then scrolls horizontally — the one thing a phone layout must never do. These
+   all become a single column; the content is the same, stacked.
+   ============================================================ */
+
+:root[data-narrow] .checklist-page,
+:root[data-narrow] .checklist-page.split {
+  max-width: none;
+  display: block;
+  padding: 0 14px 24px;
+}
+
+:root[data-narrow] .checklist-col + .checklist-col {
+  margin-top: 26px;
+}
+
+/* The dashboard's six-column widget grid, and the picker that fills it.
+
+   Row height goes automatic as well as the columns. Widgets carry a height in
+   92px row units chosen against a six-wide grid; at one column those units are
+   wrong, and a widget that was three units tall clips its own contents. Letting
+   the row size to the content — with the unit as a floor — keeps every widget
+   whole. The `span` in the inline style is overridden for the same reason. */
+:root[data-narrow] .dash-grid {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-rows: minmax(92px, auto);
+}
+
+:root[data-narrow] .dash-grid > .w-wrap {
+  grid-column: 1 / -1 !important;
+  grid-row: auto !important;
+}
+
+:root[data-narrow] .dash {
+  padding: 0 14px 20px;
+}
+
+:root[data-narrow] .picker-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Card grids drop to one column rather than squeezing two into 390px. */
+:root[data-narrow] .tag-grid,
+:root[data-narrow] .people-grid,
+:root[data-narrow] .cv-tiles,
+:root[data-narrow] .sr-decks {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The agenda already stacks its backlog below 900px; it just needs the padding
+   pulled in at phone width. */
+:root[data-narrow] .ag-layout {
+  padding: 0 14px 20px;
+}
+
+/* An object is mostly prose — it only needs its desktop margins back. */
+:root[data-narrow] .obj-body {
+  padding: 12px 16px 80px;
+}
+
+:root[data-narrow] .obj-title {
+  font-size: 24px;
+}
+
+/* A property is a 140px label and a value side by side. At 390px that leaves
+   the value about half a line, so the label goes above it — the same pairing,
+   stacked. */
+:root[data-narrow] .obj-prop {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+}
+
+:root[data-narrow] .obj-prop > label {
+  width: auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+/* ---------- the editor's selection toolbar ----------
+   On the desktop this is a bubble that appears beside what you have selected.
+   On a phone that spot is under your thumb, and the keyboard is about to cover
+   wherever it lands. So it becomes a strip across the bottom of the visible
+   viewport, directly above the keyboard, and the selection stays in sight. */
+
+:root[data-narrow] .sel-menu {
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  bottom: var(--kb, 0px);
+  max-width: none;
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  padding-bottom: calc(5px + var(--safe-bottom));
+}
+
+:root[data-keyboard] .sel-menu {
+  /* The keyboard is already covering the home indicator. */
+  padding-bottom: 5px;
+}
+
+/* Its rows scroll sideways rather than wrapping into a wall of buttons. */
+:root[data-narrow] .sel-row {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+:root[data-narrow] .sel-row::-webkit-scrollbar {
+  height: 0;
+}
+
+:root[data-narrow] .sel-row > * {
+  flex-shrink: 0;
+}
+
+:root[data-narrow] .sel-btn {
+  min-height: var(--hit);
+  min-width: var(--hit);
+}
+
+/* Nothing may push the page sideways. Wide content — the database table above
+   all — scrolls inside its own box instead. */
+:root[data-narrow] .pane-scroll {
+  overflow-x: hidden;
+}
+
+/* ---------- the database table becomes a list of cards ----------
+
+   A table with a Name column plus however many properties the type defines is
+   the one layout that cannot be made to fit: side-scrolling it would mean the
+   name scrolls away from its own values.
+
+   So the same markup is re-laid-out. Each row becomes a card, each cell a
+   labelled line — the label comes from the `data-label` the cell carries,
+   because the header row is gone. Nothing about the data, the editing or the
+   selection changes; only the boxes move. */
+
+:root[data-narrow] .table-scroll {
+  padding: 0 14px;
+  overflow-x: visible;
+}
+
+:root[data-narrow] .db-table,
+:root[data-narrow] .db-table tbody,
+:root[data-narrow] .db-table tr,
+:root[data-narrow] .db-table td {
+  display: block;
+  width: auto;
+}
+
+/* The header row's only job was naming the columns, and each cell now names
+   itself. */
+:root[data-narrow] .db-table thead {
+  display: none;
+}
+
+:root[data-narrow] .db-table tr {
+  position: relative;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-2);
+}
+
+/* The title leads the card, at the size a heading deserves. */
+:root[data-narrow] .db-table td.td-name {
+  padding: 0 0 2px;
+  font-size: 15.5px;
+  font-weight: 600;
+}
+
+:root[data-narrow] .db-table td.td-name .cell-name {
+  flex-wrap: wrap;
+}
+
+/* Every other cell is a label-and-value line. Empty ones say nothing at all
+   rather than printing a label with a blank beside it. */
+:root[data-narrow] .db-table td[data-label] {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 0;
+  border: none;
+}
+
+:root[data-narrow] .db-table td[data-label]::before {
+  content: attr(data-label);
+  flex: 0 0 34%;
+  min-width: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+:root[data-narrow] .db-table td[data-label] > * {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Delete sits in the card's top corner instead of a trailing column. */
+:root[data-narrow] .db-table td.td-end {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 0;
+}
+
+/* The select checkbox likewise, opposite it, and only while selecting. */
+:root[data-narrow] .db-table td.td-pick {
+  padding: 0 0 4px;
+}
+
+:root[data-narrow] .db-table td.td-pick.off {
+  display: none;
+}
+
+:root[data-narrow] .add-row {
+  width: 100%;
+  justify-content: center;
+  min-height: var(--hit);
+}
+
+/* Five view modes plus the filter and sort chips are wider than the screen and
+   always will be. The row scrolls sideways on its own rather than being clipped
+   by the pane — the modes past Calendar are still reachable, by swiping the row
+   the way the rest of the app's overflow rows work. */
+:root[data-narrow] .view-bar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+:root[data-narrow] .view-bar::-webkit-scrollbar {
+  height: 0;
+}
+
+:root[data-narrow] .view-bar > * {
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   The page's own action bar
+
+   A page header on the desktop is a title on the left and five or six controls
+   on the right. At 390px that row has nowhere to go — the controls were running
+   off the edge with the New button half cut off.
+
+   So they become a second floating pill, matching the drawer button and sitting
+   beside it: same height, same corner radius, same shadow, same distance off the
+   bottom edge. Two floating things rather than one, because they answer two
+   different questions — the round one is "where do I go", this one is "what can
+   I do on this page".
+
+   It floats over the content rather than docking to the pane, so a page reads
+   full height and nothing is boxed in by a permanent strip.
+
+   One per pane, because panes stack: a single bar fixed to the window would
+   belong to whichever page rendered last while sitting under the other one.
+   ============================================================ */
+
+/* Empty on the desktop and on any page that hasn't opted in. */
+.pane-action-slot:empty {
+  display: none;
+}
+
+:root[data-narrow] .pane-action-slot {
+  position: absolute;
+  z-index: 30;
+  left: calc(12px + var(--safe-left));
+  /* Stops short of the drawer button rather than running under it. */
+  right: calc(70px + var(--safe-right));
+  bottom: calc(16px + var(--safe-bottom));
+  /* The gap either side of the pill is still page, not bar — clicks there must
+     reach the content underneath. */
+  pointer-events: none;
+  display: flex;
+}
+
+:root[data-narrow] .page-action-bar {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 46px;
+  padding: 0 8px;
+  border-radius: 23px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow);
+  /* Too many controls scroll inside the pill rather than shrinking to slivers —
+     the buttons keep their real size and the row admits it is a row. */
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+:root[data-narrow] .page-action-bar::-webkit-scrollbar {
+  height: 0;
+}
+
+:root[data-narrow] .page-action-bar > * {
+  flex-shrink: 0;
+}
+
+/* Inside a 46px pill the controls want to be round too, and a hair shorter than
+   the pill so the shape reads as one thing. */
+:root[data-narrow] .page-action-bar .btn,
+:root[data-narrow] .page-action-bar .icon-btn,
+:root[data-narrow] .page-action-bar .today-btn,
+:root[data-narrow] .page-action-bar .seg.mini {
+  min-height: 36px;
+  border-radius: 18px;
+}
+
+:root[data-narrow] .page-action-bar .split-btn > .btn:first-child {
+  border-radius: 18px 0 0 18px;
+}
+
+:root[data-narrow] .page-action-bar .split-btn > .btn:last-child {
+  border-radius: 0 18px 18px 0;
+}
+
+/* The pill scrolls, which means something can be off-screen — and it must never
+   be the thing the page is for. The primary action is pulled to the head of the
+   row so New / Add is always the one control reachable without scrolling. */
+:root[data-narrow] .page-action-bar .btn.primary,
+:root[data-narrow] .page-action-bar .split-btn {
+  order: -1;
+}
+
+/* The search box would otherwise eat the whole pill and push everything out. */
+:root[data-narrow] .page-action-bar .people-search {
+  min-width: 0;
+  flex: 0 1 140px;
+}
+
+/* Floating means it covers the foot of the page, so the page ends above it —
+   otherwise the last row of a list is permanently under the pill. Only pages
+   that actually have one pay for the room. */
+:root[data-narrow] .pane:has(.pane-action-slot:not(:empty)) .pane-scroll {
+  padding-bottom: 74px;
+}
+
+/* With the controls moved out, the header is a title and nothing else. */
+:root[data-narrow] .page-head,
+:root[data-narrow] .daily-head {
+  padding: 16px 16px 10px;
+  gap: 8px;
+}
+
+:root[data-narrow] .page-head h1,
+:root[data-narrow] .daily-head h1 {
+  font-size: 22px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- the right-hand drawer ----------
+   The sidebar itself is unchanged; this is only its container. It comes off the
+   right edge because that is the side the hand holding the phone is already on. */
+
+:root[data-narrow] .drawer {
+  /* Against .app, not the layout viewport — see the keyboard note above. */
+  position: absolute;
+  z-index: 60;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  /* Never the whole screen: the sliver of page still showing is what says this
+     is a layer over your work rather than a place you have navigated to. */
+  width: min(var(--sidebar-w) + 42px, 84vw);
+  box-shadow: var(--shadow);
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  padding-right: var(--safe-right);
+  background: var(--sidebar-bg);
+  touch-action: pan-y;
+}
+
+:root[data-narrow] .drawer-drag {
+  flex: 1;
+  display: flex;
+  min-width: 0;
+}
+
+:root[data-narrow] .drawer .sidebar {
+  width: 100%;
+  border-right: none;
+}
+
+/* The drawer's own header has nothing to hold on a phone — no traffic lights to
+   make room for, and the collapse button lives in the sidebar already. */
+:root[data-narrow] .drawer .sidebar-drag {
+  -webkit-app-region: none;
+}
+
+:root[data-narrow] .drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 55;
+  background: rgba(0, 0, 0, 0.38);
+}
+
+/* ---------- the drawer's button, in the thumb arc ----------
+   Bottom right, where the thumb already rests. There is no bottom navigation
+   bar on purpose: this plus the edge swipes covers it without spending any
+   permanent height on the smallest screen the app runs on. */
+
+:root[data-narrow] .drawer-fab {
+  position: absolute;
+  z-index: 50;
+  right: calc(14px + var(--safe-right));
+  bottom: calc(16px + var(--safe-bottom));
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 23px;
+  color: var(--text);
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  box-shadow: var(--shadow);
+}
+
+/* ---------- edge gesture zones ----------
+   Narrow enough to stay out of the way, wide enough to catch a thumb coming in
+   off the bezel. They own their strip outright, hence `touch-action: none`. */
+
+:root[data-narrow] .edge-swipe {
+  position: absolute;
+  z-index: 45;
+  top: var(--safe-top);
+  bottom: var(--safe-bottom);
+  width: 16px;
+  touch-action: none;
+}
+
+:root[data-narrow] .edge-swipe.left {
+  left: 0;
+}
+
+:root[data-narrow] .edge-swipe.right {
+  right: 0;
+}
+
+/* ---------- Electron chrome has no meaning here ----------
+   The drag strip is an invisible 20px band across the top of the window. On a
+   phone there is no window to drag and it would just eat taps. */
+
+:root[data-narrow] .drag-strip,
+:root[data-narrow] .edge-reveal {
+  display: none;
+}
+
+:root[data-narrow] .pane-bar,
+:root[data-narrow] .sidebar-drag {
+  -webkit-app-region: none;
+}
+
+/* ---------- pane bar at 390px ----------
+   "Main / Side view / active" plus three buttons does not fit. The accent rail
+   and the dot already say which pane is focused, so the words go and the close
+   button stays. Side-by-side goes too — a narrow window only ever stacks. */
+
+:root[data-narrow] .pane-name,
+:root[data-narrow] .pane-active-tag,
+:root[data-narrow] .split-controls .icon-btn[aria-label='Split right'],
+:root[data-narrow] .pane-bar .icon-btn[aria-label='Split side by side'] {
+  display: none;
+}
+
+/* ---------- a page that isn't available here ---------- */
+
+.page-note {
+  margin: auto;
+  padding: 40px 28px;
+  max-width: 34ch;
+  text-align: center;
+  color: var(--text-2);
+}
+
+.page-note h2 {
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.page-note p {
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+/* ---------- bottom sheets ----------
+   Not scoped to [data-narrow]: a sheet is only ever rendered where the code has
+   already decided one belongs, and scoping the styling too would mean a sheet
+   opened on a wide touch screen came up unstyled. */
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.sheet {
+  position: fixed;
+  z-index: 75;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  /* Never the full height: the strip of page left showing is what says this is
+     a layer over your work rather than a screen you have moved to. */
+  max-height: 82dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-2);
+  border-top: 1px solid var(--border);
+  border-radius: 16px 16px 0 0;
+  box-shadow: var(--shadow);
+}
+
+/* On a wide window the same component is a dialog, not a bar across the foot of
+   a 1280px screen. It keeps the slide-up entrance — `left`/`width` rather than a
+   centring transform, because Motion owns `transform` while it animates. */
+:root:not([data-narrow]) .sheet {
+  left: 50%;
+  right: auto;
+  width: 420px;
+  margin-left: -210px;
+  bottom: 44px;
+  max-height: 70vh;
+  border: 1px solid var(--border-2);
+  border-radius: 14px;
+}
+
+:root:not([data-narrow]) .sheet-grip {
+  display: none;
+}
+
+/* Dragging a centred dialog away by its body is a phone gesture; on the desktop
+   the backdrop and Escape do that job. */
+:root:not([data-narrow]) .sheet-drag {
+  pointer-events: auto;
+}
+
+.sheet-drag {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: var(--safe-bottom);
+  touch-action: pan-y;
+}
+
+.sheet-grip {
+  flex-shrink: 0;
+  width: 38px;
+  height: 4px;
+  margin: 9px auto 4px;
+  border-radius: 2px;
+  background: var(--border-2);
+}
+
+.sheet-title {
+  flex-shrink: 0;
+  padding: 6px 18px 8px;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+
+.sheet-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 4px 10px 10px;
+}
+
+/* A sheet's rows are the full width of the thumb's reach, not popover-sized. */
+.sheet-body .menu-item {
+  width: 100%;
+  min-height: var(--hit);
+  gap: 12px;
+  padding: 0 14px;
+  border-radius: 9px;
+  font-size: 15px;
+}
+
+/* ============================================================
+   Overlays
+
+   Seventeen components render an anchored `.popover`, each computing its own
+   left/top from the element that opened it. None of that survives a 390px
+   screen: there is rarely room beside anything, and the finger that opened the
+   menu is covering the spot.
+
+   Rather than rewrite seventeen call sites, the anchoring is overridden here.
+   The inline left/top those components set is exactly what `!important` is for
+   — this is the one place in the project that earns it, and the alternative is
+   threading a `narrow` prop through every one of them.
+   ============================================================ */
+
+:root[data-narrow] .popover {
+  position: fixed;
+  left: 0 !important;
+  right: 0 !important;
+  top: auto !important;
+  /* Above the keyboard, not behind it: a fixed sheet is positioned against the
+     layout viewport, which does not shrink. --kb is how much the keyboard is
+     covering. */
+  bottom: var(--kb, 0px);
+  width: auto;
+  max-width: none;
+  max-height: 78dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 16px 16px 0 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  padding-bottom: calc(10px + var(--safe-bottom));
+}
+
+/* The grab handle a sheet needs to look like one, without a wrapper element. */
+:root[data-narrow] .popover::before {
+  content: '';
+  display: block;
+  width: 38px;
+  height: 4px;
+  margin: 3px auto 9px;
+  border-radius: 2px;
+  background: var(--border-2);
+}
+
+:root[data-narrow] .popover .menu-item,
+:root[data-narrow] .popover .tpl-row > .menu-item {
+  min-height: var(--hit);
+  font-size: 15px;
+  border-radius: 9px;
+}
+
+/* The backdrop is what makes a sheet dismissable; anchored popovers on the
+   desktop often leave it invisible. */
+:root[data-narrow] .backdrop {
+  background: rgba(0, 0, 0, 0.34);
+}
+
+/* ---------- modals go the whole way ----------
+   An 800px settings modal on a 390px screen is not a dialog, it is the screen. */
+
+:root[data-narrow] .modal-layer {
+  padding: 0;
+}
+
+:root[data-narrow] .modal {
+  width: 100%;
+  max-width: none;
+  height: 100dvh;
+  max-height: none;
+  border-radius: 0;
+  border: none;
+  padding-top: calc(14px + var(--safe-top));
+  padding-bottom: calc(14px + var(--safe-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---------- the palette and Ask ----------
+   Full height, and the input stays at the top where the caret and the keyboard
+   agree about where it is. */
+
+:root[data-narrow] .palette-backdrop {
+  padding: 0;
+}
+
+:root[data-narrow] .palette {
+  width: 100%;
+  max-width: none;
+  max-height: none;
+  height: 100dvh;
+  border-radius: 0;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+}
+
+:root[data-narrow] .palette-results {
+  max-height: none;
+  flex: 1;
+}
+
+:root[data-narrow] .palette-input {
+  font-size: 16px; /* under 16px iOS zooms the page on focus */
+}
+
+/* Every text field, for the same reason. */
+:root[data-narrow] input,
+:root[data-narrow] textarea,
+:root[data-narrow] select {
+  font-size: max(16px, 1em);
+}
+
+/* Caret popups are positioned in JS against the visual viewport (see
+   placePopup) — they only need to not be wider than the screen. */
+:root[data-narrow] .mention-popup > * {
+  max-width: calc(100vw - 16px);
+}
+
+/* ---------- scroll containment ----------
+   Every scroller stops its parent from taking over at the ends, so a list that
+   hits bottom doesn't start dragging the page (or the sheet) behind it. */
+
+:root[data-coarse] .pane-scroll,
+:root[data-coarse] .sidebar-inner,
+:root[data-coarse] .popover-list,
+:root[data-coarse] .palette-results {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---------- the confirm sheet ----------
+   Replaces `window.confirm`, which a webview draws as a system alert: unstyled,
+   captioned with the app's origin, and looking like the page has misbehaved.
+   Loaded for every screen size, not just narrow — a styled question is better
+   on the desktop too. See src/confirm.tsx. */
+
+.confirm-text {
+  padding: 0 2px 4px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-2);
+}
+
+.confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+:root[data-narrow] .confirm-actions {
+  /* Full-width targets: a phone has the room down here and the fingers do not
+     have the precision up there. */
+  padding-top: 16px;
+}
+
+:root[data-narrow] .confirm-actions .btn {
+  flex: 1;
+  justify-content: center;
+  min-height: var(--hit);
+}
+
+/* ============================================================
+   Gestures and scrolling
+
+   A phone has one pointer and several things competing for it. Written down in
+   one place because these rules only make sense against each other — scattered
+   through the file they read as arbitrary.
+
+   Who owns a touch, outermost first:
+
+     the screen edges   16px strips, `touch-action: none` — drawer and back
+     a drag handle      the split divider, a widget's resize corner, also `none`
+     the drawer         `pan-y`: it scrolls its own list, and its dismissal is a
+                        horizontal drag Motion reads itself
+     everything else    the browser's own scrolling, unchanged
+
+   The rule is that only something which genuinely consumes a drag takes
+   `touch-action` away from the browser. Nothing here is set defensively.
+   ============================================================ */
+
+/* Every scroller stops at its own ends. Without this a list that runs out
+   scrolls its parent instead — and at the top of the page, the webview starts
+   pulling the whole app down. */
+:root[data-coarse] .sheet-body,
+:root[data-coarse] .drawer .sidebar-inner,
+:root[data-coarse] .modal,
+:root[data-coarse] .cal-scroll,
+:root[data-coarse] .ag-days,
+:root[data-coarse] .table-scroll,
+:root[data-coarse] .picker-body {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* A tap on a card or a row must not select its text, the way a slightly long
+   press does on iOS. Inputs and the editor are exempt, obviously. */
+:root[data-coarse] .day-task,
+:root[data-coarse] .nav-item,
+:root[data-coarse] .tag-card,
+:root[data-coarse] .db-table tr,
+:root[data-coarse] .menu-item,
+:root[data-coarse] .sheet-title {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+:root[data-coarse] input,
+:root[data-coarse] textarea,
+:root[data-coarse] [contenteditable],
+:root[data-coarse] .editor {
+  -webkit-user-select: text;
+  user-select: text;
+}

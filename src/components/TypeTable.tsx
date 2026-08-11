@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../api';
+import { ask } from '../confirm';
 import { dialogIn, snap, spring } from '../motion';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
@@ -23,6 +24,7 @@ import { DateField } from './DateField';
 import { fmtClock, fromValue } from '../dateParse';
 import { Icon, TypeIcon } from './Icons';
 import { SplitControls } from './SplitControls';
+import { PageActions } from './PageActions';
 import { PropEditor } from './PropEditor';
 import { BoardView, GalleryView } from './typeViews';
 import { TypeEditor } from './TypeEditor';
@@ -377,7 +379,7 @@ export function TypeTable({ typeId, embedded = false }: { typeId: string; embedd
   };
 
   const removeRow = async (o: Obj) => {
-    if (!confirm(`Delete “${o.title || 'Untitled'}”? This also removes its links.`)) return;
+    if (!(await ask(`Delete “${o.title || 'Untitled'}”? This also removes its links.`))) return;
     await api.objects.remove(o.id);
     objectChanged(o.id);
     setObjs((list) => list.filter((x) => x.id !== o.id));
@@ -393,14 +395,14 @@ export function TypeTable({ typeId, embedded = false }: { typeId: string; embedd
   };
 
   const deleteProp = async (def: PropDef) => {
-    if (!confirm(`Remove property “${def.name}” from all ${type.name}s?`)) return;
+    if (!(await ask(`Remove property “${def.name}” from all ${type.name}s?`))) return;
     await api.types.update(type.id, { properties: type.properties.filter((p) => p.id !== def.id) });
     await reloadTypes();
   };
 
   const deleteType = async () => {
     const n = objs.length;
-    if (!confirm(`Delete the type “${type.name}” and its ${n} object${n === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    if (!(await ask(`Delete the type “${type.name}” and its ${n} object${n === 1 ? '' : 's'}? This cannot be undone.`))) return;
     await api.types.remove(type.id);
     await reloadTypes();
     navigate({ kind: 'dashboard' });
@@ -439,7 +441,7 @@ export function TypeTable({ typeId, embedded = false }: { typeId: string; embedd
 
   const bulkDelete = async () => {
     const ids = [...selected];
-    if (!confirm(`Delete ${ids.length} ${ids.length === 1 ? 'object' : 'objects'}? This also removes their links.`))
+    if (!(await ask(`Delete ${ids.length} ${ids.length === 1 ? 'object' : 'objects'}? This also removes their links.`)))
       return;
     await api.objects.bulkRemove(ids);
     ids.forEach(objectChanged);
@@ -490,6 +492,7 @@ export function TypeTable({ typeId, embedded = false }: { typeId: string; embedd
           <h1>{type.name}</h1>
           <span className="count-badge">{objs.length}</span>
         </div>
+        <PageActions>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
           <button
             className={'icon-btn' + (selectMode ? ' active' : '')}
@@ -550,6 +553,7 @@ export function TypeTable({ typeId, embedded = false }: { typeId: string; embedd
           </div>
           <SplitControls />
         </div>
+        </PageActions>
       </header>
       )}
 
@@ -814,7 +818,10 @@ export function TypeTable({ typeId, embedded = false }: { typeId: string; embedd
                   </div>
                 </td>
                 {type.properties.map((p) => (
-                  <td key={p.id}>
+                  // The label rides along on the cell so a narrow screen can
+                  // print it beside the value: a table turned into cards has no
+                  // header row left to read the column names from.
+                  <td key={p.id} data-label={p.name}>
                     <Cell
                       def={p}
                       value={o.props[p.id]}

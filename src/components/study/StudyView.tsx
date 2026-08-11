@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../../api';
+import { ask } from '../../confirm';
 import { dealtIn, spring, stagger } from '../../motion';
 import { useApp } from '../../store';
 import type { Deck, StudyNote, StudyOverview } from '../../types';
 import { addDays, ago, todayKey, typeColor } from '../../util';
 import { Icon } from '../Icons';
 import { SplitControls } from '../SplitControls';
+import { PageActions } from '../PageActions';
 import { StudySession } from './StudySession';
 import { VocabAdd } from './VocabAdd';
 
@@ -239,16 +241,18 @@ export function StudyView() {
       <div className="page-head">
         <h1>Study</h1>
         <span className="spacer" />
-        <button className="btn subtle" onClick={newNote}>
-          <Icon name="doc" size={14} /> New note
-        </button>
-        <button className="btn subtle" onClick={() => setAdding((v) => !v)}>
-          <Icon name="languages" size={14} /> Add words
-        </button>
-        <button className="btn subtle" onClick={() => setNaming(true)}>
-          <Icon name="plus" size={14} /> New deck
-        </button>
-        <SplitControls />
+        <PageActions>
+          <button className="btn subtle" onClick={newNote}>
+            <Icon name="doc" size={14} /> New note
+          </button>
+          <button className="btn subtle" onClick={() => setAdding((v) => !v)}>
+            <Icon name="languages" size={14} /> Add words
+          </button>
+          <button className="btn subtle" onClick={() => setNaming(true)}>
+            <Icon name="plus" size={14} /> New deck
+          </button>
+          <SplitControls />
+        </PageActions>
       </div>
 
       <AnimatePresence initial={false}>
@@ -357,7 +361,7 @@ export function StudyView() {
                   onOpen={() => navigate({ kind: 'deck', id: d.id })}
                   onDelete={async () => {
                     const n = d.counts?.total ?? 0;
-                    if (!confirm(`Delete “${d.name}” and its ${n} card${n === 1 ? '' : 's'}? Your notes are kept.`)) return;
+                    if (!(await ask(`Delete “${d.name}” and its ${n} card${n === 1 ? '' : 's'}? Your notes are kept.`))) return;
                     await api.study.deckDelete(d.id);
                     load();
                   }}
@@ -384,7 +388,7 @@ export function StudyView() {
                   note={n}
                   onOpen={() => navigate({ kind: 'studyNote', id: n.id })}
                   onDelete={async () => {
-                    if (!confirm(`Delete “${n.title || 'Untitled note'}”? Cards made from it are kept.`)) return;
+                    if (!(await ask(`Delete “${n.title || 'Untitled note'}”? Cards made from it are kept.`))) return;
                     await api.study.noteDelete(n.id);
                     load();
                   }}

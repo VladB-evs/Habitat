@@ -11,7 +11,7 @@ export function IconPicker({ value, color, onPick }: { value: string; color: str
   const shown = ICON_CHOICES.filter((k) => k.includes(q.trim().toLowerCase().replace(/\s+/g, '-')));
   return (
     <>
-      <input className="field icon-search" placeholder="Search icons…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input className="field icon-search" placeholder="Search icons…" enterKeyHint="search" autoCapitalize="off" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="icon-grid">
         {shown.map((k) => (
           <button

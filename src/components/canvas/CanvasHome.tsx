@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../../api';
+import { ask } from '../../confirm';
 import { dealtIn, spring, stagger } from '../../motion';
 import { useApp } from '../../store';
 import type { CanvasSummary } from '../../types';
@@ -83,7 +84,7 @@ export function CanvasHome() {
 
   const remove = async (board: CanvasSummary) => {
     setMenu(null);
-    if (!confirm(`Delete “${board.name}”? The objects on it stay in your vault.`)) return;
+    if (!(await ask(`Delete “${board.name}”? The objects on it stay in your vault.`))) return;
     await api.canvas.remove(board.id);
     load();
   };

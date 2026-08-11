@@ -289,7 +289,7 @@ export function MathBar({ editor }: { editor: Editor | null }) {
           <input
             ref={search}
             className="math-search"
-            placeholder="Search symbols — sum, alpha, integral…"
+            placeholder="Search symbols — sum, alpha, integral…" enterKeyHint="search" autoCapitalize="off"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onMouseDown={(e) => e.stopPropagation()}

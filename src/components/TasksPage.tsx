@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { objectChanged, onObjectChanged } from '../objects';
+import { useLayout } from '../layout';
 import { useApp } from '../store';
 import type { Agenda, AgendaTask } from '../types';
 import { fmtMonthYear, todayKey } from '../util';
@@ -8,6 +9,7 @@ import { Backlog, DaySection, TaskLine } from './Agenda';
 import { CalendarView, useCalendarNav } from './CalendarView';
 import { Icon } from './Icons';
 import { SplitControls } from './SplitControls';
+import { PageActions } from './PageActions';
 import { TypeTable } from './TypeTable';
 
 type Mode = 'agenda' | 'calendar' | 'table';
@@ -35,6 +37,7 @@ const nothing: Agenda = { days: [], overdue: [], backlog: [] };
  */
 export function TasksPage() {
   const { navigate } = useApp();
+  const { narrow } = useLayout();
   const [mode, setMode] = useState<Mode>(() => (localStorage.getItem('habitat:tasks-mode') as Mode) || 'agenda');
   const [agenda, setAgenda] = useState<Agenda>(nothing);
   const [showDone, setShowDone] = useState(false);
@@ -110,6 +113,7 @@ export function TasksPage() {
           <span className="count-badge">{left}</span>
         </div>
 
+        <PageActions>
         <div className="page-actions">
           {mode === 'calendar' && (
             <>
@@ -118,14 +122,18 @@ export function TasksPage() {
                   ? new Date(nav.anchor + 'T12:00:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
                   : fmtMonthYear(nav.anchor)}
               </span>
-              <div className="seg mini">
-                <button className={nav.mode === 'day' ? 'on' : ''} onClick={() => nav.setMode('day')}>
-                  Day
-                </button>
-                <button className={nav.mode === 'week' ? 'on' : ''} onClick={() => nav.setMode('week')}>
-                  Week
-                </button>
-              </div>
+              {/* A phone only ever gets the day view, so there is no switch to
+                  offer — see useCalendarNav. */}
+              {!narrow && (
+                <div className="seg mini">
+                  <button className={nav.mode === 'day' ? 'on' : ''} onClick={() => nav.setMode('day')}>
+                    Day
+                  </button>
+                  <button className={nav.mode === 'week' ? 'on' : ''} onClick={() => nav.setMode('week')}>
+                    Week
+                  </button>
+                </div>
+              )}
               <button className="icon-btn" onClick={() => nav.step(-1)} aria-label="Previous">
                 <Icon name="chevron-left" />
               </button>
@@ -162,6 +170,7 @@ export function TasksPage() {
           </button>
           <SplitControls />
         </div>
+        </PageActions>
       </header>
 
       {mode === 'agenda' && (

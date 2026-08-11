@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
+import { ask } from '../confirm';
 import { useApp } from '../store';
 import type { DashWidget, ObjType, Stats } from '../types';
 import type { WidgetDef } from '../widgets';
@@ -21,6 +22,7 @@ import {
 import { typeColor } from '../util';
 import { Icon } from './Icons';
 import { SplitControls } from './SplitControls';
+import { PageActions } from './PageActions';
 
 /* ---------- one placed widget ---------- */
 
@@ -34,7 +36,7 @@ interface FrameProps {
   onRemove: () => void;
   onToggleSettings: () => void;
   onConfig: (patch: Record<string, any>) => void;
-  onResizeStart: (e: React.MouseEvent) => void;
+  onResizeStart: (e: React.PointerEvent) => void;
   onDragStart: () => void;
   onDragEnter: () => void;
   onDragEnd: () => void;
@@ -124,7 +126,7 @@ function WidgetFrame({
               <Icon name="trash" size={13} />
             </button>
           </div>
-          <div className="w-resize" onMouseDown={onResizeStart} title="Drag to resize" />
+          <div className="w-resize" onPointerDown={onResizeStart} title="Drag to resize" />
           {resizing && (
             <div className="w-size">
               {w.w} × {w.h}
@@ -235,6 +237,8 @@ interface Resize {
   y: number;
   minW: number;
   minH: number;
+  /** So a second finger landing on the page can't drive someone else's resize. */
+  pointerId: number;
 }
 
 export function Dashboard() {
@@ -293,7 +297,7 @@ export function Dashboard() {
   };
 
   const reset = async () => {
-    if (!confirm('Reset the dashboard to its default widgets? Any widgets you added will be removed.')) return;
+    if (!(await ask('Reset the dashboard to its default widgets? Any widgets you added will be removed.'))) return;
     await api.dashboard.reset();
     setWidgets(defaultLayout());
     setSettingsFor(null);
@@ -325,10 +329,14 @@ export function Dashboard() {
 
   /* --- drag the corner to resize, in whole grid units --- */
 
-  const startResize = (w: DashWidget, e: React.MouseEvent) => {
+  const startResize = (w: DashWidget, e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
     const def = widgetDef(w.kind);
+    // Captured so the corner keeps the gesture once the finger slides off it.
+    // Capture retargets the events to the handle, and they still bubble to the
+    // window listeners below.
+    e.currentTarget.setPointerCapture(e.pointerId);
     setSettingsFor(null);
     setResize({
       id: w.id,
@@ -338,6 +346,7 @@ export function Dashboard() {
       y: e.clientY,
       minW: def?.minW ?? 1,
       minH: def?.minH ?? 1,
+      pointerId: e.pointerId,
     });
   };
 
@@ -347,25 +356,31 @@ export function Dashboard() {
     const colUnit = ((gridRef.current?.clientWidth ?? 900) + GAP) / COLS;
     const rowUnit = ROW_H + GAP;
 
-    const move = (e: MouseEvent) => {
+    const move = (e: PointerEvent) => {
+      if (e.pointerId !== resize.pointerId) return;
       const w = clamp(Math.round(resize.startW + (e.clientX - resize.x) / colUnit), resize.minW, COLS);
       const h = clamp(Math.round(resize.startH + (e.clientY - resize.y) / rowUnit), resize.minH, MAX_H);
       setWidgets((list) =>
         list ? list.map((x) => (x.id === resize.id && (x.w !== w || x.h !== h) ? { ...x, w, h } : x)) : list
       );
     };
-    const up = () => {
+    // A cancelled gesture still commits: the widget is already at the size the
+    // finger left it at, and throwing that away would look like a bug.
+    const up = (e: PointerEvent) => {
+      if (e.pointerId !== resize.pointerId) return;
       setResize(null);
       persist();
     };
 
     document.body.style.cursor = 'nwse-resize';
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
     return () => {
       document.body.style.cursor = '';
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
     };
   }, [resize, persist]);
 
@@ -378,6 +393,7 @@ export function Dashboard() {
   return (
     <div className={'dash' + (edit ? ' editing' : '')}>
       <div className="dash-bar">
+        <PageActions>
         {edit ? (
           <>
             <span className="dash-tip">Drag to reorder · pull a corner to resize</span>
@@ -397,6 +413,7 @@ export function Dashboard() {
           </button>
         )}
         <SplitControls />
+        </PageActions>
       </div>
 
       <DashDataCtx.Provider value={dash}>

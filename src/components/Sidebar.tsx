@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../api';
+import { ask } from '../confirm';
+import { useLayout } from '../layout';
 import { softSpring, spring } from '../motion';
 import { useApp } from '../store';
 import type { SettingsInfo } from '../types';
@@ -94,6 +96,7 @@ export function Sidebar({
   pinned?: boolean;
 }) {
   const { types, view, navigate, theme, setTheme } = useApp();
+  const { narrow } = useLayout();
   const [showNewType, setShowNewType] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showNewHabitat, setShowNewHabitat] = useState(false);
@@ -117,7 +120,7 @@ export function Sidebar({
   };
 
   const deleteHabitat = async (h: { id: string; name: string }) => {
-    if (!confirm(`Permanently delete "${h.name}" and everything in it? This cannot be undone.`)) return;
+    if (!(await ask(`Permanently delete "${h.name}" and everything in it? This cannot be undone.`))) return;
     const res = await api.habitats.remove(h.id);
     if (res?.ok) window.location.reload();
   };
@@ -203,7 +206,10 @@ export function Sidebar({
           <NavItem icon="circle-check" label="Tasks" active={view.kind === 'tasks'} onClick={() => navigate({ kind: 'tasks' })} />
           <NavItem icon="people" label="People" active={view.kind === 'people'} onClick={() => navigate({ kind: 'people' })} />
           <NavItem icon="hash" label="Tags" active={view.kind === 'tags'} onClick={() => navigate({ kind: 'tags' })} />
-          <NavItem icon="canvas" label="Canvas" active={view.kind === 'canvas'} onClick={() => navigate({ kind: 'canvas' })} />
+          {/* Boards are desktop-only — see the note in PaneView. */}
+          {!narrow && (
+            <NavItem icon="canvas" label="Canvas" active={view.kind === 'canvas'} onClick={() => navigate({ kind: 'canvas' })} />
+          )}
           <NavItem
             icon="study"
             label="Study"

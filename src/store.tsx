@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api } from './api';
+import { useLayout } from './layout';
 import type { ObjType } from './types';
 import { clientUid } from './util';
 
@@ -79,6 +80,7 @@ function initialView(): View {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const { narrow } = useLayout();
   const [types, setTypes] = useState<ObjType[]>([]);
   const [panes, setPanes] = useState<Pane[]>([{ id: clientUid(), stack: [initialView()] }]);
   const [dir, setDir] = useState<SplitDir>('row');
@@ -150,9 +152,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [openBeside, openObject]
   );
 
+  /**
+   * Side by side is a desktop luxury: two columns of a 390px screen are two
+   * slivers, so a narrow window only ever stacks. The pane model is otherwise
+   * untouched — the side view is still pane 1, it just sits below rather than
+   * beside.
+   */
   const split = useCallback(
     (d: SplitDir) => {
-      setDir(d);
+      setDir(narrow ? 'col' : d);
       setPanes((ps) => {
         if (ps.length > 1) return ps;
         const top = ps[0].stack[ps[0].stack.length - 1];
@@ -160,8 +168,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
       setActive(1);
     },
-    []
+    [narrow]
   );
+
+  // Splitting side by side and *then* narrowing the window has to end up stacked
+  // too, or the panes are left as two unusable columns.
+  useEffect(() => {
+    if (narrow) setDir((d) => (d === 'row' ? 'col' : d));
+  }, [narrow]);
 
   const reloadTypes = useCallback(async () => {
     setTypes(await api.types.list());

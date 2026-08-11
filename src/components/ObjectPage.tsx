@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
+import { ask } from '../confirm';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
 import type { Obj, ObjType, PropDef } from '../types';
@@ -90,10 +91,10 @@ export function ObjectPage({ id }: { id: string }) {
       const warning = backlinks.length
         ? `\n\nIt will be removed from ${where}. The objects themselves are kept — only the tag goes away.`
         : '';
-      if (!confirm(`Delete the tag “${obj.title}”?${warning}`)) return;
+      if (!(await ask(`Delete the tag “${obj.title}”?${warning}`))) return;
       await api.tags.remove(id);
     } else {
-      if (!confirm(`Delete “${obj.title || 'Untitled'}”? This also removes its links.`)) return;
+      if (!(await ask(`Delete “${obj.title || 'Untitled'}”? This also removes its links.`))) return;
       await api.objects.remove(id);
     }
     objectChanged(id);
@@ -113,7 +114,9 @@ export function ObjectPage({ id }: { id: string }) {
   const moveTo = async (t: ObjType) => {
     setMovePos(null);
     const res = await api.objects.setType(id, t.id);
-    if ('error' in res) return void alert(`Could not move this to ${t.name}.`);
+    // Nothing to decide, only something to be told — so the sheet offers one
+    // button and the answer is thrown away.
+    if ('error' in res) return void ask(`Could not move this to ${t.name}.`, { title: 'That did not work', confirmLabel: 'OK', danger: false });
     // The editor owns its own text; only the surrounding data is replaced.
     setObj((prev) => (prev ? { ...res, content: prev.content } : res));
     objectChanged(id);

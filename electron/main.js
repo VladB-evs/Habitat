@@ -2,6 +2,7 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, protocol, 
 const telegram = require('./telegram');
 const updater = require('./updater');
 const server = require('./server');
+const devBridge = require('./devbridge');
 const ai = require('./ai');
 const aiActions = require('./aiActions');
 const ask = require('./ask');
@@ -335,6 +336,20 @@ function boot() {
     ipcMain.handle(channel, (_e, payload) => fn(payload));
   }
 
+  /**
+   * Handlers that live here rather than in the vault's channel map, registered
+   * so the dev bridge can reach them too. An ipcMain handler cannot be called
+   * from anywhere but IPC, so anything the browser needs at boot — which vault
+   * is open, whether the model is around, what version this is — goes through
+   * this instead of `ipcMain.handle` directly. Everything else stays as it was:
+   * a file dialog or a traffic-light call has no meaning in a browser tab.
+   */
+  const devChannels = {};
+  const handle = (channel, fn) => {
+    devChannels[channel] = fn;
+    ipcMain.handle(channel, (_e, payload) => fn(payload));
+  };
+
   // habitat://file/<sha256><ext> — streamed straight off disk. The hash shape is
   // checked in files.resolve(), so a crafted URL can't walk out of the store.
   protocol.handle('habitat', async (request) => {
@@ -528,7 +543,7 @@ function boot() {
     }
   }
 
-  ipcMain.handle('update:state', () => updateState);
+  handle('update:state', () => updateState);
   ipcMain.handle('update:check', async () => {
     await checkForUpdates();
     return updateState;
@@ -599,7 +614,7 @@ function boot() {
     if (hub.account() && hub.configured()) engine.run();
   };
 
-  ipcMain.handle('sync:status', () => syncStatus());
+  handle('sync:status', () => syncStatus());
   ipcMain.handle('sync:now', async () => {
     await engine.run();
     return syncStatus();
@@ -617,7 +632,7 @@ function boot() {
     hub.signOut();
     return syncStatus();
   });
-  ipcMain.handle('sync:config', () => syncConfig());
+  handle('sync:config', () => syncConfig());
   ipcMain.handle('sync:saveConfig', (_e, patch) => {
     saveConfig({ sync: { ...syncConfig(), ...patch } });
     return syncConfig();
@@ -626,14 +641,14 @@ function boot() {
   setTimeout(autoSync, 4000);
   setInterval(autoSync, 2 * 60 * 1000);
 
-  ipcMain.handle('app:info', () => ({ appDir: path.resolve(__dirname, '..'), version: app.getVersion() }));
+  handle('app:info', () => ({ appDir: path.resolve(__dirname, '..'), version: app.getVersion() }));
   ipcMain.handle('api:apply', () => applyServer());
   ipcMain.handle('api:status', () => server.status());
 
   // ---------- on-device model ----------
 
-  ipcMain.handle('ai:availability', () => ai.availability());
-  ipcMain.handle('ai:actions', () => aiActions.list());
+  handle('ai:availability', () => ai.availability());
+  handle('ai:actions', () => aiActions.list());
   ipcMain.handle('ai:prewarm', () => {
     ai.prewarm();
     return true;
@@ -772,14 +787,14 @@ function boot() {
 
   pollTelegram();
 
-  ipcMain.handle('window:trafficLights', (_e, visible) => {
+  handle('window:trafficLights', (visible) => {
     if (win && process.platform === 'darwin') win.setWindowButtonVisibility(!!visible);
     return true;
   });
 
-  ipcMain.handle('settings:get', () => ({ dbPath: currentDbPath, ...habitatsState() }));
+  handle('settings:get', () => ({ dbPath: currentDbPath, ...habitatsState() }));
 
-  ipcMain.handle('spellcheck:get', () => spellcheckEnabled());
+  handle('spellcheck:get', () => spellcheckEnabled());
 
   ipcMain.handle('spellcheck:set', (_e, enabled) => {
     const on = !!enabled;
@@ -1056,6 +1071,11 @@ function boot() {
     return { ok: true, onboarding: true };
   });
 
+  // Dev only, and a no-op without HABITAT_DEV: lets the renderer run in a plain
+  // browser against this vault, which is how the mobile layouts get checked at a
+  // real phone viewport.
+  devBridge.start(api, devChannels);
+
   installMenu();
   createWindow();
   app.on('activate', () => {
@@ -1064,6 +1084,7 @@ function boot() {
 }
 
 app.on('before-quit', () => server.stop());
+app.on('before-quit', () => devBridge.stop());
 
 // The model sidecar is a child process, and a child left running holds the model
 // in memory long after the app that wanted it is gone.

@@ -45,7 +45,7 @@ function FieldPicker({
       <div className="popover field-picker" style={pos}>
         <input
           className="popover-search"
-          placeholder="Search details…"
+          placeholder="Search details…" enterKeyHint="search" autoCapitalize="off"
           value={q}
           autoFocus
           onChange={(e) => setQ(e.target.value)}

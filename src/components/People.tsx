@@ -8,6 +8,7 @@ import type { NextBirthday, Person } from '../types';
 import { avatarColor, birthdayCountdown, fmtBirthday, initials, relationships } from '../util';
 import { Icon } from './Icons';
 import { SplitControls } from './SplitControls';
+import { PageActions } from './PageActions';
 
 /** Initials on a colour that stays the same for a given name, everywhere in the app. */
 export function Avatar({ name, size = 40, theme }: { name: string; size?: number; theme: string }) {
@@ -263,10 +264,11 @@ export function People() {
           <h1>People</h1>
           <span className="count-badge">{people.length}</span>
         </div>
+        <PageActions>
         <div className="people-tools">
           <div className="people-search">
             <Icon name="search" size={13} />
-            <input placeholder="Search people…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input placeholder="Search people…" enterKeyHint="search" autoCapitalize="off" value={q} onChange={(e) => setQ(e.target.value)} />
             {q && (
               <button className="icon-btn" onClick={() => setQ('')} aria-label="Clear search">
                 <Icon name="x" size={12} />
@@ -286,6 +288,7 @@ export function People() {
           </button>
           <SplitControls />
         </div>
+        </PageActions>
       </header>
 
       <div className="people-body">

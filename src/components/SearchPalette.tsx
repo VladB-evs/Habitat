@@ -156,7 +156,7 @@ export function SearchPalette({ onClose }: { onClose: () => void }) {
         <input
           ref={inputRef}
           className="palette-input"
-          placeholder="Search your Habitat…"
+          placeholder="Search your Habitat…" enterKeyHint="search" autoCapitalize="off"
           value={q}
           autoFocus
           onChange={(e) => {
