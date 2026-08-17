@@ -18,7 +18,10 @@ export type View =
   | { kind: 'tags' }
   | { kind: 'people' }
   | { kind: 'type'; typeId: string }
-  | { kind: 'object'; id: string }
+  /** `occurrence` is set when this was opened from one day of a repeating series
+   *  on the calendar, so notes taken here can fork just that day instead of
+   *  rewriting every occurrence. */
+  | { kind: 'object'; id: string; occurrence?: string }
   | { kind: 'template'; id: string };
 
 export type SplitDir = 'row' | 'col';
@@ -50,10 +53,14 @@ interface AppCtx {
   navigate: (v: View) => void;
   back: () => void;
   canBack: boolean;
-  openObject: (id: string) => void;
+  openObject: (id: string, occurrence?: string) => void;
   /** Click handler for anything that opens an object: ⌘/⌃/⇧-click sends it to the other pane. */
-  openFrom: (e: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }, id: string) => void;
-  openBeside: (id: string) => void;
+  openFrom: (e: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }, id: string, occurrence?: string) => void;
+  openBeside: (id: string, occurrence?: string) => void;
+  /** Swaps the current object view onto another id in place, without pushing
+   *  history — for when notes taken on a repeating occurrence fork it into a
+   *  new object and the page needs to keep editing that one. */
+  retarget: (id: string) => void;
   theme: string;
   setTheme: (t: string) => void;
 }
@@ -123,15 +130,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [panes, here, requestClose]);
 
-  const openObject = useCallback((id: string) => navigate({ kind: 'object', id }), [navigate]);
+  const openObject = useCallback(
+    (id: string, occurrence?: string) => navigate({ kind: 'object', id, occurrence }),
+    [navigate]
+  );
 
   /**
    * The side view is always pane 1: opening something there creates it if needed
    * and keeps it as the target, so links clicked in the side view stay in the
    * side view instead of bouncing back to the main pane.
    */
-  const openBeside = useCallback((id: string) => {
-    const view: View = { kind: 'object', id };
+  const openBeside = useCallback((id: string, occurrence?: string) => {
+    const view: View = { kind: 'object', id, occurrence };
     setPanes((ps) =>
       ps.length === 1
         ? [ps[0], { id: clientUid(), stack: [view] }]
@@ -145,11 +155,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
    * the object full-width in the pane you clicked from.
    */
   const openFrom = useCallback(
-    (e: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }, id: string) => {
-      if (e.metaKey || e.ctrlKey || e.shiftKey) openObject(id);
-      else openBeside(id);
+    (e: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }, id: string, occurrence?: string) => {
+      if (e.metaKey || e.ctrlKey || e.shiftKey) openObject(id, occurrence);
+      else openBeside(id, occurrence);
     },
     [openBeside, openObject]
+  );
+
+  const retarget = useCallback(
+    (id: string) =>
+      setPanes((ps) =>
+        ps.map((p, i) => {
+          if (i !== Math.min(active, ps.length - 1)) return p;
+          const stack = p.stack.slice();
+          const top = stack[stack.length - 1];
+          if (top.kind !== 'object') return p;
+          stack[stack.length - 1] = { kind: 'object', id };
+          return { ...p, stack };
+        })
+      ),
+    [active]
   );
 
   /**
@@ -215,6 +240,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         openObject,
         openFrom,
         openBeside,
+        retarget,
         theme,
         setTheme,
       }}

@@ -41,8 +41,16 @@
    the space between their controls, and on a touch device that *is* the primary
    gesture — so the Open pill and the Open arrow have nothing left to offer, and
    surfacing them would only crowd the row. They stay hidden here, which is why
-   no row ends up needing an overflow menu. */
+   no row ends up needing an overflow menu.
+
+   The Open pill alone also has to go under `data-narrow` even with a mouse: the
+   table becomes a stack of cards below that width (see `.db-table` further
+   down), which pulls Delete into the card's top-right corner — exactly where
+   the pill already sits, on top of it, so it was blocking every delete. The
+   Open arrow keeps its own row's normal layout at any width and isn't part of
+   that collision, so it only drops out for touch. */
 :root[data-coarse] .open-pill,
+:root[data-narrow] .open-pill,
 :root[data-coarse] .row-open {
   display: none;
 }

@@ -88,7 +88,7 @@ function PaneView({ view }: { view: View }) {
         {/* People has its own view rather than the generic table. */}
         {view.kind === 'type' &&
           (view.typeId === PEOPLE_TYPE ? <People /> : <TypeTable key={view.typeId} typeId={view.typeId} />)}
-        {view.kind === 'object' && <ObjectPage key={view.id} id={view.id} />}
+        {view.kind === 'object' && <ObjectPage key={view.id} id={view.id} occurrence={view.occurrence} />}
         {view.kind === 'template' && <TemplatePage key={view.id} id={view.id} />}
       </motion.div>
     </AnimatePresence>
@@ -138,6 +138,7 @@ function Shell() {
   /** A hidden sidebar peeks over the content while the pointer is on it. */
   const [peeking, setPeeking] = useState(false);
   const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** A split is down the middle until the divider says otherwise. */
   const [ratio, setRatio] = useState(1 / 2);
   const mainRef = useRef<HTMLDivElement>(null);
@@ -302,7 +303,23 @@ function Shell() {
     peekTimer.current = null;
   };
 
-  useEffect(() => cancelPeek, []);
+  /** Same dwell on the way out, so overshooting toward the collapse button
+   *  (or catching the slide-in animation mid-flight) doesn't yank the sidebar
+   *  away before the click lands. Cancelable if the pointer comes back. */
+  const armUnpeek = () => {
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(() => setPeeking(false), 260);
+  };
+
+  const cancelUnpeek = () => {
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    leaveTimer.current = null;
+  };
+
+  useEffect(() => () => {
+    cancelPeek();
+    cancelUnpeek();
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -381,9 +398,10 @@ function Shell() {
           <motion.div
             key="sidebar"
             className={'sidebar-slot' + (sidebarHidden ? ' peeking' : '')}
+            onMouseEnter={cancelUnpeek}
             onMouseLeave={() => {
               cancelPeek();
-              setPeeking(false);
+              armUnpeek();
             }}
             initial={sidebarHidden ? { x: -248 } : { marginLeft: -240, opacity: 0 }}
             animate={sidebarHidden ? { x: 0 } : { marginLeft: 0, opacity: 1 }}

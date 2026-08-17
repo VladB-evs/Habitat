@@ -11,8 +11,8 @@ import { PersonBody } from './PersonBody';
 import { PropsPanel } from './PropsPanel';
 import { SplitControls } from './SplitControls';
 
-export function ObjectPage({ id }: { id: string }) {
-  const { types, back, canBack, navigate, openFrom, theme } = useApp();
+export function ObjectPage({ id, occurrence }: { id: string; occurrence?: string }) {
+  const { types, back, canBack, navigate, openFrom, retarget, theme } = useApp();
   const [obj, setObj] = useState<Obj | null>(null);
   const [missing, setMissing] = useState(false);
   const [backlinks, setBacklinks] = useState<Obj[]>([]);
@@ -83,7 +83,18 @@ export function ObjectPage({ id }: { id: string }) {
     api.objects.update(id, { extraProps: defs }).then(() => objectChanged(id));
   };
 
-  const saveContent = (json: any) => api.objects.update(id, { content: json }).then(() => objectChanged(id));
+  /**
+   * Notes taken while viewing one occurrence of a repeating event fork that day
+   * into its own object instead of rewriting the series everyone else's copy
+   * still reads — see `updateObjectForOccurrence` in electron/db.js. When that
+   * happens the save comes back with a new id; `retarget` swaps the page onto
+   * it without adding a step to the back history.
+   */
+  const saveContent = (json: any) =>
+    api.objects.update(id, { content: json }, occurrence).then((saved) => {
+      objectChanged(id);
+      if (saved && saved.id !== id) retarget(saved.id);
+    });
 
   const del = async () => {
     if (isTag) {

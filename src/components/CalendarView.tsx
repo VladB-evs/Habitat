@@ -412,7 +412,7 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
                   style={{ ['--c' as any]: colorOf(e.typeId) }}
                   title={`${e.title} · ${e.typeName}` + (e.repeats ? ' · repeats' : '')}
                   onPointerDown={(ev) => startDrag(ev, 'allday', e)}
-                  onClick={(ev) => !justDragged.current && openFrom(ev, e.id)}
+                  onClick={(ev) => !justDragged.current && openFrom(ev, e.id, e.repeats ? e.dayKey : undefined)}
                 >
                   {e.title}
                 </button>
@@ -486,7 +486,7 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
                       }}
                       title={`${entry.title} · ${entry.typeName} · ${hhmm(start)}` + (entry.repeats ? ' · repeats' : '')}
                       onPointerDown={(ev) => startDrag(ev, 'move', entry)}
-                      onClick={(ev) => !justDragged.current && openFrom(ev, entry.id)}
+                      onClick={(ev) => !justDragged.current && openFrom(ev, entry.id, entry.repeats ? entry.dayKey : undefined)}
                     >
                       <span className="cal-event-time">
                         {hhmm(start)}

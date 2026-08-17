@@ -2208,6 +2208,14 @@ input[type='date'].cell-input {
   backdrop-filter: blur(10px);
 }
 
+/* With the sidebar collapsed this is the leftmost thing in the window, right
+   under the traffic lights (`.sidebar-drag` reserves the same 78px while the
+   sidebar is around) — without the extra padding the back button and the
+   type crumb sit behind the window's own close/minimize/zoom dots. */
+.app.no-sidebar .obj-topbar {
+  padding-left: 78px;
+}
+
 .crumb {
   display: inline-flex;
   align-items: center;

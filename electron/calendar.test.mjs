@@ -336,6 +336,59 @@ test('moving one occurrence takes it out of the series and leaves the rest', () 
   assert.equal(on('2026-10-19')[0].startMinute, 7 * 60, 'and so is the week after');
 });
 
+test('taking notes on one occurrence forks it, leaving the rest of the series untouched', () => {
+  const doc = (text) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
+
+  const series = api['objects:create']({
+    typeId: 'meeting',
+    title: 'Weekly sync',
+    props: { startsAt: '2027-01-05T09:00', duration: 15, repeat: 'FREQ=WEEKLY' },
+  });
+
+  // No notes anywhere yet: every occurrence carries the same (empty) object id.
+  const before = range('2027-01-05', '2027-01-19').filter((e) => e.title === 'Weekly sync');
+  assert.equal(before.length, 3);
+  assert.ok(before.every((e) => e.id === series.id));
+
+  const forked = api['objects:update']({
+    id: series.id,
+    patch: { content: doc('Discussed the launch date') },
+    occurrence: '2027-01-12',
+  });
+
+  assert.notEqual(forked.id, series.id, 'the noted day becomes its own object');
+  assert.equal(forked.props.repeat, undefined, 'and no longer repeats itself');
+  assert.deepEqual(forked.content, doc('Discussed the launch date'));
+
+  const after = range('2027-01-05', '2027-01-19').filter((e) => e.title === 'Weekly sync');
+  assert.equal(after.length, 3, 'still three occurrences, just one of them detached');
+  const on = (key) => after.find((e) => e.dayKey === key);
+  assert.equal(on('2027-01-05').id, series.id);
+  assert.equal(on('2027-01-12').id, forked.id, 'the 12th now points at the forked copy');
+  assert.equal(on('2027-01-19').id, series.id);
+
+  assert.equal(api['objects:get'](series.id).content, null, 'the series itself never had notes added to it');
+
+  // Editing that same day again — now that it has its own object — is an
+  // ordinary update, not another fork.
+  const editedAgain = api['objects:update']({
+    id: forked.id,
+    patch: { content: doc('Discussed the launch date, take two') },
+    occurrence: '2027-01-12',
+  });
+  assert.equal(editedAgain.id, forked.id);
+
+  // A different, still-untouched occurrence forks independently and doesn't
+  // see the first occurrence's notes.
+  const forkedAgain = api['objects:update']({
+    id: series.id,
+    patch: { content: doc('A completely different standup') },
+    occurrence: '2027-01-19',
+  });
+  assert.notEqual(forkedAgain.id, series.id);
+  assert.notEqual(forkedAgain.id, forked.id);
+});
+
 test('the whole series can be moved instead', () => {
   const series = api['objects:create']({
     typeId: 'task',

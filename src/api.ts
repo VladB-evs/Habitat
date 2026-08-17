@@ -110,10 +110,17 @@ export const api = {
     get: (id: string): Promise<Obj | null> => inv('objects:get', id),
     create: (p: { typeId: string; title?: string; props?: Record<string, any>; content?: any; dateKey?: string }): Promise<Obj> =>
       inv('objects:create', p),
+    /**
+     * `occurrence` names the calendar day being edited. It only matters for a
+     * `content` edit on an object that's still repeating: the day forks into
+     * its own object (returned, with a new id) instead of rewriting notes
+     * every occurrence of the series shares.
+     */
     update: (
       id: string,
-      patch: { title?: string; props?: Record<string, any>; content?: any; pinned?: boolean; extraProps?: PropDef[] }
-    ): Promise<Obj> => inv('objects:update', { id, patch }),
+      patch: { title?: string; props?: Record<string, any>; content?: any; pinned?: boolean; extraProps?: PropDef[] },
+      occurrence?: string
+    ): Promise<Obj> => inv('objects:update', { id, patch, occurrence }),
     /**
      * Move an object to another type. Values the new type also defines carry
      * over; the rest are kept on the object as extra properties.

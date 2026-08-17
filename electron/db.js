@@ -154,12 +154,15 @@ const scheduleDef = (defs, props, kind) =>
 /**
  * Take one day out of a series and give it its own object.
  *
- * What "move just this one" and "delete just this one" both need: the series
- * records that the day is no longer its to answer for, and the day becomes a
- * plain unrepeating copy that can be moved, edited or deleted on its own. Ticks
- * already made on that day come with it, so nothing appears to un-finish.
+ * What "move just this one", "delete just this one" and "note just this one"
+ * all need: the series records that the day is no longer its to answer for,
+ * and the day becomes a plain unrepeating copy that can be moved, edited or
+ * deleted on its own. Ticks already made on that day come with it, so nothing
+ * appears to un-finish. `opts.content` carries notes onto the new copy — the
+ * series row keeps whatever it had, which is what every occurrence still
+ * pointed at it goes on showing.
  */
-function detachOccurrence(obj, defs, dayKey) {
+function detachOccurrence(obj, defs, dayKey, opts = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey || '')) return null;
   const skip = daySet(obj, REPEAT_SKIP_PROP);
   if (skip.has(dayKey)) return null;
@@ -189,7 +192,37 @@ function detachOccurrence(obj, defs, dayKey) {
     title: obj.title,
     props,
     extraProps: obj.extraProps || [],
+    content: opts.content !== undefined ? opts.content : null,
   });
+}
+
+/**
+ * Save an edit that may belong to a single occurrence of a series.
+ *
+ * Notes are the one kind of edit that's about a particular day rather than
+ * the whole series — moving or renaming a series still means every future
+ * occurrence, but jotting something down during Tuesday's standup shouldn't
+ * appear on Thursday's too. So only a `content` edit, and only while the day
+ * hasn't already forked, takes this detour: the occurrence gets its own
+ * object (carrying the new notes) and the series is left untouched for
+ * everyone else. Anything else — including a later edit to a day that's
+ * already forked — is an ordinary update.
+ */
+function updateObjectForOccurrence({ id, patch, occurrence }) {
+  const key = String(occurrence || '').slice(0, 10);
+  if (key && patch && patch.content !== undefined) {
+    const row = db.prepare('SELECT * FROM objects WHERE id = ?').get(id);
+    if (row) {
+      const obj = parseObj(row);
+      if (ruleOf(obj) && !daySet(obj, REPEAT_SKIP_PROP).has(key)) {
+        const type = getType(row.type_id);
+        const defs = [...(type ? type.properties : []), ...obj.extraProps];
+        const detached = detachOccurrence(obj, defs, key, { content: patch.content });
+        if (detached) return detached;
+      }
+    }
+  }
+  return updateObject({ id, patch });
 }
 
 /** A `datetime` property's value as a local Date, or null when it isn't one. */
@@ -1668,7 +1701,7 @@ const api = {
 
   'objects:get': (id) => getObj(id, true),
   'objects:create': (p) => createObject(p),
-  'objects:update': (p) => updateObject(p),
+  'objects:update': (p) => updateObjectForOccurrence(p),
   'objects:setType': (p) => setObjectType(p),
   'objects:delete': (id) => deleteObject(id),
 
