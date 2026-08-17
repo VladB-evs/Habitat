@@ -127,16 +127,7 @@ export function Sidebar({
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-drag">
-        <button
-          className="icon-btn collapse-btn"
-          onClick={onCollapse}
-          aria-label={pinned ? 'Hide sidebar' : 'Keep sidebar open'}
-          title={pinned ? 'Hide sidebar (⌘\)' : 'Keep sidebar open (⌘\)'}
-        >
-          <Icon name={pinned ? 'panel-close' : 'panel-open'} size={15} />
-        </button>
-      </div>
+      <div className="sidebar-drag" />
 
       {habMenu && info && (
         <>
@@ -257,6 +248,14 @@ export function Sidebar({
         <div style={{ display: 'flex', gap: 2 }}>
           <button className="icon-btn" onClick={() => setShowSettings(true)} aria-label="Settings">
             <Icon name="settings" />
+          </button>
+          <button
+            className="icon-btn"
+            onClick={onCollapse}
+            aria-label={pinned ? 'Hide sidebar' : 'Keep sidebar open'}
+            title={pinned ? 'Hide sidebar (⌘\)' : 'Keep sidebar open (⌘\)'}
+          >
+            <Icon name={pinned ? 'panel-close' : 'panel-open'} size={15} />
           </button>
           <button className="icon-btn" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label="Toggle theme">
             <Icon name={theme === 'dark' ? 'sun' : 'moon'} />

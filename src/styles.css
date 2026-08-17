@@ -616,20 +616,6 @@ kbd {
   left: 0;
 }
 
-.collapse-btn {
-  -webkit-app-region: no-drag;
-  margin-left: auto;
-  margin-right: 10px;
-  flex-shrink: 0;
-  opacity: var(--reveal-idle, 0);
-}
-
-@media (hover: hover) {
-  .sidebar:hover .collapse-btn {
-    opacity: 1;
-  }
-}
-
 /* ---------- sidebar ---------- */
 
 .sidebar {
