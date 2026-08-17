@@ -49,7 +49,7 @@ export function TaskLine({
         e.dataTransfer.effectAllowed = 'move';
       }}
       onClick={(e) => {
-        if (!(e.target as HTMLElement).closest('button')) openFrom(e, task.id);
+        if (!(e.target as HTMLElement).closest('button')) openFrom(e, task.id, task.when ?? undefined);
       }}
     >
       <button className={'tick' + (task.done ? ' on' : '')} onClick={() => onToggle(task)} aria-label="Toggle done">
@@ -102,7 +102,7 @@ function EventBlock({ event, onToggle }: { event: AgendaEvent; onToggle: (t: Age
       className={'ag-event' + (trailing ? ' trailing' : '')}
       style={{ ['--c' as any]: color }}
     >
-      <div className="ag-event-head" onClick={(e) => !(e.target as HTMLElement).closest('button') && openFrom(e, event.id)}>
+      <div className="ag-event-head" onClick={(e) => !(e.target as HTMLElement).closest('button') && openFrom(e, event.id, event.dayKey)}>
         <span className="ag-event-when">{whenLabel(event)}</span>
         <span className="ag-event-title">{event.title}</span>
         {event.repeats && (

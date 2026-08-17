@@ -58,13 +58,13 @@ export function DayTasks({ dateKey }: { dateKey: string }) {
             className={'day-task clickable' + (done ? ' done' : '')}
             onClick={(e) => {
               if (!(e.target as HTMLElement).closest('button, input, select, textarea, a, [contenteditable]'))
-                openFrom(e, t.id);
+                openFrom(e, t.id, t.occurrence);
             }}
           >
             <button className={'tick' + (done ? ' on' : '')} onClick={() => toggle(t)} aria-label="Toggle done">
               {done && <Icon name="check" size={11} />}
             </button>
-            <button className="day-task-title" onClick={(e) => openFrom(e, t.id)}>
+            <button className="day-task-title" onClick={(e) => openFrom(e, t.id, t.occurrence)}>
               {t.title || 'Untitled'}
             </button>
             {t.occurrence && (
