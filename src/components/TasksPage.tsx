@@ -29,11 +29,11 @@ const nothing: Agenda = { days: [], overdue: [], backlog: [] };
  * Everything with a time to it, in one place: the agenda you plan in, the grid
  * you place things on, and the table you sift them in.
  *
- * The agenda is the point. Days run down the page, each with the events that
- * happen on it — a meeting, a flight, a week away, drawn as blocks and holding
- * whatever tasks belong to them — then the loose tasks for that day. What is
- * late sits at the top where it can't be scrolled past, and what has no day yet
- * waits in the backlog, to be dragged onto one.
+ * The agenda is the point. Days run down the page, each with that day's tasks
+ * — a meeting, a flight, a plain to-do, all one type, ticked off the same way
+ * — then anything else that type happens to hold (like a Meeting) drawn as a
+ * block above them. What is late sits at the top where it can't be scrolled
+ * past, and what has no day yet waits in the backlog, to be dragged onto one.
  */
 export function TasksPage() {
   const { navigate } = useApp();
@@ -82,13 +82,13 @@ export function TasksPage() {
     objectChanged(made.id);
   };
 
-  /** A new event opens straight away: only you know when it is and who's coming. */
-  const newEvent = async () => {
+  /** A new timed task opens straight away: only you know when it is and who's coming. */
+  const newTimedTask = async () => {
     const day = mode === 'calendar' ? nav.anchor : todayKey();
     const made = await api.objects.create({
-      typeId: 'event',
-      title: 'New event',
-      props: { startsAt: `${day}T09:00`, endsAt: `${day}T10:00` },
+      typeId: 'task',
+      title: 'New task',
+      props: { status: 'Todo', startsAt: `${day}T09:00`, endsAt: `${day}T10:00` },
     });
     objectChanged(made.id);
     navigate({ kind: 'object', id: made.id });
@@ -165,8 +165,8 @@ export function TasksPage() {
             ))}
           </div>
 
-          <button className="btn primary" onClick={newEvent}>
-            <Icon name="plus" size={14} /> Event
+          <button className="btn primary" onClick={newTimedTask}>
+            <Icon name="plus" size={14} /> Task
           </button>
           <SplitControls />
         </div>

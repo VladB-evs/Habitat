@@ -1,6 +1,8 @@
-// The agenda is what the Tasks page draws, so these cover the rules it plans by:
-// what is an event and what is a task, which days a run of days covers, and where
-// a task shows up when it belongs to an event.
+// The agenda is what the Tasks page draws, so these cover the rules it plans
+// by: a Task carries a time, a location and who's involved just as an Event
+// used to, ticks off like any other task, and a run of days or a repeat still
+// work the same way. Meeting is the one type left that happens without a
+// Done to give, so it still draws as a block rather than a line.
 // Run with `npm test`.
 
 import { createRequire } from 'node:module';
@@ -20,7 +22,6 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'habitat-agenda-'));
 const FROM = '2027-06-07';
 const agenda = (from = FROM, days = 21) => api['agenda:range']({ from, days });
 const dayOf = (a, key) => a.days.find((d) => d.dayKey === key);
-const event = (a, key, title) => dayOf(a, key).events.find((e) => e.title === title);
 
 before(() => {
   dbmod.initDb(path.join(tmp, 'test.db'));
@@ -32,91 +33,69 @@ after(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('an event happens and a task is worked on — and only one of them can be ticked', () => {
-  api['objects:create']({
-    typeId: 'event',
+test('a timed task carries an end, a place and who with, and still ticks off', () => {
+  const t = api['objects:create']({
+    typeId: 'task',
     title: 'Design review',
-    props: { startsAt: '2027-06-08T14:00', endsAt: '2027-06-08T15:30', location: 'Room 2' },
+    props: { status: 'Todo', startsAt: '2027-06-08T14:00', endsAt: '2027-06-08T15:30', location: 'Room 2' },
   });
-  api['objects:create']({ typeId: 'task', title: 'Write the brief', props: { due: '2027-06-08', status: 'Todo' } });
 
   const day = dayOf(agenda(), '2027-06-08');
-  const e = day.events.find((x) => x.title === 'Design review');
-  assert.equal(e.startMinute, 14 * 60);
-  assert.equal(e.endMinute, 15 * 60 + 30, 'an end, not a length in minutes');
-  assert.equal(e.location, 'Room 2');
-  assert.deepEqual(day.tasks.map((t) => t.title), ['Write the brief']);
-  // An event has no Done to give, so it is never listed as something to tick off.
-  assert.equal(day.tasks.find((t) => t.title === 'Design review'), undefined);
-  assert.equal(api['tasks:forDay']({ dateKey: '2027-06-08' }).find((t) => t.title === 'Design review'), undefined);
+  const found = day.tasks.find((x) => x.title === 'Design review');
+  assert.ok(found, 'a task with a time is still a task, listed on its day');
+  assert.equal(found.startMinute, 14 * 60);
+
+  const saved = api['objects:get'](t.id);
+  assert.equal(saved.props.location, 'Room 2');
+
+  api['tasks:setDone']({ id: t.id, done: true });
+  assert.equal(dayOf(agenda(), '2027-06-08').tasks.find((x) => x.title === 'Design review').done, true);
 });
 
-test('an event carries its tasks, and an undated one lives only in there', () => {
-  const meeting = api['objects:create']({
-    typeId: 'event',
+test('Meeting still happens rather than gets ticked off — the one type left without a Done', () => {
+  api['objects:create']({
+    typeId: 'meeting',
     title: 'Team weekly',
-    props: { startsAt: '2027-06-09T10:00', endsAt: '2027-06-09T11:00' },
+    props: { date: '2027-06-09' },
   });
-  api['objects:create']({ typeId: 'task', title: 'Prep the deck', props: { status: 'Todo', partOf: [meeting.id] } });
 
   const a = agenda();
-  assert.deepEqual(event(a, '2027-06-09', 'Team weekly').tasks.map((t) => t.title), ['Prep the deck']);
-  assert.equal(a.backlog.find((t) => t.title === 'Prep the deck'), undefined, 'it is not loose in the backlog');
-  assert.equal(dayOf(a, '2027-06-09').tasks.find((t) => t.title === 'Prep the deck'), undefined, 'nor loose on the day');
+  const day = dayOf(a, '2027-06-09');
+  assert.ok(day.events.some((e) => e.title === 'Team weekly'));
+  assert.equal(day.tasks.find((t) => t.title === 'Team weekly'), undefined, 'never listed as something to tick off');
 });
 
-test("a task with its own day is shown there too, saying which event it is for", () => {
-  const trip = api['objects:create']({
-    typeId: 'event',
-    title: 'Holiday in Portugal',
-    props: { startsAt: '2027-06-19T00:00', endsAt: '2027-06-26T22:00' },
-  });
+test('a task that runs several days still shows up, on the day it starts', () => {
+  // A run across days drawn on every one of them is a calendar-grid thing (see
+  // calendar.test.mjs — that expansion is generic, unaffected by what folded
+  // into Task). The agenda list gives a task exactly one line, like it always
+  // has for anything with a "Done" to give.
   api['objects:create']({
     typeId: 'task',
-    title: 'Book the parking',
-    props: { status: 'Todo', due: '2027-06-16', partOf: [trip.id] },
+    title: 'Holiday in Portugal',
+    props: { status: 'Todo', startsAt: '2027-06-19T00:00', endsAt: '2027-06-26T22:00' },
   });
 
   const a = agenda();
-  const onItsDay = dayOf(a, '2027-06-16').tasks.find((t) => t.title === 'Book the parking');
-  assert.ok(onItsDay, 'a thing due on Wednesday has to appear on Wednesday');
-  assert.equal(onItsDay.eventName, 'Holiday in Portugal');
-  assert.ok(
-    event(a, '2027-06-19', 'Holiday in Portugal').tasks.some((t) => t.title === 'Book the parking'),
-    "and still inside the event, so the event's own list is whole"
-  );
+  assert.ok(dayOf(a, '2027-06-19').tasks.some((t) => t.title === 'Holiday in Portugal'));
+  assert.equal(dayOf(a, '2027-06-20').tasks.find((t) => t.title === 'Holiday in Portugal'), undefined);
 });
 
-test('a run of days covers every one of them, with the detail on the first', () => {
-  const a = agenda();
-  const first = event(a, '2027-06-19', 'Holiday in Portugal');
-  assert.equal(first.spanDay, 1);
-  assert.equal(first.spanOf, 8);
-  assert.equal(first.allDay, true, 'starting at midnight means the day, not a minute past twelve');
-
-  for (const [i, key] of ['2027-06-20', '2027-06-23', '2027-06-26'].entries()) {
-    const on = event(a, key, 'Holiday in Portugal');
-    assert.ok(on, `the holiday should still be on ${key}`);
-    assert.ok(on.spanDay > 1, 'and know it is not its first day');
-    assert.equal(on.tasks.length, 0, 'the tasks belong to the first day only');
-    assert.ok(i >= 0);
-  }
-  assert.equal(dayOf(a, '2027-06-27').events.find((e) => e.title === 'Holiday in Portugal'), undefined, 'and it ends');
-});
-
-test('a repeating event comes back on each of its days, tasks and all', () => {
-  const standup = api['objects:create']({
-    typeId: 'event',
+test('a repeating task shows only its next occurrence in the agenda, not every future day', () => {
+  // Same reasoning as above: the agenda list has always given a repeating task
+  // one line that moves forward as it's ticked off, rather than a block per
+  // occurrence — that's unchanged by anything folding into Task. Every
+  // occurrence is still there in the calendar grid and the table.
+  api['objects:create']({
+    typeId: 'task',
     title: 'Standup',
-    props: { startsAt: '2027-06-07T09:00', endsAt: '2027-06-07T09:15', repeat: 'FREQ=WEEKLY;BYDAY=MO,TH' },
+    props: { status: 'Todo', startsAt: '2027-06-07T09:00', repeat: 'FREQ=WEEKLY;BYDAY=MO,TH' },
   });
-  api['objects:create']({ typeId: 'task', title: 'Bring the numbers', props: { status: 'Todo', partOf: [standup.id] } });
 
   const a = agenda();
-  const days = a.days.filter((d) => d.events.some((e) => e.title === 'Standup')).map((d) => d.dayKey);
-  assert.deepEqual(days.slice(0, 4), ['2027-06-07', '2027-06-10', '2027-06-14', '2027-06-17']);
-  assert.deepEqual(event(a, '2027-06-10', 'Standup').tasks.map((t) => t.title), ['Bring the numbers']);
-  assert.equal(event(a, '2027-06-07', 'Standup').repeats, true);
+  const days = a.days.filter((d) => d.tasks.some((t) => t.title === 'Standup')).map((d) => d.dayKey);
+  assert.equal(days.length, 1, 'only the next occurrence is listed');
+  assert.equal(dayOf(a, days[0]).tasks.find((t) => t.title === 'Standup').repeats, true);
 });
 
 test('what is late floats to the top and what has no day waits in the backlog', () => {

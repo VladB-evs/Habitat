@@ -2014,11 +2014,13 @@ const api = {
    * The agenda: the next few weeks as days, each with what happens on it.
    *
    * Two shapes, told apart the way the rest of Habitat tells them apart. A type
-   * with a "Done" option makes **tasks** — things to work on and tick off. A type
-   * without one, but with a date, makes **events** — things that happen: a
-   * meeting, a flight, a week away. Events hold tasks, through the task's
-   * `partOf`, so an agenda and a booking reference live where they belong; a
-   * task inside an event is shown there and nowhere else.
+   * with a "Done" option makes **tasks** — things to work on and tick off, which
+   * is what a meeting, a flight or a week away turned out to be too, once they
+   * gained a time, an end, somewhere to be and someone to be there with. A type
+   * without a "Done" option, but with a date, still draws as a block that happens
+   * rather than a line to tick — Meeting is the one built-in type left like that.
+   * `partOf` still nests a task inside whichever of those a value points at, for
+   * anything that sets it by hand; nothing built in offers it anymore.
    *
    * Also returns the two piles that aren't on any day: what is late, and what
    * has never been given one.
@@ -2864,37 +2866,6 @@ function migrate() {
   });
 
   /**
-   * An Event is a thing that happens — a meeting, a flight, a holiday. It isn't
-   * a to-do and can't be ticked off, which is exactly why it is its own type:
-   * anything with a "Done" option is a task everywhere else in Habitat.
-   *
-   * Tasks live inside events through `partOf`, so a team meeting can carry its
-   * agenda and a flight its booking details.
-   */
-  runOnce('event-type-v2', () => {
-    const defs = [
-      { id: TIME_PROP, name: 'Starts', kind: 'datetime' },
-      { id: END_PROP, name: 'Ends', kind: 'datetime' },
-      { id: 'location', name: 'Where', kind: 'text' },
-      { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: PEOPLE_TYPE },
-      { id: REPEAT_PROP, name: 'Repeats', kind: 'repeat' },
-    ];
-    const existing = getType('event');
-    if (existing) {
-      // An earlier build's Event had a length in minutes rather than an end.
-      const kept = existing.properties.filter((p) => !defs.some((d) => d.id === p.id) && p.id !== DURATION_PROP);
-      db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(JSON.stringify([...defs, ...kept]), 'event');
-      return;
-    }
-    // A vault deliberately emptied to "blank" keeps its empty type list.
-    const others = db.prepare("SELECT COUNT(*) AS c FROM types WHERE id NOT IN ('daily', ?)").get(PEOPLE_TYPE);
-    if (!others || !others.c) return;
-    db.prepare(
-      'INSERT INTO types (id, name, emoji, color, properties, builtin, starred, created_at) VALUES (?, ?, ?, ?, ?, 1, 1, ?)'
-    ).run('event', 'Event', 'calendar-days', '#7b5cd6', JSON.stringify(defs), now());
-  });
-
-  /**
    * Where a task sits, and what it belongs to. Somewhere to be and someone to be
    * there with are an event's business now, so Task hands both back — but only
    * from the type. A task that had a value keeps it as a property of its own,
@@ -2926,6 +2897,53 @@ function migrate() {
       });
       const add = filled.filter((p) => !extra.some((e) => e.id === p.id));
       if (add.length) upd.run(JSON.stringify([...extra, ...add]), row.id);
+    }
+  });
+
+  /**
+   * Event folds into Task, by request: a separate type for "a thing that
+   * happens" turned out to be more confusing than useful, especially once a
+   * repeating one could quietly fork on its own. A task already carries a
+   * time and can repeat — it only needed somewhere to be, someone to be
+   * there with, and a link for when "somewhere" is a call.
+   *
+   * Every existing Event object is deleted outright, not carried over — the
+   * type is gone, not merely hidden. `partOf`, which only ever pointed a
+   * task at an event, goes with it.
+   */
+  runOnce('fold-event-into-task-v1', () => {
+    for (const row of db.prepare("SELECT id FROM objects WHERE type_id = 'event'").all()) deleteObject(row.id);
+    db.prepare("DELETE FROM templates WHERE type_id = 'event'").run();
+    db.prepare("DELETE FROM types WHERE id = 'event'").run();
+
+    const task = getType('task');
+    if (!task) return;
+    const merged = [
+      { id: END_PROP, name: 'Ends', kind: 'datetime' },
+      { id: 'location', name: 'Where', kind: 'text' },
+      { id: 'link', name: 'Link', kind: 'url' },
+      { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: PEOPLE_TYPE },
+    ];
+    const mergedIds = new Set([...merged.map((d) => d.id), PART_OF_PROP]);
+    const kept = task.properties.filter((p) => !mergedIds.has(p.id));
+    db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(JSON.stringify([...kept, ...merged]), 'task');
+
+    // A task that already carried these under the old shape — a location kept
+    // as an extra property since task-partof-v1, or a partOf pointed at an
+    // event that's now gone — gets them folded back into real properties, or
+    // dropped rather than left behind as a stale duplicate.
+    const upd = db.prepare('UPDATE objects SET props = ?, extra_props = ? WHERE id = ?');
+    for (const row of db.prepare("SELECT id, props, extra_props FROM objects WHERE type_id = 'task'").all()) {
+      let props, extra;
+      try {
+        props = JSON.parse(row.props || '{}');
+        extra = JSON.parse(row.extra_props || '[]');
+      } catch {
+        continue;
+      }
+      delete props[PART_OF_PROP];
+      const nextExtra = extra.filter((p) => !mergedIds.has(p.id));
+      upd.run(JSON.stringify(props), JSON.stringify(nextExtra), row.id);
     }
   });
 }
@@ -2973,17 +2991,11 @@ const FLAVOR_TYPES = {
       properties: [
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
-        { id: 'partOf', name: 'Part of', kind: 'relation', targetTypeId: 'event' },
-      ],
-    },
-    {
-      id: 'event', name: 'Event', icon: 'calendar-days', color: '#7b5cd6',
-      properties: [
         { id: 'startsAt', name: 'Starts', kind: 'datetime' },
         { id: 'endsAt', name: 'Ends', kind: 'datetime' },
         { id: 'location', name: 'Where', kind: 'text' },
+        { id: 'link', name: 'Link', kind: 'url' },
         { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: 'people' },
-        { id: 'repeat', name: 'Repeats', kind: 'repeat' },
       ],
     },
     {
@@ -3018,17 +3030,11 @@ const FLAVOR_TYPES = {
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
         { id: 'project', name: 'Project', kind: 'relation', targetTypeId: 'project' },
-        { id: 'partOf', name: 'Part of', kind: 'relation', targetTypeId: 'event' },
-      ],
-    },
-    {
-      id: 'event', name: 'Event', icon: 'calendar-days', color: '#7b5cd6',
-      properties: [
         { id: 'startsAt', name: 'Starts', kind: 'datetime' },
         { id: 'endsAt', name: 'Ends', kind: 'datetime' },
         { id: 'location', name: 'Where', kind: 'text' },
+        { id: 'link', name: 'Link', kind: 'url' },
         { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: 'people' },
-        { id: 'repeat', name: 'Repeats', kind: 'repeat' },
       ],
     },
     {
@@ -3054,17 +3060,11 @@ const FLAVOR_TYPES = {
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
         { id: 'course', name: 'Course', kind: 'relation', targetTypeId: 'course' },
-        { id: 'partOf', name: 'Part of', kind: 'relation', targetTypeId: 'event' },
-      ],
-    },
-    {
-      id: 'event', name: 'Event', icon: 'calendar-days', color: '#7b5cd6',
-      properties: [
         { id: 'startsAt', name: 'Starts', kind: 'datetime' },
         { id: 'endsAt', name: 'Ends', kind: 'datetime' },
         { id: 'location', name: 'Where', kind: 'text' },
+        { id: 'link', name: 'Link', kind: 'url' },
         { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: 'people' },
-        { id: 'repeat', name: 'Repeats', kind: 'repeat' },
       ],
     },
   ],
@@ -3090,17 +3090,11 @@ const FLAVOR_TYPES = {
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
         { id: 'project', name: 'Project', kind: 'relation', targetTypeId: 'project' },
-        { id: 'partOf', name: 'Part of', kind: 'relation', targetTypeId: 'event' },
-      ],
-    },
-    {
-      id: 'event', name: 'Event', icon: 'calendar-days', color: '#7b5cd6',
-      properties: [
         { id: 'startsAt', name: 'Starts', kind: 'datetime' },
         { id: 'endsAt', name: 'Ends', kind: 'datetime' },
         { id: 'location', name: 'Where', kind: 'text' },
+        { id: 'link', name: 'Link', kind: 'url' },
         { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: 'people' },
-        { id: 'repeat', name: 'Repeats', kind: 'repeat' },
       ],
     },
   ],

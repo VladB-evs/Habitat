@@ -242,22 +242,14 @@ test('a start time is not rolled forward the way a missed due date is', () => {
 
 // ---------- repeating ----------
 
-test('Task is what you tick off, Event is what happens', () => {
+test('a Task is where and who with now too, and there is no separate Event', () => {
+  assert.equal(api['types:list']().find((t) => t.id === 'event'), undefined, 'Event folded into Task');
+
   const task = api['types:list']().find((t) => t.id === 'task');
-  const event = api['types:list']().find((t) => t.id === 'event');
-
   const tids = task.properties.map((p) => p.id);
-  for (const id of ['status', 'due', 'startsAt', 'duration', 'repeat', 'partOf'])
+  for (const id of ['status', 'due', 'startsAt', 'duration', 'repeat', 'endsAt', 'location', 'link', 'attendees'])
     assert.ok(tids.includes(id), `Task should have ${id}`);
-  assert.ok(!tids.includes('location') && !tids.includes('attendees'), 'where and who with are an event\'s business');
-
-  const eids = event.properties.map((p) => p.id);
-  for (const id of ['startsAt', 'endsAt', 'location', 'attendees', 'repeat'])
-    assert.ok(eids.includes(id), `Event should have ${id}`);
-  assert.ok(
-    !event.properties.some((p) => p.kind === 'select' && (p.options || []).includes('Done')),
-    'an event happens; it is never finished'
-  );
+  assert.ok(!tids.includes('partOf'), 'nothing left to be part of');
 });
 
 test('one repeating object fills every day of its series', () => {
