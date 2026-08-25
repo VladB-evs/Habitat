@@ -52,10 +52,11 @@ export function DayTasks({ dateKey }: { dateKey: string }) {
     <div className="day-tasks">
       {tasks.map((t) => {
         const done = t.props.status === 'Done';
+        const rolled = !!t.props.rolled && !done;
         return (
           <div
             key={t.id}
-            className={'day-task clickable' + (done ? ' done' : '')}
+            className={'day-task clickable' + (done ? ' done' : '') + (rolled ? ' rolled' : '')}
             onClick={(e) => {
               if (!(e.target as HTMLElement).closest('button, input, select, textarea, a, [contenteditable]'))
                 openFrom(e, t.id, t.occurrence);
@@ -72,7 +73,11 @@ export function DayTasks({ dateKey }: { dateKey: string }) {
                 <Icon name="redo" size={10} />
               </span>
             )}
-            {t.props.rolled && !done && <span className="rolled-badge">carried over</span>}
+            {rolled && (
+              <span className="rolled-badge" title="Wasn't finished on the day it was due — moved forward to today">
+                <Icon name="history" size={11} /> Carried over
+              </span>
+            )}
           </div>
         );
       })}

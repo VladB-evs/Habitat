@@ -33,20 +33,42 @@ export function TaskLine({
   task,
   onToggle,
   showEvent = true,
+  moveAction,
+  onDragStart,
 }: {
   task: AgendaTask;
   onToggle: (t: AgendaTask) => void;
   showEvent?: boolean;
+  /** A touch-friendly stand-in for the drag that normally moves a task between
+   *  the backlog and a day — dragging never reaches a touch screen at all, so
+   *  without this the backlog has no way in from a phone. */
+  moveAction?: { icon: string; label: string; onClick: () => void };
+  /** Fired the moment a real drag begins (not the `moveAction` guard below) —
+   *  the backlog sheet uses this to get itself out of the way, since the days
+   *  it's meant to be dropped onto sit right behind it and a drag can't reach
+   *  what a fixed overlay is covering. */
+  onDragStart?: () => void;
 }) {
   const { openFrom } = useApp();
+  const rolled = task.rolled && !task.done;
   return (
     <div
-      className={'ag-task' + (task.done ? ' done' : '') + (task.overdue ? ' overdue' : '')}
+      className={'ag-task' + (task.done ? ' done' : '') + (task.overdue ? ' overdue' : '') + (rolled ? ' rolled' : '')}
       draggable
       onDragStart={(e) => {
+        // A native drag grabs the whole row, `moveAction` button included —
+        // without this, starting the drag gesture there could swallow what
+        // was meant to be a tap on the button, and reliably firing the row's
+        // own click (open the task) instead of the button's is the exact
+        // symptom that made the button feel broken.
+        if ((e.target as HTMLElement).closest('.ag-task-move')) {
+          e.preventDefault();
+          return;
+        }
         e.dataTransfer.setData('text/habitat-task', task.id);
         e.dataTransfer.setData('text/habitat-minute', String(task.startMinute ?? ''));
         e.dataTransfer.effectAllowed = 'move';
+        onDragStart?.();
       }}
       onClick={(e) => {
         if (!(e.target as HTMLElement).closest('button')) openFrom(e, task.id, task.when ?? undefined);
@@ -67,7 +89,26 @@ export function TaskLine({
           <Icon name="calendar-days" size={9} /> {task.eventName}
         </span>
       )}
-      {task.rolled && !task.done && <span className="rolled-badge">carried over</span>}
+      {rolled && (
+        <span className="rolled-badge" title="Wasn't finished on the day it was due — moved forward to today">
+          <Icon name="history" size={11} /> Carried over
+        </span>
+      )}
+      {moveAction && (
+        <button
+          className="ag-task-move"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            moveAction.onClick();
+          }}
+          aria-label={moveAction.label}
+          title={moveAction.label}
+        >
+          <Icon name={moveAction.icon} size={12} />
+          {moveAction.label}
+        </button>
+      )}
     </div>
   );
 }
@@ -177,11 +218,14 @@ export function DaySection({
   onToggle,
   onDrop,
   onAdd,
+  onUnschedule,
 }: {
   day: AgendaDay;
   onToggle: (t: AgendaTask) => void;
   onDrop: (taskId: string, dayKey: string, minute: number | null) => void;
   onAdd: (dayKey: string, title: string) => void;
+  /** The touch-friendly way back to the backlog — see TaskLine's `moveAction`. */
+  onUnschedule: (taskId: string) => void;
 }) {
   const [over, setOver] = useState(false);
   const [draft, setDraft] = useState('');
@@ -216,7 +260,12 @@ export function DaySection({
           <EventBlock key={e.id + e.dayKey} event={e} onToggle={onToggle} />
         ))}
         {day.tasks.map((t) => (
-          <TaskLine key={t.id} task={t} onToggle={onToggle} />
+          <TaskLine
+            key={t.id}
+            task={t}
+            onToggle={onToggle}
+            moveAction={{ icon: 'list', label: 'Move to backlog', onClick: () => onUnschedule(t.id) }}
+          />
         ))}
 
         <div className="ag-task add quiet">
@@ -247,11 +296,18 @@ export function Backlog({
   onToggle,
   onAdd,
   onClear,
+  onSchedule,
+  onDragStart,
 }: {
   tasks: AgendaTask[];
   onToggle: (t: AgendaTask) => void;
   onAdd: (title: string) => void;
   onClear: (taskId: string) => void;
+  /** The touch-friendly way onto a day — opens a "Schedule for" prompt instead
+   *  of needing a drag onto a day section. See TaskLine's `moveAction`. */
+  onSchedule: (taskId: string) => void;
+  /** Passed straight through to each TaskLine — see its own `onDragStart`. */
+  onDragStart?: () => void;
 }) {
   const [draft, setDraft] = useState('');
   const [over, setOver] = useState(false);
@@ -280,7 +336,13 @@ export function Backlog({
 
       <div className="ag-backlog-body">
         {tasks.map((t) => (
-          <TaskLine key={t.id} task={t} onToggle={onToggle} />
+          <TaskLine
+            key={t.id}
+            task={t}
+            onToggle={onToggle}
+            moveAction={{ icon: 'calendar-days', label: 'Schedule', onClick: () => onSchedule(t.id) }}
+            onDragStart={onDragStart}
+          />
         ))}
         <div className="ag-task add">
           <span className="tick ghost">
@@ -299,7 +361,9 @@ export function Backlog({
             }}
           />
         </div>
-        {!tasks.length && <p className="ag-hint">Drag anything here to take its day away again.</p>}
+        {!tasks.length && (
+          <p className="ag-hint">Drag anything here — or use its "Move to backlog" button — to take its day away again.</p>
+        )}
       </div>
     </aside>
   );

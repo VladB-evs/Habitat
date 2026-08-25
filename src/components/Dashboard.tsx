@@ -1,70 +1,105 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import { api } from '../api';
 import { ask } from '../confirm';
+import { useLayout } from '../layout';
 import { useApp } from '../store';
 import type { DashWidget, ObjType, Stats } from '../types';
 import type { WidgetDef } from '../widgets';
 import {
-  COLS,
   DashDataCtx,
   GAP,
-  MAX_H,
-  ROW_H,
   WIDGETS,
   WidgetFrameCtx,
-  clamp,
   defaultLayout,
   isAvailable,
   makeWidget,
   normalize,
   widgetDef,
+  widgetHeight,
 } from '../widgets';
 import { typeColor } from '../util';
 import { Icon } from './Icons';
 import { SplitControls } from './SplitControls';
 import { PageActions } from './PageActions';
 
+/* ---------- reordering / moving widgets between columns ----------
+
+   Deliberately plain pointer events rather than a drag-and-drop library or
+   Framer's Reorder: Reorder locks a dragged item's own motion to a single
+   axis (it has to, to compute in-list order), so it can visually move up and
+   down but never sideways — there is no way to drag one into the other
+   column, only to fake it by reading the pointer's position separately from
+   where the tile appears to be. That produced a real capability but a
+   confusing gesture. Raw pointer events don't have that constraint: the
+   dragged tile can go anywhere, because nothing but this code is deciding
+   where it goes. This is the same window-listener + pointer-capture shape
+   already used for the sidebar divider and (formerly) the resize corner. */
+
+/** Where a drop would land: which column, and which position within it,
+ *  counting only the *other* widgets already there. `top` is precomputed in
+ *  the same pass since it needs the same DOM measurements. */
+interface DropTarget {
+  col: number;
+  index: number;
+  top: number;
+}
+
+/** Splits `dragged` out of `list` and reinserts it as the `index`-th widget of
+ *  `col`, preserving every other widget's relative order (including the other
+ *  column's, which never moves). */
+function commitDrop(list: DashWidget[], draggedId: string, col: number, index: number): DashWidget[] {
+  const dragged = list.find((w) => w.id === draggedId);
+  if (!dragged) return list;
+  const rest = list.filter((w) => w.id !== draggedId);
+  const colSlots: number[] = [];
+  rest.forEach((w, i) => {
+    if (w.col === col) colSlots.push(i);
+  });
+  const at = Math.max(0, Math.min(index, colSlots.length));
+  const insertAt = at < colSlots.length ? colSlots[at] : colSlots.length ? colSlots[colSlots.length - 1] + 1 : rest.length;
+  const next = [...rest];
+  next.splice(insertAt, 0, dragged.col === col ? dragged : { ...dragged, col });
+  return next;
+}
+
+/** The narrow-window version: one merged list, so there's no column to slot
+ *  into — just a new position in the same flat array. `col` on the moved
+ *  widget is left exactly as it was, for whenever the window widens again. */
+function commitDropNarrow(list: DashWidget[], draggedId: string, index: number): DashWidget[] {
+  const dragged = list.find((w) => w.id === draggedId);
+  if (!dragged) return list;
+  const rest = list.filter((w) => w.id !== draggedId);
+  const at = Math.max(0, Math.min(index, rest.length));
+  const next = [...rest];
+  next.splice(at, 0, dragged);
+  return next;
+}
+
 /* ---------- one placed widget ---------- */
 
 interface FrameProps {
   w: DashWidget;
   edit: boolean;
+  dragging: boolean;
   types: ObjType[];
   settingsOpen: boolean;
-  dragging: boolean;
-  resizing: boolean;
   onRemove: () => void;
   onToggleSettings: () => void;
   onConfig: (patch: Record<string, any>) => void;
-  onResizeStart: (e: React.PointerEvent) => void;
-  onDragStart: () => void;
-  onDragEnter: () => void;
-  onDragEnd: () => void;
+  onDragStart: (e: React.PointerEvent) => void;
 }
 
-function WidgetFrame({
-  w,
-  edit,
-  types,
-  settingsOpen,
-  dragging,
-  resizing,
-  onRemove,
-  onToggleSettings,
-  onConfig,
-  onResizeStart,
-  onDragStart,
-  onDragEnter,
-  onDragEnd,
-}: FrameProps) {
+function WidgetFrame({ w, edit, dragging, types, settingsOpen, onRemove, onToggleSettings, onConfig, onDragStart }: FrameProps) {
   const def = widgetDef(w.kind);
   const [empty, setEmpty] = useState(false);
   const frame = useMemo(() => ({ setEmpty }), []);
 
   const available = def ? isAvailable(def, types) : false;
-  // Nothing to show: stay mounted (so the body keeps watching its data) but drop out of the grid.
+  // Nothing to show: stay mounted (so the body keeps watching its data) but drop out of the list.
   const hidden = !edit && (empty || !available);
   const title = def?.title?.(w.config) ?? null;
+  const h = def?.defaultH ?? 2;
 
   const cls = [
     'w-wrap',
@@ -72,24 +107,16 @@ function WidgetFrame({
     def?.center ? 'w-center' : '',
     edit ? 'w-editing' : '',
     dragging ? 'w-dragging' : '',
-    resizing ? 'w-resizing' : '',
     hidden ? 'w-hidden' : '',
   ]
     .filter(Boolean)
     .join(' ');
 
   return (
-    <div
-      className={cls}
-      data-h={w.h}
-      style={{ gridColumn: `span ${w.w}`, gridRow: `span ${w.h}` }}
-      onDragEnter={onDragEnter}
-      onDragOver={(e) => edit && e.preventDefault()}
-    >
-      {title && <div className="w-title">{title}</div>}
-
+    <motion.div layout="position" className={cls} data-wid={w.id} data-h={h} style={{ height: widgetHeight(h) }}>
       <div className="w-body">
         <WidgetFrameCtx.Provider value={frame}>
+          {title && <div className="w-title">{title}</div>}
           {!def ? (
             <div className="w-empty">Unknown widget “{w.kind}”.</div>
           ) : !available ? (
@@ -103,14 +130,9 @@ function WidgetFrame({
       {edit && (
         <>
           {/* Swallows clicks so dragging a widget never fires the controls inside it, and
-              carries the drag itself — keeping `draggable` off the wrapper means selecting
-              text in the settings popover can't start a widget drag. */}
-          <div
-            className="w-shield"
-            draggable={!resizing}
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-          />
+              carries the drag itself — keeping the pointer listener off the tile means
+              selecting text in the settings popover can't start a widget drag. */}
+          <div className="w-shield" onPointerDown={onDragStart} />
           <div className="w-tools">
             <span className="w-kind">{def?.name ?? w.kind}</span>
             {def?.Settings && (
@@ -126,12 +148,6 @@ function WidgetFrame({
               <Icon name="trash" size={13} />
             </button>
           </div>
-          <div className="w-resize" onPointerDown={onResizeStart} title="Drag to resize" />
-          {resizing && (
-            <div className="w-size">
-              {w.w} × {w.h}
-            </div>
-          )}
         </>
       )}
 
@@ -140,7 +156,7 @@ function WidgetFrame({
           <def.Settings config={w.config} set={onConfig} />
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -177,7 +193,7 @@ function WidgetPicker({
         <div className="picker-head">
           <div>
             <h2>Add a widget</h2>
-            <div className="picker-sub">It lands at the end — drag it where you want, then pull its corner to size it.</div>
+            <div className="picker-sub">It's added to this column — drag it wherever you'd rather have it.</div>
           </div>
           <button className="icon-btn" onClick={onClose} aria-label="Close">
             <Icon name="x" size={15} />
@@ -229,32 +245,22 @@ function WidgetPicker({
 
 /* ---------- the dashboard ---------- */
 
-interface Resize {
-  id: string;
-  startW: number;
-  startH: number;
-  x: number;
-  y: number;
-  minW: number;
-  minH: number;
-  /** So a second finger landing on the page can't drive someone else's resize. */
-  pointerId: number;
-}
-
 export function Dashboard() {
   const { types } = useApp();
+  const { narrow } = useLayout();
   const [widgets, setWidgets] = useState<DashWidget[] | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [edit, setEdit] = useState(false);
-  const [picking, setPicking] = useState(false);
+  /** Which column "Add widget" is targeting — null while the picker is closed.
+   *  On a narrow window there's only one list, so this is always 0 there. */
+  const [pickingCol, setPickingCol] = useState<number | null>(null);
   const [settingsFor, setSettingsFor] = useState<string | null>(null);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [resize, setResize] = useState<Resize | null>(null);
-  const gridRef = useRef<HTMLDivElement>(null);
-  const latest = useRef<DashWidget[]>([]);
-  const moved = useRef(false);
 
-  latest.current = widgets ?? [];
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [ghostPos, setGhostPos] = useState<{ x: number; y: number } | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+  const colRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const dragPointerId = useRef<number | null>(null);
 
   const reloadStats = useCallback(() => {
     api.stats().then(setStats);
@@ -264,10 +270,6 @@ export function Dashboard() {
     api.dashboard.get().then((l) => setWidgets(l?.widgets?.length ? l.widgets.map(normalize) : defaultLayout()));
     reloadStats();
   }, [reloadStats]);
-
-  const persist = useCallback(() => {
-    api.dashboard.save({ widgets: latest.current });
-  }, []);
 
   /** Every layout change is persisted immediately — there's no separate save step. */
   const commit = useCallback((next: DashWidget[]) => {
@@ -285,8 +287,9 @@ export function Dashboard() {
   }, []);
 
   const add = (def: WidgetDef) => {
-    setPicking(false);
-    const w = makeWidget(def);
+    if (pickingCol === null) return;
+    const w = makeWidget(def, pickingCol);
+    setPickingCol(null);
     commit([...(widgets ?? []), w]);
     if (def.Settings && def.defaultConfig) setSettingsFor(w.id);
   };
@@ -303,92 +306,138 @@ export function Dashboard() {
     setSettingsFor(null);
   };
 
-  /* --- drag to reorder --- */
+  /**
+   * Which column and position the pointer is over right now — read from the
+   * live DOM (not from React state) because it has to reflect wherever the
+   * *other* widgets currently sit, and re-deriving that from scratch on every
+   * pointer move is simpler and cheaper than keeping a parallel model in sync
+   * with it. `excludeId` is always the widget being dragged, so it can't
+   * measure or target itself.
+   */
+  const computeDrop = useCallback(
+    (clientX: number, clientY: number, excludeId: string): DropTarget | null => {
+      let col = 0;
+      if (!narrow) {
+        let bestDist = Infinity;
+        colRefs.current.forEach((el, i) => {
+          if (!el) return;
+          const r = el.getBoundingClientRect();
+          const d = clientX < r.left ? r.left - clientX : clientX > r.right ? clientX - r.right : 0;
+          if (d < bestDist) {
+            bestDist = d;
+            col = i;
+          }
+        });
+      }
+      const container = colRefs.current[col];
+      if (!container) return null;
+      const kids = Array.from(container.querySelectorAll<HTMLElement>('[data-wid]')).filter(
+        (el) => el.dataset.wid !== excludeId
+      );
+      const containerRect = container.getBoundingClientRect();
+      let index = kids.length;
+      for (let i = 0; i < kids.length; i++) {
+        if (clientY < kids[i].getBoundingClientRect().top + kids[i].getBoundingClientRect().height / 2) {
+          index = i;
+          break;
+        }
+      }
+      let top: number;
+      if (kids.length === 0) top = 0;
+      else if (index === 0) top = kids[0].getBoundingClientRect().top - containerRect.top - GAP / 2;
+      else if (index >= kids.length)
+        top = kids[kids.length - 1].getBoundingClientRect().bottom - containerRect.top + GAP / 2;
+      else {
+        const prevBottom = kids[index - 1].getBoundingClientRect().bottom - containerRect.top;
+        const nextTop = kids[index].getBoundingClientRect().top - containerRect.top;
+        top = (prevBottom + nextTop) / 2;
+      }
+      return { col, index, top };
+    },
+    [narrow]
+  );
 
-  const dragOver = (overId: string) => {
-    if (!dragId || dragId === overId) return;
-    setWidgets((list) => {
-      if (!list) return list;
-      const from = list.findIndex((w) => w.id === dragId);
-      const to = list.findIndex((w) => w.id === overId);
-      if (from < 0 || to < 0) return list;
-      const next = [...list];
-      next.splice(to, 0, next.splice(from, 1)[0]);
-      moved.current = true;
-      return next;
-    });
-  };
-
-  const dragEnd = () => {
-    setDragId(null);
-    if (moved.current) {
-      moved.current = false;
-      persist();
-    }
-  };
-
-  /* --- drag the corner to resize, in whole grid units --- */
-
-  const startResize = (w: DashWidget, e: React.PointerEvent) => {
+  const startDrag = (w: DashWidget, e: React.PointerEvent) => {
     e.preventDefault();
-    e.stopPropagation();
-    const def = widgetDef(w.kind);
-    // Captured so the corner keeps the gesture once the finger slides off it.
-    // Capture retargets the events to the handle, and they still bubble to the
-    // window listeners below.
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setSettingsFor(null);
-    setResize({
-      id: w.id,
-      startW: w.w,
-      startH: w.h,
-      x: e.clientX,
-      y: e.clientY,
-      minW: def?.minW ?? 1,
-      minH: def?.minH ?? 1,
-      pointerId: e.pointerId,
-    });
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    dragPointerId.current = e.pointerId;
+    setDragId(w.id);
+    setGhostPos({ x: e.clientX, y: e.clientY });
+    setDropTarget(computeDrop(e.clientX, e.clientY, w.id));
   };
 
   useEffect(() => {
-    if (!resize) return;
-    // One column step is the track width plus a gap, which works out to (gridWidth + gap) / columns.
-    const colUnit = ((gridRef.current?.clientWidth ?? 900) + GAP) / COLS;
-    const rowUnit = ROW_H + GAP;
-
-    const move = (e: PointerEvent) => {
-      if (e.pointerId !== resize.pointerId) return;
-      const w = clamp(Math.round(resize.startW + (e.clientX - resize.x) / colUnit), resize.minW, COLS);
-      const h = clamp(Math.round(resize.startH + (e.clientY - resize.y) / rowUnit), resize.minH, MAX_H);
-      setWidgets((list) =>
-        list ? list.map((x) => (x.id === resize.id && (x.w !== w || x.h !== h) ? { ...x, w, h } : x)) : list
-      );
+    if (!dragId) return;
+    let frame = 0;
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerId !== dragPointerId.current) return;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setGhostPos({ x: e.clientX, y: e.clientY });
+        setDropTarget(computeDrop(e.clientX, e.clientY, dragId));
+      });
     };
-    // A cancelled gesture still commits: the widget is already at the size the
-    // finger left it at, and throwing that away would look like a bug.
-    const up = (e: PointerEvent) => {
-      if (e.pointerId !== resize.pointerId) return;
-      setResize(null);
-      persist();
+    const end = (e: PointerEvent) => {
+      if (e.pointerId !== dragPointerId.current) return;
+      const target = computeDrop(e.clientX, e.clientY, dragId);
+      if (target) {
+        setWidgets((list) => {
+          if (!list) return list;
+          const next = narrow
+            ? commitDropNarrow(list, dragId, target.index)
+            : commitDrop(list, dragId, target.col, target.index);
+          api.dashboard.save({ widgets: next });
+          return next;
+        });
+      }
+      dragPointerId.current = null;
+      setDragId(null);
+      setGhostPos(null);
+      setDropTarget(null);
     };
-
-    document.body.style.cursor = 'nwse-resize';
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', up);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
     return () => {
-      document.body.style.cursor = '';
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      window.removeEventListener('pointercancel', up);
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
     };
-  }, [resize, persist]);
+  }, [dragId, narrow, computeDrop]);
 
   const dash = useMemo(() => ({ stats, reloadStats, edit }), [stats, reloadStats, edit]);
 
   if (!widgets) return <div className="dash" />;
 
   const used = new Set(widgets.map((w) => w.kind));
+  const draggedDef = dragId ? widgetDef(widgets.find((w) => w.id === dragId)?.kind ?? '') : null;
+
+  const renderColumn = (col: number, list: DashWidget[]) => (
+    <div className="dash-col" ref={(el) => (colRefs.current[col] = el)}>
+      {list.map((w) => (
+        <WidgetFrame
+          key={w.id}
+          w={w}
+          edit={edit}
+          dragging={dragId === w.id}
+          types={types}
+          settingsOpen={settingsFor === w.id}
+          onRemove={() => remove(w.id)}
+          onToggleSettings={() => setSettingsFor((id) => (id === w.id ? null : w.id))}
+          onConfig={(p) => patch(w.id, (x) => ({ ...x, config: { ...x.config, ...p } }))}
+          onDragStart={(e) => startDrag(w, e)}
+        />
+      ))}
+      {dropTarget?.col === col && <div className="drop-line" style={{ top: dropTarget.top }} />}
+      {edit && (
+        <button className="dash-add" onClick={() => setPickingCol(col)}>
+          <Icon name="plus" size={14} /> Add widget
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div className={'dash' + (edit ? ' editing' : '')}>
@@ -396,10 +445,7 @@ export function Dashboard() {
         <PageActions>
         {edit ? (
           <>
-            <span className="dash-tip">Drag to reorder · pull a corner to resize</span>
-            <button className="btn" onClick={() => setPicking(true)}>
-              <Icon name="plus" size={13} /> Add widget
-            </button>
+            <span className="dash-tip">Drag to reorder, or move it into the other column</span>
             <button className="btn subtle" onClick={reset}>
               Reset
             </button>
@@ -417,26 +463,14 @@ export function Dashboard() {
       </div>
 
       <DashDataCtx.Provider value={dash}>
-        <div className="dash-grid" ref={gridRef}>
-          {widgets.map((w) => (
-            <WidgetFrame
-              key={w.id}
-              w={w}
-              edit={edit}
-              types={types}
-              dragging={dragId === w.id}
-              resizing={resize?.id === w.id}
-              settingsOpen={settingsFor === w.id}
-              onRemove={() => remove(w.id)}
-              onToggleSettings={() => setSettingsFor((id) => (id === w.id ? null : w.id))}
-              onConfig={(p) => patch(w.id, (x) => ({ ...x, config: { ...x.config, ...p } }))}
-              onResizeStart={(e) => startResize(w, e)}
-              onDragStart={() => setDragId(w.id)}
-              onDragEnter={() => dragOver(w.id)}
-              onDragEnd={dragEnd}
-            />
-          ))}
-        </div>
+        {narrow ? (
+          renderColumn(0, widgets)
+        ) : (
+          <div className="dash-cols">
+            {renderColumn(0, widgets.filter((w) => w.col !== 1))}
+            {renderColumn(1, widgets.filter((w) => w.col === 1))}
+          </div>
+        )}
       </DashDataCtx.Provider>
 
       {!widgets.length && !edit && (
@@ -449,7 +483,14 @@ export function Dashboard() {
         </div>
       )}
 
-      {picking && <WidgetPicker types={types} used={used} onPick={add} onClose={() => setPicking(false)} />}
+      {dragId && ghostPos && draggedDef && (
+        <div className="drag-ghost" style={{ left: ghostPos.x, top: ghostPos.y }}>
+          <Icon name={draggedDef.icon} size={14} />
+          {draggedDef.name}
+        </div>
+      )}
+
+      {pickingCol !== null && <WidgetPicker types={types} used={used} onPick={add} onClose={() => setPickingCol(null)} />}
     </div>
   );
 }

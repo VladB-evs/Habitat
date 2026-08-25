@@ -1,5 +1,14 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { AnimatePresence, MotionConfig, animate, motion, useMotionTemplate, useMotionValue } from 'motion/react';
+import {
+  AnimatePresence,
+  MotionConfig,
+  animate,
+  motion,
+  useMotionTemplate,
+  useMotionValue,
+  useSpring,
+  useTransform,
+} from 'motion/react';
 import { api } from './api';
 import { AppProvider, useApp } from './store';
 import { openLink } from './links';
@@ -7,6 +16,7 @@ import type { View } from './store';
 import { Onboarding } from './components/Habitats';
 import { Sidebar } from './components/Sidebar';
 import { SidebarDrawer } from './components/SidebarDrawer';
+import { BottomNav } from './components/BottomNav';
 import { EdgeSwipe } from './components/EdgeSwipe';
 import { PaneSlot } from './components/PageActions';
 import { ConfirmHost } from './confirm';
@@ -14,6 +24,7 @@ import { useLayout } from './layout';
 import { Dashboard } from './components/Dashboard';
 import { DailyNotes } from './components/DailyNotes';
 import { TasksPage } from './components/TasksPage';
+import { EventsPage } from './components/EventsPage';
 import { TypeTable } from './components/TypeTable';
 import { ObjectPage } from './components/ObjectPage';
 import { TemplatePage } from './components/TemplatePage';
@@ -53,6 +64,7 @@ function PaneView({ view }: { view: View }) {
         {view.kind === 'dashboard' && <Dashboard />}
         {view.kind === 'daily' && <DailyNotes />}
         {view.kind === 'tasks' && <TasksPage />}
+        {view.kind === 'events' && <EventsPage />}
         {/* Boards are a pointer-and-space interaction — panning a graph, dragging
             connections between cards — and they do not survive the trip down to
             390px. The entry is hidden there, but a link or a restored URL can
@@ -139,6 +151,21 @@ function Shell() {
   const [peeking, setPeeking] = useState(false);
   const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * A tell that lives entirely outside React state: how close the pointer is to
+   * the left edge while the sidebar is put away, so the edge itself can lean
+   * toward the cursor before it ever reaches the 14px hit-target. Plain motion
+   * values rather than `useState` — this updates on every `mousemove`, and
+   * routing that through a render would make dragging your mouse across the
+   * window redraw the whole shell.
+   */
+  const edgeY = useMotionValue(0);
+  const edgeYSpring = useSpring(edgeY, { stiffness: 300, damping: 32 });
+  const edgeNear = useMotionValue(0);
+  const edgeNearSpring = useSpring(edgeNear, { stiffness: 220, damping: 24 });
+  const edgeWidth = useTransform(edgeNearSpring, [0, 1], [3, 9]);
+  const edgeHeight = useTransform(edgeNearSpring, [0, 1], [34, 84]);
+  const edgeOpacity = useTransform(edgeNearSpring, [0, 1], [0, 0.85]);
   /** A split is down the middle until the divider says otherwise. */
   const [ratio, setRatio] = useState(1 / 2);
   const mainRef = useRef<HTMLDivElement>(null);
@@ -321,6 +348,44 @@ function Shell() {
     cancelUnpeek();
   }, []);
 
+  /**
+   * The nub only has something to say while the sidebar is actually put away —
+   * once it's pinned or already peeking, there's nowhere left to invite the
+   * pointer toward. `EDGE_RANGE` is well past the 14px hit-target on purpose:
+   * the whole point is to lean out before you've arrived, not once you're
+   * already there.
+   */
+  useEffect(() => {
+    if (narrow || !sidebarHidden || peeking) {
+      edgeNear.set(0);
+      return;
+    }
+    const EDGE_RANGE = 260;
+    let frame = 0;
+    const onMove = (e: MouseEvent) => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        edgeY.set(e.clientY);
+        const raw = Math.max(0, Math.min(1, 1 - e.clientX / EDGE_RANGE));
+        // A gentler curve than a straight square: it's already noticeable a
+        // third of the way into the range, then keeps gathering itself in as
+        // you get closer — closer still reads as more eager, just from a
+        // head start instead of from a standing stop.
+        edgeNear.set(raw ** 1.3);
+      });
+    };
+    const onLeaveWindow = () => edgeNear.set(0);
+    window.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseleave', onLeaveWindow);
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseleave', onLeaveWindow);
+      if (frame) cancelAnimationFrame(frame);
+      edgeNear.set(0);
+    };
+  }, [narrow, sidebarHidden, peeking, edgeY, edgeNear]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -363,9 +428,10 @@ function Shell() {
     <div className={'app' + (sidebarHidden ? ' no-sidebar' : '')}>
       <div className="drag-strip" />
 
-      {/* On a phone the sidebar is a drawer off the right edge, and the whole
-          desktop arrangement below — pinning, hover-peeking, the reveal strip —
-          is simply not mounted. */}
+      {/* On a phone (or an Electron window pinched thin) the sidebar is a drawer
+          off the right edge and navigation is a customizable bottom bar, rather
+          than the desktop arrangement below — pinning, hover-peeking, the
+          reveal strip — which is simply not mounted. */}
       {narrow ? (
         <>
           <SidebarDrawer
@@ -376,23 +442,20 @@ function Shell() {
           />
           {!drawerOpen && <EdgeSwipe side="right" onTrigger={() => setDrawerOpen(true)} />}
           {!drawerOpen && canBack && <EdgeSwipe side="left" onTrigger={back} />}
-          {!drawerOpen && (
-            <motion.button
-              className="drawer-fab"
-              onClick={() => setDrawerOpen(true)}
-              aria-label="Open menu"
-              initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: 1, scale: 1 }}
-              whileTap={{ scale: 0.92 }}
-              transition={spring}
-            >
-              <Icon name="panel-open" size={18} />
-            </motion.button>
-          )}
+          <BottomNav onSearch={() => setPaletteOpen(true)} onAsk={askReady ? () => setAskOpen(true) : undefined} />
         </>
       ) : (
         <>
-          {sidebarHidden && !peeking && <div className="edge-reveal" onMouseEnter={armPeek} onMouseLeave={cancelPeek} />}
+          {sidebarHidden && !peeking && (
+            <>
+              <div className="edge-reveal" onMouseEnter={armPeek} onMouseLeave={cancelPeek} />
+              <motion.div
+                className="edge-hint"
+                aria-hidden
+                style={{ top: edgeYSpring, width: edgeWidth, height: edgeHeight, opacity: edgeOpacity }}
+              />
+            </>
+          )}
           <AnimatePresence initial={false}>
             {(!sidebarHidden || peeking) && (
           <motion.div

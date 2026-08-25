@@ -549,6 +549,15 @@ kbd {
   gap: 5px;
 }
 
+/* `.palette-backdrop` is otherwise the ⌘K palette's own — top-anchored at
+   13vh, which reads fine for a search box you expect near the top but put a
+   small confirmation dialog in the same spot and it just looks stranded.
+   This overrides only the alignment, so the dim backdrop itself is shared. */
+.date-backdrop {
+  align-items: center;
+  padding-top: 0;
+}
+
 .date-prompt {
   width: 260px;
   padding: 18px;
@@ -593,9 +602,26 @@ kbd {
   top: 0;
   left: 0;
   bottom: 0;
-  width: 14px;
+  width: 24px;
   z-index: 55;
   -webkit-app-region: no-drag;
+}
+
+/* The nub that leans toward the pointer while the sidebar is put away — purely
+   a tell, never a target. `top`/`width`/`height`/`opacity` are driven directly
+   from JS as motion values (see App.tsx's `edgeNear`/`edgeY`), so the "-50%"
+   here uses the modern `translate` property rather than `transform`: that way
+   CSS only ever centers it, and never fights the motion values over the same
+   property the way mixing both into `transform` would. */
+.edge-hint {
+  position: fixed;
+  left: 0;
+  border-radius: 0 999px 999px 0;
+  background: var(--accent);
+  box-shadow: 0 0 16px 2px color-mix(in srgb, var(--accent) 55%, transparent);
+  translate: 0 -50%;
+  pointer-events: none;
+  z-index: 54;
 }
 
 /* Peeking: the sidebar floats over the content and slides away with the pointer. */
@@ -1359,8 +1385,20 @@ button.version.version-update {
   letter-spacing: -0.02em;
 }
 
+/* Today reads as a small filled badge around the date — not a color swap,
+   which at this size just looked like a stray highlight rather than a
+   deliberate "you are here" marker. */
 .day-pill.today .num {
-  color: var(--mention-fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 25px;
+  height: 25px;
+  margin-top: 2px;
+  border-radius: 999px;
+  color: var(--on-accent);
+  background: var(--accent);
+  font-size: 14px;
 }
 
 .day-pill .dot {
@@ -1393,6 +1431,58 @@ button.version.version-update {
   margin-top: 3px;
   font-size: 14.5px;
   color: var(--text-2);
+}
+
+/* ---------- mood picker ---------- */
+
+.mood-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.mood-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  padding: 9px 12px 8px;
+  border-radius: 13px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-3);
+  transition: border-color 0.12s ease, color 0.12s ease, background-color 0.12s ease;
+}
+
+@media (hover: hover) {
+  .mood-btn:hover {
+    color: var(--mood-color);
+    border-color: color-mix(in srgb, var(--mood-color) 45%, var(--border-2));
+    background: color-mix(in srgb, var(--mood-color) 8%, var(--bg-2));
+  }
+}
+
+.mood-btn.on {
+  color: var(--mood-color);
+  border-color: var(--mood-color);
+  background: color-mix(in srgb, var(--mood-color) 16%, var(--bg-2));
+}
+
+.mood-label {
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* The same mood colour, shrunk to a dot, on a month cell that has one. */
+.cal-mood {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
 }
 
 .daily-page .sect {
@@ -1494,6 +1584,7 @@ button.version.version-update {
 }
 
 .cal-cell {
+  position: relative;
   min-height: 86px;
   display: flex;
   flex-direction: column;
@@ -1522,14 +1613,22 @@ button.version.version-update {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border-2));
 }
 
-.cal-cell.today .cal-num {
-  color: var(--mention-fg);
-}
-
 .cal-num {
   font-size: 13px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+}
+
+/* Same badge treatment as the week strip's today marker, at this cell's scale. */
+.cal-cell.today .cal-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 21px;
+  height: 21px;
+  border-radius: 999px;
+  color: var(--on-accent);
+  background: var(--accent);
 }
 
 .cal-snippet {
@@ -1540,6 +1639,35 @@ button.version.version-update {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* The Tasks page's month view: the same cell, filled with entries instead of
+   journal text. Each chip reuses `.cal-chip` from the day/week grid's all-day
+   row unchanged — same colour-by-type, same left bar. */
+.cal-cell-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+
+.cal-cell-chips .cal-chip {
+  cursor: default;
+}
+
+/* Events' own month grid chip actually opens something on click (the Tasks
+   page's month view doesn't — that whole cell just navigates uniformly), so
+   it keeps the pointer cursor `.cal-chip` normally has. */
+.cal-cell-chips .cal-chip.clickable {
+  cursor: pointer;
+}
+
+.cal-more {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  padding: 0 2px;
 }
 
 .rel-badge {
@@ -2809,6 +2937,61 @@ input[type='date'].cell-input {
   color: var(--text-2);
 }
 
+/* ---------- bottom nav editor (Settings > Navigation) ---------- */
+
+.nav-edit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.nav-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  /* Motion drags this element directly (Reorder.Item owns its own transform),
+     so it needs to read as liftable — a shadow while it's in your hand. */
+  cursor: grab;
+}
+
+.nav-edit-row:active {
+  cursor: grabbing;
+}
+
+.nav-edit-grip {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.nav-edit-label {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-edit-add {
+  margin-top: 4px;
+}
+
+.nav-edit-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.nav-edit-chips .chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .set-note code,
 .set-val code {
   padding: 1px 5px;
@@ -3407,12 +3590,25 @@ code.var-ref-name {
 
 .rolled-badge {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 11px;
   font-weight: 600;
   color: var(--mention-fg);
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
-  padding: 2px 8px;
+  background: color-mix(in srgb, var(--mention-fg) 16%, transparent);
+  padding: 2px 9px 2px 7px;
   border-radius: 20px;
+}
+
+/* The badge alone reads fine at a glance, but a task row is often scanned
+   faster than that — the row itself carries the same tell down its left edge,
+   so a carried-over task never gets mistaken for one that was simply due
+   today. `box-shadow` rather than `border` so it doesn't nudge the row's own
+   padding. */
+.day-task.rolled,
+.ag-task.rolled {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--mention-fg) 65%, transparent);
 }
 
 .day-task-input {
@@ -5158,16 +5354,95 @@ code.var-ref-name {
   }
 }
 
-/* 6 columns wide, 92px row units — widgets span whole units in both axes.
-   The container lives here rather than on .dash: container-type implies
+/* Two equal columns, each its own independently ordered list — a widget
+   always fills the full width of whichever column it's in, so there's no grid
+   to place it on anymore, just an order within one of two arrays. The
+   container lives here rather than on .dash: container-type implies
    contain:layout, which would otherwise make .dash the containing block for
    the position:fixed picker backdrop. */
-.dash-grid {
+.dash-cols {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  grid-auto-rows: 92px;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: 16px;
   container-type: inline-size;
+}
+
+/* A pane too narrow for two columns (a split view, say) stacks them instead —
+   the window-level narrow layout replaces this with one true merged list
+   further down; this is only the "still wide, just cramped" case. */
+@container (max-width: 620px) {
+  .dash-cols {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dash-col {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* Where a drop would land, between whichever two widgets it falls between —
+   the one live piece of feedback the drag needs, since the tile itself stays
+   put and a small floating chip is all that follows the pointer. Positioned
+   by Dashboard.tsx's own geometry, not flex/grid — it has to sit *between*
+   items, which neither layout can express on its own. */
+.drop-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+  pointer-events: none;
+}
+
+/* The dragged widget's stand-in — simpler than cloning its live body (which
+   would mean two mounted copies of anything stateful, a running Clock or a
+   custom script, at once), and it reads as "picked up" precisely because it
+   doesn't try to be the widget. */
+.drag-ghost {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  border-radius: 11px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.3);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(-2deg);
+}
+
+.dash-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  border: 1px dashed var(--border-2);
+  border-radius: 13px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+@media (hover: hover) {
+  .dash-add:hover {
+    color: var(--text);
+    border-color: var(--text-3);
+  }
 }
 
 .w-wrap {
@@ -5276,19 +5551,25 @@ code.var-ref-name {
   z-index: 3;
   border-radius: 13px;
   cursor: grab;
+  /* The column scrolls with the page; a touch drag started here must not also
+     hand the gesture to that scroll. */
+  touch-action: none;
 }
 
 .w-shield:active {
   cursor: grabbing;
 }
 
-.w-dragging {
-  opacity: 0.35;
+/* Dragging is a pointer gesture the app owns start to finish, not a native
+   text/element selection — without this, sweeping the pointer across the
+   dashboard to relocate a widget also highlights every word it passes over. */
+.dash.editing {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.w-dragging > .w-body,
-.w-resizing > .w-body {
-  outline-color: var(--accent);
+.w-dragging {
+  opacity: 0.35;
 }
 
 /* Floats over the widget so edit mode never changes the layout underneath it. */
@@ -5307,10 +5588,6 @@ code.var-ref-name {
   backdrop-filter: blur(8px);
   opacity: var(--reveal-idle, 0);
   transition: opacity 0.1s ease;
-}
-
-.w-resizing .w-tools {
-  opacity: 1;
 }
 
 @media (hover: hover) {
@@ -5348,81 +5625,6 @@ code.var-ref-name {
 .w-tool.on {
   color: var(--accent);
   background: var(--bg-3);
-}
-
-/* Corner grip — drag it to set the widget's width and height in grid units. */
-.w-resize {
-  position: absolute;
-  right: -7px;
-  bottom: -7px;
-  width: 18px;
-  height: 18px;
-  z-index: 7;
-  border-radius: 5px;
-  cursor: nwse-resize;
-  /* The grid scrolls; this corner must not hand its drag to the scroller. */
-  touch-action: none;
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
-  opacity: var(--reveal-idle, 0);
-  transition: opacity 0.1s ease;
-}
-
-.w-resize::after {
-  content: '';
-  position: absolute;
-  right: 3px;
-  bottom: 3px;
-  width: 8px;
-  height: 8px;
-  border-right: 2px solid var(--text-3);
-  border-bottom: 2px solid var(--text-3);
-  border-radius: 0 0 3px 0;
-}
-
-.w-resizing .w-resize {
-  opacity: 1;
-}
-
-@media (hover: hover) {
-  .w-wrap:hover .w-resize {
-    opacity: 1;
-  }
-}
-
-.w-resizing .w-resize {
-  border-color: var(--accent);
-}
-
-@media (hover: hover) {
-  .w-resize:hover {
-    border-color: var(--accent);
-  }
-}
-
-.w-resizing .w-resize::after {
-  border-color: var(--accent);
-}
-
-@media (hover: hover) {
-  .w-resize:hover::after {
-    border-color: var(--accent);
-  }
-}
-
-.w-size {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  z-index: 8;
-  padding: 3px 8px;
-  border-radius: 7px;
-  font-size: 12px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--on-accent);
-  background: var(--accent);
-  pointer-events: none;
 }
 
 /* --- widget internals --- */
@@ -5742,13 +5944,6 @@ code.var-ref-name {
   color: var(--accent);
   text-decoration: underline;
   font-size: inherit;
-}
-
-/* Narrow panes: everything goes full width rather than shrinking to slivers. */
-@container (max-width: 620px) {
-  .dash-grid > .w-wrap {
-    grid-column: 1 / -1 !important;
-  }
 }
 
 @media (max-width: 560px) {
@@ -6723,6 +6918,10 @@ code.var-ref-name {
   cursor: grabbing;
 }
 
+.board-card.dragging {
+  opacity: 0.35;
+}
+
 .board-card-title {
   font-size: 13.5px;
   font-weight: 550;
@@ -7263,6 +7462,33 @@ figcaption {
   padding: 44px 28px 16px;
 }
 
+/* Calendar mode's own date nav, narrow-window only — see `calNav` in
+   TasksPage.tsx. In normal flow rather than the floating action pill, so it
+   doesn't have to fight the page's Agenda/Calendar/Board switch and Add
+   button for room in one scrolling strip. */
+.tasks-cal-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 12px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.tasks-cal-nav::-webkit-scrollbar {
+  height: 0;
+}
+
+.tasks-cal-nav > * {
+  flex-shrink: 0;
+}
+
+.tasks-cal-nav .cal-when {
+  margin-right: 2px;
+}
+
 .page-actions {
   display: flex;
   align-items: center;
@@ -7363,6 +7589,16 @@ figcaption {
   z-index: 1;
 }
 
+/* The header needs its own opaque background to cover the body scrolling
+   underneath it while stuck — which puts it on a different visual layer from
+   the day card behind it, so `.ag-day.over`'s tint (below) never reached it on
+   its own: the card lit up orange while the heading sat on an untinted strip
+   over the top of it. Recolouring the header to the same mix keeps the sticky
+   cover opaque while actually matching. */
+.ag-day.over .ag-day-head {
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg));
+}
+
 .ag-day-head h3 {
   font-size: 13px;
   font-weight: 700;
@@ -7432,6 +7668,34 @@ figcaption {
   flex-shrink: 0;
 }
 
+/* The touch-friendly stand-in for dragging a task between the backlog and a
+   day — always visible and labelled, not a hover-reveal icon. Dragging is the
+   discoverable-on-a-mouse path; on touch this button *is* the feature, so it
+   needs to read as an obvious control at a glance, not something you have to
+   already know is there. */
+.ag-task-move {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 9px 0 7px;
+  border-radius: 20px;
+  border: 1px solid var(--border-2);
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .ag-task-move:hover {
+    background: var(--bg-2);
+    color: var(--text);
+    border-color: var(--text-3);
+  }
+}
+
 .ag-in-event {
   display: inline-flex;
   align-items: center;
@@ -7458,7 +7722,9 @@ figcaption {
   }
 }
 
-/* The per-day adder stays out of the way until the day is pointed at. */
+/* The per-day adder stays out of the way on the desktop until the day is
+   pointed at — narrow/mobile has no hover to reveal it with, so it's always
+   on there instead (see mobile.css). */
 .ag-task.add.quiet {
   opacity: var(--reveal-idle, 0);
   transition: opacity 0.12s ease;
@@ -7631,6 +7897,139 @@ figcaption {
   font-size: 12.5px;
   line-height: 1.5;
   color: var(--text-3);
+}
+
+/* ============================================================
+   Events — its own page, deliberately not the Tasks agenda's markup.
+   Similar shape (a day heading, then rows) because that shape is just what a
+   chronological list looks like, not because it's borrowed.
+   ============================================================ */
+
+/* The shared padding for both List and Month — without it Month, which has
+   no per-row padding of its own the way List's rows do, ran flush to the
+   window edge. Deliberately not its own scroller: `.pane-scroll` already
+   handles that (bottom-nav-aware padding included, on a narrow window), and
+   nesting another one here would be the exact bug already fixed for the
+   Tasks page's own day list happening again. */
+.ev-body {
+  padding: 0 28px 24px;
+}
+
+.ev-day + .ev-day {
+  margin-top: 22px;
+}
+
+.ev-day-head {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  padding: 2px 8px 6px;
+  position: sticky;
+  top: 0;
+  background: var(--bg);
+  z-index: 1;
+}
+
+.ev-day-head h3 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.ev-day-date {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.ev-day-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ev-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+@media (hover: hover) {
+  .ev-row:hover {
+    background: var(--bg-3);
+  }
+}
+
+.ev-row-time {
+  flex-shrink: 0;
+  width: 68px;
+  font-size: 12px;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.ev-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ev-row-loc {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 160px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ev-row-repeat {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--text-3);
+}
+
+/* ---------- the "New event" dialog ---------- */
+
+.ev-modal {
+  width: 340px;
+  max-width: calc(100vw - 32px);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-radius: 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.32);
+}
+
+.ev-modal h3 {
+  font-size: 15px;
+  font-weight: 650;
+  margin-bottom: 2px;
+}
+
+.ev-modal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ev-modal-row label {
+  font-size: 12.5px;
+  color: var(--text-2);
+  flex-shrink: 0;
 }
 
 /* ============================================================

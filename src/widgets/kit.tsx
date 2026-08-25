@@ -2,11 +2,12 @@ import { createContext, useContext, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { DashWidget, ObjType, Stats } from '../types';
 
-/** Grid geometry — shared by the CSS and the resize maths. */
-export const COLS = 6;
+/** A widget's height, in these row units — the one piece of sizing a widget
+ *  still controls. Width no longer exists as a concept: a widget always fills
+ *  whichever column it's in. Shared with the CSS so a `defaultH` of 1 always
+ *  means the same 92px whether it comes from styles.css or an inline style. */
 export const ROW_H = 92;
 export const GAP = 16;
-export const MAX_H = 14;
 
 export interface WidgetProps {
   /** Instance id — unique per placed widget, stable across renders. */
@@ -34,7 +35,11 @@ export interface WidgetDef {
   center?: boolean;
   /** Section heading above the body; `null` for none. */
   title?: (config: Record<string, any>) => string | null;
-  defaultW: number;
+  /** Fixed height in row units — no longer user-resizable, so this is the
+   *  final word on how tall the widget draws. `defaultW`/`minW` from the old
+   *  grid era are harmless leftovers on individual widget defs; nothing reads
+   *  them anymore now that a widget always fills its column's width. */
+  defaultW?: number;
   defaultH: number;
   minW?: number;
   minH?: number;
@@ -79,6 +84,11 @@ export const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.ma
 
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
-export function makeWidget(def: WidgetDef): DashWidget {
-  return { id: uid(), kind: def.kind, w: def.defaultW, h: def.defaultH, config: { ...(def.defaultConfig || {}) } };
+export function makeWidget(def: WidgetDef, col = 0): DashWidget {
+  return { id: uid(), kind: def.kind, col, config: { ...(def.defaultConfig || {}) } };
 }
+
+/** A widget's fixed pixel height, from its `defaultH` row units — same formula
+ *  the old grid used for `gridRow: span h`, just applied directly now that
+ *  there's no grid track to size it for. */
+export const widgetHeight = (h: number) => h * ROW_H + (h - 1) * GAP;

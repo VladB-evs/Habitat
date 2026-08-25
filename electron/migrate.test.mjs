@@ -27,9 +27,12 @@ before(() => {
 
   const raw = new DatabaseSync(file);
 
-  // The Event type an earlier build had, plus one of its objects.
+  // The Event type an earlier build had, plus one of its objects. `initDb`
+  // above already created the *current* Event type (event-type-v2 runs on
+  // every open) — REPLACE stands in for "this vault predates that rebuild
+  // too", same as resetting the migration flag below does.
   raw
-    .prepare('INSERT INTO types (id, name, emoji, color, properties, builtin, starred, created_at) VALUES (?, ?, ?, ?, ?, 1, 1, ?)')
+    .prepare('INSERT OR REPLACE INTO types (id, name, emoji, color, properties, builtin, starred, created_at) VALUES (?, ?, ?, ?, ?, 1, 1, ?)')
     .run(
       'event', 'Event', 'calendar-days', '#7b5cd6',
       JSON.stringify([
@@ -76,7 +79,7 @@ before(() => {
   );
   ins.run('tsk2', 'task', 'Nothing special', JSON.stringify({ status: 'Todo' }), '[]', '', 1, 1);
 
-  raw.prepare('DELETE FROM kv WHERE key = ?').run('migration:fold-event-into-task-v1');
+  raw.prepare('DELETE FROM kv WHERE key IN (?, ?)').run('migration:fold-event-into-task-v1', 'migration:event-type-v2');
   raw.close();
 
   dbmod.openVault(file);
@@ -87,10 +90,18 @@ after(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-test('the Event type and everything in it are gone', () => {
-  assert.equal(api['types:list']().find((t) => t.id === 'event'), undefined);
-  assert.equal(api['objects:get']('evt1'), null);
-  assert.equal(api['calendar:range']({ from: '2026-09-07', to: '2026-09-07' }).length, 0);
+test('the old Event objects are gone, and a fresh Event type replaces the old one', () => {
+  assert.equal(api['objects:get']('evt1'), null, 'the old-shape object is gone');
+  assert.equal(api['calendar:range']({ from: '2026-09-07', to: '2026-09-07' }).length, 0, 'and never counted as a task-page entry');
+
+  // Rebuilt from scratch (see events:create) rather than folded into Task —
+  // same id, a new shape: no `repeat` property of its own, since a recurring
+  // event materialises independent rows instead of expanding a rule.
+  const event = api['types:list']().find((t) => t.id === 'event');
+  assert.ok(event, 'Event exists again, just not as the old fold-away type');
+  const eids = event.properties.map((p) => p.id);
+  for (const id of ['startsAt', 'endsAt', 'location', 'link', 'attendees']) assert.ok(eids.includes(id), `Event should have ${id}`);
+  assert.ok(!eids.includes('repeat'), 'no rule on the object itself — occurrences are real rows now');
 });
 
 test('Task gains everything Event had, and gives up partOf', () => {

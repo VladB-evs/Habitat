@@ -103,7 +103,7 @@ export function Sidebar({
   const [habMenu, setHabMenu] = useState(false);
   const [info, setInfo] = useState<SettingsInfo | null>(null);
   // Daily notes, tasks, people and tags all have their own nav entries above.
-  const upstairs = new Set(['daily', 'tag', 'task', PEOPLE_TYPE]);
+  const upstairs = new Set(['daily', 'tag', 'task', 'event', PEOPLE_TYPE]);
   const visibleTypes = types.filter((t) => !upstairs.has(t.id));
 
   useEffect(() => {
@@ -195,6 +195,7 @@ export function Sidebar({
           <NavItem icon="grid" label="Dashboard" active={view.kind === 'dashboard'} onClick={() => navigate({ kind: 'dashboard' })} />
           <NavItem icon="calendar" label="Daily Notes" active={view.kind === 'daily'} onClick={() => navigate({ kind: 'daily' })} />
           <NavItem icon="circle-check" label="Tasks" active={view.kind === 'tasks'} onClick={() => navigate({ kind: 'tasks' })} />
+          <NavItem icon="calendar-clock" label="Events" active={view.kind === 'events'} onClick={() => navigate({ kind: 'events' })} />
           <NavItem icon="people" label="People" active={view.kind === 'people'} onClick={() => navigate({ kind: 'people' })} />
           <NavItem icon="hash" label="Tags" active={view.kind === 'tags'} onClick={() => navigate({ kind: 'tags' })} />
           {/* Boards are desktop-only — see the note in PaneView. */}

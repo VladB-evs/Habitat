@@ -8,6 +8,7 @@ import { dealtIn, snap, spring, stagger } from '../motion';
 import { DayTasks } from './DayTasks';
 import { Editor } from './Editor';
 import { Icon } from './Icons';
+import { MoodPicker, moodMeta } from './MoodPicker';
 import { SplitControls } from './SplitControls';
 import { PageActions } from './PageActions';
 
@@ -68,6 +69,29 @@ export function DailyNotes() {
     api.daily.list().then(setMetas);
   };
 
+  /**
+   * Simpler than `saveJournal`'s create-then-flush-the-pending-write dance —
+   * a mood pick is one deliberate tap, never a stream of autosaves racing each
+   * other, so there's nothing to queue. Gated on `loaded` at the call site:
+   * creating the row here before `daily:get` has resolved could otherwise
+   * stomp genuinely existing content with `daily:create`'s empty default.
+   */
+  const saveMood = async (score: number | null) => {
+    let target = noteRef.current;
+    if (!target) {
+      if (score === null) return;
+      target = await api.daily.create(dateKey, null);
+    }
+    const props = { ...target.props };
+    if (score === null) delete props.mood;
+    else props.mood = score;
+    target = { ...target, props };
+    noteRef.current = target;
+    setNote(target);
+    await api.objects.update(target.id, { props });
+    api.daily.list().then(setMetas);
+  };
+
   const deleteDaily = async (m: DailyMeta) => {
     if (!(await ask(`Delete the journal entry for ${new Date(m.dateKey + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}? This also removes its links.`)))
       return;
@@ -84,6 +108,8 @@ export function DailyNotes() {
   const week = Array.from({ length: 7 }, (_, i) => addDays(dateKey, i - 3));
   const today = todayKey();
   const metaMap = new Map(metas.map((m) => [m.dateKey, m.snippet]));
+  const moodMap = new Map(metas.map((m) => [m.dateKey, m.mood]));
+  const hasEntry = (k: string) => !!metaMap.get(k) || moodMap.has(k);
   const badge = relBadge(dateKey);
 
   const step = (n: number) => setDateKey(mode === 'day' ? addDays(dateKey, n) : monthStartKey(dateKey, n));
@@ -169,7 +195,7 @@ export function DailyNotes() {
                 'cal-cell' +
                 (c.inMonth ? '' : ' out') +
                 (c.key === today ? ' today' : '') +
-                (metaMap.get(c.key) ? ' has' : '')
+                (hasEntry(c.key) ? ' has' : '')
               }
               onClick={() => {
                 setDateKey(c.key);
@@ -177,6 +203,9 @@ export function DailyNotes() {
               }}
             >
               <span className="cal-num">{c.day}</span>
+              {moodMap.get(c.key) != null && (
+                <span className="cal-mood" style={{ background: moodMeta(moodMap.get(c.key))?.color }} />
+              )}
               {metaMap.get(c.key) && <span className="cal-snippet">{metaMap.get(c.key)}</span>}
             </motion.button>
           ))}
@@ -195,7 +224,7 @@ export function DailyNotes() {
                       'day-pill' +
                       (k === dateKey ? ' sel' : '') +
                       (k === today ? ' today' : '') +
-                      (metaMap.get(k) ? ' has' : '')
+                      (hasEntry(k) ? ' has' : '')
                     }
                     initial={{ opacity: 0, scale: 0.82 }}
                     animate={{ opacity: 1, scale: 1 }}
@@ -209,7 +238,7 @@ export function DailyNotes() {
                     {k === dateKey && <motion.span layoutId="day-sel" className="day-sel" transition={spring} />}
                     <span className="dow">{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
                     <span className="num">{d.getDate()}</span>
-                    <span className="dot" />
+                    <span className="dot" style={moodMap.get(k) != null ? { background: moodMeta(moodMap.get(k))?.color } : undefined} />
                   </motion.button>
                 );
               })}
@@ -236,6 +265,10 @@ export function DailyNotes() {
                   year: 'numeric',
                 })}
               </div>
+              {/* Gated on `loaded` — creating the daily row from a mood pick before
+                  the fetch for this date resolves risks overwriting real content
+                  with `daily:create`'s empty default. See saveMood. */}
+              {loaded && <MoodPicker value={note?.props.mood} onPick={saveMood} />}
             </motion.div>
           </AnimatePresence>
 

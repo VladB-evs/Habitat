@@ -7,12 +7,14 @@ import { clientUid } from '../util';
 import { ApiSettings } from './ApiSettings';
 import { UpdateSettings } from './UpdateSettings';
 import { Automations } from './Automations';
+import { NavigationSettings } from './NavigationSettings';
 import { SyncSettings } from './SyncSettings';
 import { TelegramSettings } from './TelegramSettings';
 import { Icon } from './Icons';
 
 const TABS = [
   { id: 'general', label: 'General', icon: 'settings' },
+  { id: 'navigation', label: 'Navigation', icon: 'grid' },
   { id: 'sync', label: 'Sync', icon: 'waypoints' },
   { id: 'automations', label: 'Automations', icon: 'zap' },
   { id: 'capture', label: 'Capture', icon: 'message-circle' },
@@ -198,6 +200,8 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 </section>
               </>
             )}
+
+            {tab === 'navigation' && <NavigationSettings />}
 
             {tab === 'sync' && (
               <section className="set-sec">

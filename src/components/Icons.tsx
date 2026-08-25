@@ -155,6 +155,12 @@ import {
   LuLock,
   LuLockOpen,
   LuBringToFront,
+  LuHistory,
+  LuAngry,
+  LuFrown,
+  LuMeh,
+  LuLaugh,
+  LuCalendarClock,
 } from 'react-icons/lu';
 
 const UI: Record<string, IconType> = {
@@ -245,6 +251,12 @@ const UI: Record<string, IconType> = {
   sigma: LuSigma,
   copy: LuCopy,
   sparkles: LuSparkles,
+  history: LuHistory,
+  angry: LuAngry,
+  frown: LuFrown,
+  meh: LuMeh,
+  laugh: LuLaugh,
+  'calendar-clock': LuCalendarClock,
 };
 
 export function Icon({ name, size = 16, className }: { name: string; size?: number; className?: string }) {

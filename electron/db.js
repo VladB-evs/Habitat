@@ -1554,8 +1554,15 @@ const api = {
     const out = [];
 
     for (const row of db.prepare('SELECT * FROM objects').all()) {
-      // A tag is a label, never an appointment.
-      if (row.type_id === 'tag') continue;
+      // A tag is a label, never an appointment — and a daily note's `date_key`
+      // says which day its journal entry belongs to, not that it happened at a
+      // time, which is all the fallback below the two real date properties
+      // means. Without this every journal entry showed up on the month grid
+      // as an all-day "event" the same as a task or a real event.
+      // Events live on their own page now (see the `events:*` channels) — not
+      // mixed into the Tasks calendar, which is what type_id === 'event' would
+      // otherwise fall into via its own `startsAt`.
+      if (row.type_id === 'tag' || row.type_id === 'daily' || row.type_id === 'event') continue;
       const type = types.get(row.type_id);
       const obj = parseObj(row);
       const defs = [...(type ? type.properties : []), ...obj.extraProps];
@@ -1630,8 +1637,9 @@ const api = {
 
     const row = db.prepare('SELECT * FROM objects WHERE id = ?').get(id);
     if (!row) return null;
-    // A daily note is its date and a tag is only a label — neither is an appointment.
-    if (row.type_id === 'daily' || row.type_id === 'tag') return null;
+    // A daily note is its date, a tag is only a label, and an Event lives on its
+    // own page with its own editing — none of them belong to this grid.
+    if (row.type_id === 'daily' || row.type_id === 'tag' || row.type_id === 'event') return null;
 
     const type = getType(row.type_id);
     const obj = parseObj(row);
@@ -1959,11 +1967,112 @@ const api = {
       .map((r) => asContext(r, names));
   },
 
+  // `mood` rides along here (not just on `daily:get`) so a future "mood over
+  // time" view can read it straight off the same list every other daily-notes
+  // UI already fetches, rather than needing one request per day.
   'daily:list': () =>
     db
-      .prepare("SELECT id, date_key, content, updated_at FROM objects WHERE type_id = 'daily' ORDER BY date_key DESC")
+      .prepare("SELECT id, date_key, content, props, updated_at FROM objects WHERE type_id = 'daily' ORDER BY date_key DESC")
       .all()
-      .map((r) => ({ id: r.id, dateKey: r.date_key, snippet: snippet(r.content), updatedAt: r.updated_at })),
+      .map((r) => ({
+        id: r.id,
+        dateKey: r.date_key,
+        snippet: snippet(r.content),
+        updatedAt: r.updated_at,
+        mood: JSON.parse(r.props || '{}').mood,
+      })),
+
+  /**
+   * Events, from scratch. The previous design kept one row per series and
+   * expanded it into occurrences when read — the same trick Task's own
+   * recurrence still uses, and it works fine there because a todo has nothing
+   * to say beyond its title and whether it's done. An event needed one of its
+   * occurrences to carry its own notes without touching the rest of the
+   * series, and forking a row into existence the moment someone typed into it
+   * turned out to be unreliable in practice — a real write racing a virtual
+   * read is a hard problem, and it stayed buggy across more than one attempt.
+   *
+   * So a recurring event now materialises every occurrence as its own real
+   * row, up front, at creation time. Nothing is virtual and nothing forks:
+   * `startsAt`/`endsAt` are already that occurrence's own, and its body is
+   * already its own. They only share a `seriesId`, used purely to find the
+   * rest of the series for a bulk delete — see `events:deleteSeries`.
+   *
+   * An open-ended rule (no COUNT, no UNTIL) is capped a year out rather than
+   * materialised forever; `recur.occurrences` caps at 750 rows regardless, as
+   * a last line of defence against a rule that would otherwise ask for
+   * decades of daily rows in one go.
+   */
+  'events:create': ({ title = '', startsAt, endsAt = null, location = '', link = '', attendees = [], repeat = null, content = null } = {}) => {
+    ensureEventType();
+    const baseProps = {};
+    if (location) baseProps.location = String(location);
+    if (link) baseProps.link = String(link);
+    if (Array.isArray(attendees) && attendees.length) baseProps.attendees = attendees;
+
+    // `date_key` is not used here — it carries a vault-wide UNIQUE index built
+    // for one daily note per date, and a run of same-day event occurrences (or
+    // even just one event landing on a date a daily note already claimed)
+    // would collide with it. Events are found by `startsAt` instead.
+    const rule = recur.parseRule(repeat);
+    const startKey = readStamp(startsAt) ? String(startsAt).slice(0, 10) : null;
+
+    if (!rule || !startKey) {
+      const props = { ...baseProps };
+      if (startsAt) props.startsAt = startsAt;
+      if (endsAt) props.endsAt = endsAt;
+      return createObject({ typeId: EVENT_TYPE, title, props, content });
+    }
+
+    const horizon = rule.until || shiftDay(startKey, 366);
+    const dates = recur.occurrences(rule, startKey, startKey, horizon);
+    if (!dates.length) {
+      return createObject({ typeId: EVENT_TYPE, title, props: { ...baseProps, startsAt, endsAt }, content });
+    }
+
+    const seriesId = uid();
+    let first = null;
+    for (const dateKey of dates) {
+      const props = { ...baseProps, seriesId, seriesRule: repeat, startsAt: retimeStamp(startsAt, dateKey) };
+      if (endsAt) props.endsAt = retimeStamp(endsAt, dateKey);
+      const made = createObject({ typeId: EVENT_TYPE, title, props, content });
+      if (!first) first = made;
+    }
+    return first;
+  },
+
+  'events:list': () =>
+    db
+      .prepare("SELECT * FROM objects WHERE type_id = ? ORDER BY json_extract(props, '$.startsAt')")
+      .all(EVENT_TYPE)
+      .map((r) => parseObj(r)),
+
+  /**
+   * This occurrence and every later one in its series, gone — the touch-free
+   * way to clear out a recurring event instead of deleting rows one at a time.
+   * Without a series (a one-off event, or the `seriesId` already stripped)
+   * it's just the one row.
+   */
+  'events:deleteSeries': ({ id }) => {
+    const obj = getObj(id);
+    if (!obj || obj.typeId !== EVENT_TYPE) return { ok: false, count: 0 };
+    const seriesId = obj.props.seriesId;
+    if (!seriesId) {
+      deleteObject(id);
+      return { ok: true, count: 1 };
+    }
+    const from = obj.props.startsAt || '';
+    const rows = db.prepare('SELECT id, props FROM objects WHERE type_id = ?').all(EVENT_TYPE);
+    let count = 0;
+    for (const r of rows) {
+      const props = JSON.parse(r.props || '{}');
+      if (props.seriesId !== seriesId) continue;
+      if (from && props.startsAt && props.startsAt < from) continue;
+      deleteObject(r.id);
+      count++;
+    }
+    return { ok: true, count };
+  },
 
   'backlinks:list': (id) =>
     db
@@ -2053,7 +2162,9 @@ const api = {
     const events = new Map();
 
     for (const row of rows) {
-      if (row.type_id === 'daily' || row.type_id === 'tag') continue;
+      // Events are their own page now, not this one's "something that happens"
+      // fallback — that branch is what Meeting still uses.
+      if (row.type_id === 'daily' || row.type_id === 'tag' || row.type_id === 'event') continue;
       const type = types.get(row.type_id);
       const obj = parseObj(row);
       const defs = [...(type ? type.properties : []), ...obj.extraProps];
@@ -2946,6 +3057,11 @@ function migrate() {
       upd.run(JSON.stringify(props), JSON.stringify(nextExtra), row.id);
     }
   });
+
+  // Events again — rebuilt as their own type this time (see `events:create`),
+  // not a fold back into Task. Every vault gets it, the same way People and
+  // Tag are universal rather than tied to a flavor.
+  runOnce('event-type-v2', () => ensureEventType());
 }
 
 /** Run a one-time data migration, remembered in the kv table. */
@@ -3349,6 +3465,37 @@ function ensureTagType() {
     'tag', 'Tag', 'tag', '#eb6834', '[]', 1, 0, now()
   );
   return getType('tag');
+}
+
+// ---------- Events ----------
+//
+// A thing you need to go to or join — separate from Task on purpose (see
+// `events:create` below for why) and universal like People/Tag/Daily rather
+// than tied to a flavor, since "things on my calendar" isn't a work-only idea.
+
+const EVENT_TYPE = 'event';
+
+const EVENT_PROPS = [
+  { id: 'startsAt', name: 'Starts', kind: 'datetime' },
+  { id: 'endsAt', name: 'Ends', kind: 'datetime' },
+  { id: 'location', name: 'Where', kind: 'text' },
+  { id: 'link', name: 'Link', kind: 'url' },
+  { id: 'attendees', name: 'With', kind: 'relation', targetTypeId: PEOPLE_TYPE },
+];
+
+function ensureEventType() {
+  const existing = getType(EVENT_TYPE);
+  if (existing) return existing;
+  db.prepare('INSERT INTO types (id, name, emoji, color, properties, builtin, starred, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+    EVENT_TYPE, 'Event', 'calendar-days', '#4a3aa7', JSON.stringify(EVENT_PROPS), 1, 0, now()
+  );
+  return getType(EVENT_TYPE);
+}
+
+/** `YYYY-MM-DDTHH:mm` (optionally `:ss`) moved onto another day, time kept as-is. */
+function retimeStamp(value, dateKey) {
+  if (typeof value !== 'string' || value.length < 16) return value;
+  return dateKey + value.slice(10);
 }
 
 /**

@@ -116,10 +116,18 @@
 }
 
 /* The keyboard already takes the bottom of the screen; the home indicator is
-   behind it, so its inset would only be dead space. */
-:root[data-keyboard] .pane-action-slot,
-:root[data-keyboard] .drawer-fab {
+   behind it, so its inset would only be dead space. The bottom nav has nothing
+   to do while typing anyway — it hides outright, see below. */
+:root[data-keyboard] .pane-action-slot {
   bottom: 12px;
+}
+
+:root[data-keyboard] .pane-scroll {
+  padding-bottom: 0;
+}
+
+:root[data-keyboard] .pane:has(.pane-action-slot:not(:empty)) .pane-scroll {
+  padding-bottom: 74px;
 }
 
 /* ============================================================
@@ -141,23 +149,10 @@
   margin-top: 26px;
 }
 
-/* The dashboard's six-column widget grid, and the picker that fills it.
-
-   Row height goes automatic as well as the columns. Widgets carry a height in
-   92px row units chosen against a six-wide grid; at one column those units are
-   wrong, and a widget that was three units tall clips its own contents. Letting
-   the row size to the content — with the unit as a floor — keeps every widget
-   whole. The `span` in the inline style is overridden for the same reason. */
-:root[data-narrow] .dash-grid {
-  grid-template-columns: minmax(0, 1fr);
-  grid-auto-rows: minmax(92px, auto);
-}
-
-:root[data-narrow] .dash-grid > .w-wrap {
-  grid-column: 1 / -1 !important;
-  grid-row: auto !important;
-}
-
+/* The dashboard's two columns collapse into Dashboard.tsx's own single merged
+   list on a narrow window (see the `narrow` branch there) — there's no CSS
+   override to make here, the component just never renders `.dash-cols` at
+   this width. Only the picker (still a plain grid) needs one. */
 :root[data-narrow] .dash {
   padding: 0 14px 20px;
 }
@@ -176,8 +171,29 @@
 
 /* The agenda already stacks its backlog below 900px; it just needs the padding
    pulled in at phone width. */
+/* `.tasks-page` manages its own scrolling (`position:absolute; overflow:hidden`,
+   see styles.css) rather than deferring to `.pane-scroll`, so the general
+   bottom-nav padding added there doesn't reach here — this needs its own, or
+   the last day's own "add" row ends up under the floating pill and the bar
+   the same way the backlog itself used to. */
 :root[data-narrow] .ag-layout {
-  padding: 0 14px 20px;
+  padding: 0 14px calc(74px + var(--bottom-nav-h) + var(--safe-bottom));
+}
+
+/* No hover here to reveal the per-day "add" row with — on the desktop it
+   waits for that, narrow just always shows it. An *empty* day goes further
+   still and collapses its whole body to nothing until pointed at (so a long
+   empty stretch reads as a thin line, not a wall of "add something" prompts)
+   — that collapse is what was still hiding the row on every day except today,
+   which already had content and was never collapsed in the first place. */
+:root[data-narrow] .ag-task.add.quiet {
+  opacity: 1;
+}
+
+:root[data-narrow] .ag-day.empty .ag-day-body {
+  opacity: 1;
+  height: auto;
+  overflow: visible;
 }
 
 /* An object is mostly prose — it only needs its desktop margins back. */
@@ -253,9 +269,12 @@
 }
 
 /* Nothing may push the page sideways. Wide content — the database table above
-   all — scrolls inside its own box instead. */
+   all — scrolls inside its own box instead. The bottom padding is the bottom
+   nav's footprint: without it every page's last row sits half under the bar,
+   not just the ones that also float a page-action pill above it. */
 :root[data-narrow] .pane-scroll {
   overflow-x: hidden;
+  padding-bottom: calc(var(--bottom-nav-h) + var(--safe-bottom));
 }
 
 /* ---------- the database table becomes a list of cards ----------
@@ -387,14 +406,13 @@
    on the right. At 390px that row has nowhere to go — the controls were running
    off the edge with the New button half cut off.
 
-   So they become a second floating pill, matching the drawer button and sitting
-   beside it: same height, same corner radius, same shadow, same distance off the
-   bottom edge. Two floating things rather than one, because they answer two
-   different questions — the round one is "where do I go", this one is "what can
-   I do on this page".
+   So they become a floating pill of their own, riding just above the bottom
+   nav — full width now that it isn't sharing the corner with a round button
+   anymore, the way it did back when a FAB was the only way to navigate.
 
    It floats over the content rather than docking to the pane, so a page reads
-   full height and nothing is boxed in by a permanent strip.
+   full height and nothing is boxed in by a permanent strip beyond the nav bar
+   itself.
 
    One per pane, because panes stack: a single bar fixed to the window would
    belong to whichever page rendered last while sitting under the other one.
@@ -409,9 +427,8 @@
   position: absolute;
   z-index: 30;
   left: calc(12px + var(--safe-left));
-  /* Stops short of the drawer button rather than running under it. */
-  right: calc(70px + var(--safe-right));
-  bottom: calc(16px + var(--safe-bottom));
+  right: calc(12px + var(--safe-right));
+  bottom: calc(16px + var(--bottom-nav-h) + var(--safe-bottom));
   /* The gap either side of the pill is still page, not bar — clicks there must
      reach the content underneath. */
   pointer-events: none;
@@ -478,10 +495,12 @@
 }
 
 /* Floating means it covers the foot of the page, so the page ends above it —
-   otherwise the last row of a list is permanently under the pill. Only pages
-   that actually have one pay for the room. */
+   otherwise the last row of a list is permanently under the pill. Every pane
+   already reserves room for the bottom nav (see `.pane-scroll` above); a page
+   with its own pill on top of that needs the pill's height added in, not
+   swapped for it. */
 :root[data-narrow] .pane:has(.pane-action-slot:not(:empty)) .pane-scroll {
-  padding-bottom: 74px;
+  padding-bottom: calc(74px + var(--bottom-nav-h));
 }
 
 /* With the controls moved out, the header is a title and nothing else. */
@@ -547,26 +566,61 @@
   background: rgba(0, 0, 0, 0.38);
 }
 
-/* ---------- the drawer's button, in the thumb arc ----------
-   Bottom right, where the thumb already rests. There is no bottom navigation
-   bar on purpose: this plus the edge swipes covers it without spending any
-   permanent height on the smallest screen the app runs on. */
+/* ---------- the bottom nav ----------
+   Fixed-in-place navigation for a screen too narrow for the sidebar — a phone,
+   or an Electron window pinched thin (both set [data-narrow] identically). What
+   fills it is fully user-chosen (see src/bottomnav.ts and SettingsModal's
+   Navigation tab); this only draws whatever the current slots are.
 
-:root[data-narrow] .drawer-fab {
+   Absolute against `.app` rather than `fixed`, same reasoning as the drawer:
+   `.app` is already sized to `--vvh`, so anchoring here means the bar sits
+   right above the keyboard without knowing the keyboard exists. It hides
+   outright while typing instead — screen space is worth more than the bar is,
+   and everything it can reach is still reachable once you're done. */
+
+:root[data-narrow] {
+  --bottom-nav-h: 56px;
+}
+
+:root[data-narrow] .bottom-nav {
   position: absolute;
   z-index: 50;
-  right: calc(14px + var(--safe-right));
-  bottom: calc(16px + var(--safe-bottom));
-  width: 46px;
-  height: 46px;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
+  height: calc(var(--bottom-nav-h) + var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
+  background: var(--bg-2);
+  border-top: 1px solid var(--border);
+}
+
+:root[data-keyboard] .bottom-nav {
+  display: none;
+}
+
+.bn-item {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  border-radius: 23px;
-  color: var(--text);
-  background: var(--bg-2);
-  border: 1px solid var(--border-2);
-  box-shadow: var(--shadow);
+  gap: 3px;
+  color: var(--text-3);
+}
+
+.bn-item span {
+  max-width: 100%;
+  font-size: 10.5px;
+  font-weight: 550;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bn-item.on {
+  color: var(--accent);
 }
 
 /* ---------- edge gesture zones ----------

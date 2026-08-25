@@ -114,6 +114,14 @@ test('tags never appear, and a bad window returns nothing', () => {
   assert.deepEqual(range('nonsense', '2026-08-03'), []);
 });
 
+test('a daily journal entry never appears on the calendar', () => {
+  // Its `date_key` is which day the journal is for, not a datetime or date
+  // property — without the exclusion it fell through to that column and
+  // showed up as an all-day "event" on the month grid like a task or meeting.
+  api['daily:create']({ dateKey: '2026-08-09', content: null });
+  assert.ok(!range('2026-08-09', '2026-08-09').some((r) => r.typeId === 'daily'));
+});
+
 // ---------- moving and creating from the grid ----------
 
 const move = (p) => api['calendar:reschedule'](p);
@@ -242,9 +250,7 @@ test('a start time is not rolled forward the way a missed due date is', () => {
 
 // ---------- repeating ----------
 
-test('a Task is where and who with now too, and there is no separate Event', () => {
-  assert.equal(api['types:list']().find((t) => t.id === 'event'), undefined, 'Event folded into Task');
-
+test('a Task is where and who with now too — those fields stayed on it even after Event came back as its own type', () => {
   const task = api['types:list']().find((t) => t.id === 'task');
   const tids = task.properties.map((p) => p.id);
   for (const id of ['status', 'due', 'startsAt', 'duration', 'repeat', 'endsAt', 'location', 'link', 'attendees'])

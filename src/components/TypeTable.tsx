@@ -159,11 +159,22 @@ function QuickAdd({
  * A type's own page: its objects in whichever view is set, with the filters,
  * sorting and templates that belong to the type.
  *
- * `embedded` drops the page header — the Tasks page shows this as one of its
- * modes and already has a header of its own, but the view bar underneath still
- * belongs to the table.
+ * `embedded` drops the page header and pins the view to a single mode with no
+ * mode switcher — the Tasks page shows this as one of its own modes, already
+ * has a header (and an agenda and a calendar) of its own, and showing a second
+ * set of view buttons underneath was just noise on top of noise.
  */
-export function TypeTable({ typeId, embedded = false }: { typeId: string; embedded?: boolean }) {
+export function TypeTable({
+  typeId,
+  embedded = false,
+  embeddedMode = 'table',
+}: {
+  typeId: string;
+  embedded?: boolean;
+  /** Which single view an embedded table is pinned to — the Tasks page uses
+   *  'board' for its own Board tab, everything else still gets a plain table. */
+  embeddedMode?: ViewMode;
+}) {
   const { types, reloadTypes, openObject, openFrom, openBeside, navigate, theme } = useApp();
   const type = types.find((t) => t.id === typeId);
   const [objs, setObjs] = useState<Obj[]>([]);
@@ -248,10 +259,14 @@ export function TypeTable({ typeId, embedded = false }: { typeId: string; embedd
   const open = (list: Obj[]) => (hidingDone ? list.filter((o) => !isDone(o)) : list);
   const visible = open(sorted);
 
-  const modes = availableModes(type, fields, doneProp);
+  // Embedded is only ever the Tasks page's own "Table" tab — it already has an
+  // agenda and a calendar of its own, so the one thing this instance should
+  // ever be is a plain table, with no second mode-switcher fighting the one
+  // above it for the same job.
+  const modes = embedded ? ([embeddedMode] as ViewMode[]) : availableModes(type, fields, doneProp);
   // Until one is picked the type's shape decides: anything task-shaped opens as a
   // checklist. A saved mode can also stop being available, if its property went away.
-  const mode: ViewMode = view.mode && modes.includes(view.mode) ? view.mode : doneProp ? 'checklist' : 'table';
+  const mode: ViewMode = embedded ? embeddedMode : view.mode && modes.includes(view.mode) ? view.mode : doneProp ? 'checklist' : 'table';
 
   const selectProps = type.properties.filter((p) => p.kind === 'select');
   const groupProp = selectProps.find((p) => p.id === view.groupBy) ?? selectProps[0];
@@ -1076,7 +1091,7 @@ export function TypeTable({ typeId, embedded = false }: { typeId: string; embedd
 
       {datePrompt && (
         <motion.div
-          className="palette-backdrop"
+          className="palette-backdrop date-backdrop"
           onMouseDown={(e) => e.target === e.currentTarget && setDatePrompt(null)}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}

@@ -4,7 +4,7 @@ import { objectChanged, onObjectChanged } from '../objects';
 import { useLayout } from '../layout';
 import { useApp } from '../store';
 import type { CalEntry, ObjType } from '../types';
-import { addDays, fmtMonthYear, keyOf, todayKey, typeColor } from '../util';
+import { addDays, fmtMonthYear, keyOf, monthCells, monthStartKey, todayKey, typeColor } from '../util';
 import { Icon } from './Icons';
 import { RepeatField } from './RepeatField';
 import { SplitControls } from './SplitControls';
@@ -106,35 +106,42 @@ function layout(entries: CalEntry[]) {
  * so the Tasks page can put the controls in its own header while the grid, the
  * arrows and the Today button all still move together.
  */
+export type CalMode = 'day' | 'week' | 'month';
+
 export interface CalendarNav {
-  mode: 'day' | 'week';
-  setMode: (m: 'day' | 'week') => void;
+  mode: CalMode;
+  setMode: (m: CalMode) => void;
   anchor: string;
   setAnchor: (key: string) => void;
-  /** Forward or back by one day or one week, whichever is being shown. */
+  /** Forward or back by one day, one week or one month, whichever is being shown. */
   step: (n: number) => void;
 }
 
 export function useCalendarNav(): CalendarNav {
   const { narrow } = useLayout();
-  const [saved, setModeState] = useState<'day' | 'week'>(
-    () => (localStorage.getItem('habitat:cal-mode') as 'day' | 'week') || 'week'
+  const [saved, setModeState] = useState<CalMode>(
+    () => (localStorage.getItem('habitat:cal-mode') as CalMode) || 'week'
   );
   /**
    * Seven columns of a 390px screen are 50px each — narrower than the text of a
-   * single event. A phone gets the day view whatever the saved preference says,
-   * and the preference is left alone so the desktop still opens on the week you
-   * chose.
+   * single event. A phone gets the day view instead of the week, whatever the
+   * saved preference says, and the preference is left alone so the desktop
+   * still opens on the week you chose. Month doesn't have that problem — it
+   * was never going to fit event text either way, so it's already just dots —
+   * and stays available.
    */
-  const mode = narrow ? 'day' : saved;
+  const mode = narrow && saved === 'week' ? 'day' : saved;
   const [anchor, setAnchor] = useState(todayKey());
 
-  const setMode = (m: 'day' | 'week') => {
+  const setMode = (m: CalMode) => {
     setModeState(m);
     localStorage.setItem('habitat:cal-mode', m);
   };
 
-  return { mode, setMode, anchor, setAnchor, step: (n) => setAnchor(addDays(anchor, mode === 'week' ? n * 7 : n)) };
+  const step = (n: number) =>
+    setAnchor(mode === 'month' ? monthStartKey(anchor, n) : addDays(anchor, mode === 'week' ? n * 7 : n));
+
+  return { mode, setMode, anchor, setAnchor, step };
 }
 
 /**
@@ -171,17 +178,19 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
   const justDragged = useRef(false);
 
   const days = useMemo(() => (mode === 'week' ? weekDays(anchor) : [anchor]), [mode, anchor]);
+  // The month grid always shows 42 cells, including the tail of the previous
+  // month and the head of the next — entries for those need fetching too, or
+  // the edge weeks would look empty even when they aren't.
+  const monthCellsList = useMemo(() => (mode === 'month' ? monthCells(anchor) : []), [mode, anchor]);
+  const rangeStart = mode === 'month' ? monthCellsList[0].key : days[0];
+  const rangeEnd = mode === 'month' ? monthCellsList[monthCellsList.length - 1].key : days[days.length - 1];
   const colorOf = (typeId: string) => typeColor(types.find((t) => t.id === typeId)?.color, theme);
 
-  const reload = useMemo(
-    () => () => api.calendar(days[0], days[days.length - 1]).then(setEntries),
-    [days]
-  );
+  const reload = useMemo(() => () => api.calendar(rangeStart, rangeEnd).then(setEntries), [rangeStart, rangeEnd]);
 
   useEffect(() => {
     let alive = true;
-    const load = () =>
-      api.calendar(days[0], days[days.length - 1]).then((r) => alive && setEntries(r));
+    const load = () => api.calendar(rangeStart, rangeEnd).then((r) => alive && setEntries(r));
     load();
     // Ticking a task or moving a meeting elsewhere shows up here too.
     const off = onObjectChanged(load);
@@ -189,7 +198,7 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
       alive = false;
       off();
     };
-  }, [days]);
+  }, [rangeStart, rangeEnd]);
 
   // One set of window listeners for the whole gesture: the pointer routinely leaves
   // the element it went down on — that's the entire point of dragging.
@@ -372,6 +381,9 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
             <button className={mode === 'week' ? 'on' : ''} onClick={() => setModeSaved('week')}>
               Week
             </button>
+            <button className={mode === 'month' ? 'on' : ''} onClick={() => setModeSaved('month')}>
+              Month
+            </button>
           </div>
           <button className="icon-btn" onClick={() => step(-1)} aria-label="Previous">
             <Icon name="chevron-left" />
@@ -387,6 +399,54 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
       </div>
       )}
 
+      {mode === 'month' ? (
+        <div className="cal-scroll">
+          <div className="cal-grid">
+            {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => (
+              <div key={d} className="cal-dow">
+                {d}
+              </div>
+            ))}
+            {monthCellsList.map((c) => {
+              // Sorted so a timed entry leads and an all-day one doesn't crowd
+              // out the actual schedule for the day.
+              const dayEntries = entries
+                .filter((e) => e.dayKey === c.key)
+                .sort((a, b) => (a.startMinute ?? DAY_MINUTES) - (b.startMinute ?? DAY_MINUTES));
+              const shownEntries = dayEntries.slice(0, 3);
+              const more = dayEntries.length - shownEntries.length;
+              return (
+                <button
+                  key={c.key}
+                  className={'cal-cell' + (c.inMonth ? '' : ' out') + (c.key === todayKey() ? ' today' : '')}
+                  onClick={() => {
+                    setAnchor(c.key);
+                    setModeSaved('day');
+                  }}
+                >
+                  <span className="cal-num">{c.day}</span>
+                  {dayEntries.length > 0 && (
+                    <div className="cal-cell-chips">
+                      {shownEntries.map((e) => (
+                        <span
+                          key={e.id + e.dayKey}
+                          className={'cal-chip' + (e.done ? ' done' : '')}
+                          style={{ ['--c' as any]: colorOf(e.typeId) }}
+                        >
+                          {e.title}
+                        </span>
+                      ))}
+                      {more > 0 && <span className="cal-more">+{more} more</span>}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {entries.length === 0 && <div className="empty cal-empty">Nothing scheduled this month.</div>}
+        </div>
+      ) : (
+        <>
       <div className="cal-head" style={{ ['--cal-days' as any]: days.length }}>
         <div className="cal-gutter-head" />
         {days.map((d) => {
@@ -524,6 +584,8 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
         <div className="empty cal-empty">
           Nothing scheduled yet — drag anywhere on the grid to make something, or give a Task a <b>Starts</b> time.
         </div>
+      )}
+        </>
       )}
     </div>
   );

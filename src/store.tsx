@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { api } from './api';
+import type { NavKey } from './bottomnav';
+import { loadNav, saveNav } from './bottomnav';
 import { useLayout } from './layout';
 import type { ObjType } from './types';
 import { clientUid } from './util';
@@ -10,6 +12,9 @@ export type View =
   | { kind: 'daily' }
   /** Tasks and the calendar are one page: two ways of reading the same things. */
   | { kind: 'tasks' }
+  /** Meetings, flights, anything you need to go to or join — its own page, not
+   *  Tasks. See EventsPage.tsx. */
+  | { kind: 'events' }
   /** No id is the gallery of boards; an id is one board, open. */
   | { kind: 'canvas'; id?: string }
   | { kind: 'study' }
@@ -63,6 +68,10 @@ interface AppCtx {
   retarget: (id: string) => void;
   theme: string;
   setTheme: (t: string) => void;
+  /** What appears in the bottom bar on a narrow window, in order. Persisted, and
+   *  edited from Settings' Navigation tab rather than from the bar itself. */
+  bottomNav: NavKey[];
+  setBottomNav: (keys: NavKey[]) => void;
 }
 
 const Ctx = createContext<AppCtx>(null!);
@@ -74,6 +83,7 @@ function initialView(): View {
   if (h.startsWith('/daily')) return { kind: 'daily' };
   // /calendar is where the calendar used to live, and links to it still work.
   if (h.startsWith('/tasks') || h.startsWith('/calendar')) return { kind: 'tasks' };
+  if (h.startsWith('/events')) return { kind: 'events' };
   if (h.startsWith('/canvas/')) return { kind: 'canvas', id: h.slice(8) };
   if (h.startsWith('/canvas')) return { kind: 'canvas' };
   if (h.startsWith('/deck/')) return { kind: 'deck', id: h.slice(6) };
@@ -93,6 +103,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dir, setDir] = useState<SplitDir>('row');
   const [active, setActive] = useState(0);
   const [theme, setThemeState] = useState<string>(() => localStorage.getItem('habitat:theme') || 'dark');
+  const [bottomNav, setBottomNavState] = useState<NavKey[]>(loadNav);
 
   const pane = panes[Math.min(active, panes.length - 1)];
   const view = pane.stack[pane.stack.length - 1];
@@ -220,6 +231,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
 
+  const setBottomNav = useCallback((keys: NavKey[]) => {
+    setBottomNavState(keys);
+    saveNav(keys);
+  }, []);
+
   return (
     <Ctx.Provider
       value={{
@@ -243,6 +259,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         retarget,
         theme,
         setTheme,
+        bottomNav,
+        setBottomNav,
       }}
     >
       {children}

@@ -7,6 +7,7 @@ const CHANNELS = new Set([
   'templates:list', 'templates:get', 'templates:create', 'templates:update', 'templates:delete',
   'tasks:forDay', 'tasks:setDone', 'agenda:range', 'calendar:range', 'calendar:reschedule', 'calendar:create', 'calendar:skip',
   'daily:get', 'daily:create', 'daily:list',
+  'events:create', 'events:list', 'events:deleteSeries',
   'backlinks:list', 'stats:get',
   'canvas:list', 'canvas:create', 'canvas:get', 'canvas:patch', 'canvas:delete',
   'canvas:addItems', 'canvas:moveItems', 'canvas:patchItem', 'canvas:removeItems', 'canvas:order',

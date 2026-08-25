@@ -415,6 +415,24 @@ export interface DailyMeta {
   dateKey: string;
   snippet: string;
   updatedAt: number;
+  /** 1 (Awful) through 5 (Great) — undefined where that day never got one.
+   *  Carried here, not just on the full object, so a future mood-over-time
+   *  graph can read it straight off `daily:list` like everything else does. */
+  mood?: number;
+}
+
+/** What `events:create` takes. `repeat` is the same RRULE-ish string RepeatField
+ *  already writes for Task — set, it materialises one independent object per
+ *  occurrence instead of a single row with a rule on it (see db.js). */
+export interface NewEvent {
+  title: string;
+  startsAt: string;
+  endsAt?: string | null;
+  location?: string;
+  link?: string;
+  attendees?: string[];
+  repeat?: string | null;
+  content?: any;
 }
 
 export interface TagObj extends Obj {
@@ -602,10 +620,15 @@ export interface UserVar {
 export interface DashWidget {
   id: string;
   kind: string;
-  w: number;
-  h: number;
+  /** 0 = left column, 1 = right. Ignored on a narrow window, where every
+   *  widget stacks into one reorderable list regardless of which column it's
+   *  in — the column split only matters once there's room for two. */
+  col: number;
   config: Record<string, any>;
-  /** Pre-grid layouts stored a 'small' | 'medium' | 'large' width — migrated on load. */
+  /** Pre-column layouts stored a grid width/height (or, earlier still, a
+   *  'small' | 'medium' | 'large' size) — migrated on load, see normalize(). */
+  w?: number;
+  h?: number;
   size?: string;
 }
 

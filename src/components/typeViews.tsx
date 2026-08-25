@@ -103,6 +103,10 @@ export function BoardView({
   onAdd: (value: string | null) => void;
 }) {
   const [over, setOver] = useState<string | null>(null);
+  // Native drag leaves the source element exactly where it was — without this,
+  // a picked-up card looked duplicated: the real one sitting untouched in its
+  // column plus the browser's own translucent drag image following the cursor.
+  const [draggingId, setDraggingId] = useState<string | null>(null);
   const columns: (string | null)[] = [...(prop.options ?? []), null];
   const inColumn = (value: string | null) =>
     objs.filter((o) => {
@@ -147,12 +151,14 @@ export function BoardView({
               {rows.map((o) => (
                 <div
                   key={o.id}
-                  className="board-card"
+                  className={'board-card' + (draggingId === o.id ? ' dragging' : '')}
                   draggable
                   onDragStart={(e) => {
                     e.dataTransfer.setData('text/habitat-obj', o.id);
                     e.dataTransfer.effectAllowed = 'move';
+                    setDraggingId(o.id);
                   }}
+                  onDragEnd={() => setDraggingId(null)}
                   onClick={(e) => onOpen(e, o.id)}
                 >
                   <div className="board-card-title">{o.title || 'Untitled'}</div>

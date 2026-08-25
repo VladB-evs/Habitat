@@ -1,24 +1,30 @@
 import { useCallback, useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import { api } from '../api';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useLayout } from '../layout';
+import { dialogIn, snap } from '../motion';
 import { useApp } from '../store';
 import type { Agenda, AgendaTask } from '../types';
 import { fmtMonthYear, todayKey } from '../util';
 import { Backlog, DaySection, TaskLine } from './Agenda';
 import { CalendarView, useCalendarNav } from './CalendarView';
+import { DateField } from './DateField';
 import { Icon } from './Icons';
 import { SplitControls } from './SplitControls';
 import { PageActions } from './PageActions';
+import { Sheet } from './Sheet';
 import { TypeTable } from './TypeTable';
 
-type Mode = 'agenda' | 'calendar' | 'table';
+type Mode = 'agenda' | 'calendar' | 'board';
 
 const MODES: [Mode, string, string][] = [
   ['agenda', 'Agenda', 'list'],
   ['calendar', 'Calendar', 'clock'],
-  ['table', 'Table', 'table'],
+  ['board', 'Board', 'columns'],
 ];
+
+const isMode = (v: string | null): v is Mode => v === 'agenda' || v === 'calendar' || v === 'board';
 
 /** Three weeks ahead: far enough to plan around, short enough to scroll. */
 const HORIZON = 21;
@@ -38,9 +44,21 @@ const nothing: Agenda = { days: [], overdue: [], backlog: [] };
 export function TasksPage() {
   const { navigate } = useApp();
   const { narrow } = useLayout();
-  const [mode, setMode] = useState<Mode>(() => (localStorage.getItem('habitat:tasks-mode') as Mode) || 'agenda');
+  // A stale 'table' from before Board replaced it (or anything else unrecognised)
+  // falls back to Agenda rather than rendering nothing.
+  const [mode, setMode] = useState<Mode>(() => {
+    const saved = localStorage.getItem('habitat:tasks-mode');
+    return isMode(saved) ? saved : 'agenda';
+  });
   const [agenda, setAgenda] = useState<Agenda>(nothing);
-  const [showDone, setShowDone] = useState(false);
+  /** The touch-friendly "Schedule for" dialog a backlog task's own button
+   *  opens — see Agenda.tsx's Backlog and TaskLine `moveAction`. */
+  const [scheduling, setScheduling] = useState<{ id: string; value: string } | null>(null);
+  /** On a narrow window the backlog moves into its own sheet instead of
+   *  stacking under the days — stacked, it sat right where the bottom nav and
+   *  the floating action pill both cover, so its own last rows and the
+   *  "add" input were physically unreachable no matter how the page scrolled. */
+  const [backlogOpen, setBacklogOpen] = useState(false);
   const nav = useCalendarNav();
 
   const pick = (m: Mode) => {
@@ -94,13 +112,59 @@ export function TasksPage() {
     navigate({ kind: 'object', id: made.id });
   };
 
-  const visible = (list: AgendaTask[]) => list.filter((t) => showDone || !t.done);
+  const visible = (list: AgendaTask[]) => list.filter((t) => !t.done);
   const days = agenda.days.map((d) => ({
     ...d,
     tasks: visible(d.tasks),
     events: d.events.map((e) => ({ ...e, tasks: visible(e.tasks) })),
   }));
   const left = agenda.days.reduce((n, d) => n + d.tasks.filter((t) => !t.done).length, 0) + agenda.overdue.length;
+  const backlogTasks = visible(agenda.backlog);
+  const backlogCount = backlogTasks.length;
+
+  /**
+   * Split out so it can render in two different places: inline in the
+   * floating action pill on a wide window, or in its own row under the title
+   * on a narrow one. Calendar mode alone was crowding that pill with a month
+   * label, a Day/Week/Month switch, three step buttons, *and* the page's own
+   * Agenda/Calendar/Board switch and Add button all fighting for one
+   * horizontally-scrolling strip — this is the half of it that isn't really
+   * an "action" so much as it's telling you which day you're looking at.
+   */
+  const calNav = mode === 'calendar' && (
+    <>
+      <span className="month-label cal-when">
+        {nav.mode === 'day'
+          ? new Date(nav.anchor + 'T12:00:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
+          : fmtMonthYear(nav.anchor)}
+      </span>
+      <div className="seg mini">
+        <button className={nav.mode === 'day' ? 'on' : ''} onClick={() => nav.setMode('day')}>
+          Day
+        </button>
+        {/* A phone only ever gets the day view in place of the week — seven
+            50px columns are narrower than the text of a single event — but
+            month has no such problem, so it stays. */}
+        {!narrow && (
+          <button className={nav.mode === 'week' ? 'on' : ''} onClick={() => nav.setMode('week')}>
+            Week
+          </button>
+        )}
+        <button className={nav.mode === 'month' ? 'on' : ''} onClick={() => nav.setMode('month')}>
+          Month
+        </button>
+      </div>
+      <button className="icon-btn" onClick={() => nav.step(-1)} aria-label="Previous">
+        <Icon name="chevron-left" />
+      </button>
+      <button className="today-btn" onClick={() => nav.setAnchor(todayKey())}>
+        Today
+      </button>
+      <button className="icon-btn" onClick={() => nav.step(1)} aria-label="Next">
+        <Icon name="chevron-right" />
+      </button>
+    </>
+  );
 
   return (
     <div className="page tasks-page">
@@ -115,44 +179,16 @@ export function TasksPage() {
 
         <PageActions>
         <div className="page-actions">
-          {mode === 'calendar' && (
-            <>
-              <span className="month-label cal-when">
-                {nav.mode === 'day'
-                  ? new Date(nav.anchor + 'T12:00:00').toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
-                  : fmtMonthYear(nav.anchor)}
-              </span>
-              {/* A phone only ever gets the day view, so there is no switch to
-                  offer — see useCalendarNav. */}
-              {!narrow && (
-                <div className="seg mini">
-                  <button className={nav.mode === 'day' ? 'on' : ''} onClick={() => nav.setMode('day')}>
-                    Day
-                  </button>
-                  <button className={nav.mode === 'week' ? 'on' : ''} onClick={() => nav.setMode('week')}>
-                    Week
-                  </button>
-                </div>
-              )}
-              <button className="icon-btn" onClick={() => nav.step(-1)} aria-label="Previous">
-                <Icon name="chevron-left" />
-              </button>
-              <button className="today-btn" onClick={() => nav.setAnchor(todayKey())}>
-                Today
-              </button>
-              <button className="icon-btn" onClick={() => nav.step(1)} aria-label="Next">
-                <Icon name="chevron-right" />
-              </button>
-            </>
-          )}
+          {!narrow && calNav}
 
-          {mode === 'agenda' && (
-            <button
-              className={'btn subtle' + (showDone ? ' on' : '')}
-              onClick={() => setShowDone((v) => !v)}
-              title={showDone ? 'Hide what is done' : 'Show what is done'}
-            >
-              <Icon name="check" size={13} /> Done
+          {/* On a wide window the backlog sits beside the days, always visible.
+              Narrow has no room for that, and stacking it below the days put its
+              own last rows behind the bottom nav and this very pill with no way
+              to scroll past them — a sheet gives it the room instead. */}
+          {narrow && mode === 'agenda' && (
+            <button className="btn subtle" onClick={() => setBacklogOpen(true)}>
+              <Icon name="list" size={13} /> Backlog
+              {backlogCount > 0 && <span className="count-badge">{backlogCount}</span>}
             </button>
           )}
 
@@ -173,6 +209,8 @@ export function TasksPage() {
         </PageActions>
       </header>
 
+      {narrow && calNav && <div className="tasks-cal-nav">{calNav}</div>}
+
       {mode === 'agenda' && (
         <div className="ag-layout">
           <div className="ag-days">
@@ -184,7 +222,12 @@ export function TasksPage() {
                 </header>
                 <div className="ag-day-body">
                   {agenda.overdue.map((t) => (
-                    <TaskLine key={t.id} task={t} onToggle={toggle} />
+                    <TaskLine
+                      key={t.id}
+                      task={t}
+                      onToggle={toggle}
+                      moveAction={{ icon: 'list', label: 'Move to backlog', onClick: () => unschedule(t.id) }}
+                    />
                   ))}
                 </div>
               </section>
@@ -197,21 +240,80 @@ export function TasksPage() {
                 onToggle={toggle}
                 onDrop={drop}
                 onAdd={(dayKey, title) => addTask(title, { due: dayKey })}
+                onUnschedule={unschedule}
               />
             ))}
           </div>
 
-          <Backlog
-            tasks={visible(agenda.backlog)}
-            onToggle={toggle}
-            onAdd={(title) => addTask(title)}
-            onClear={unschedule}
-          />
+          {!narrow && (
+            <Backlog
+              tasks={backlogTasks}
+              onToggle={toggle}
+              onAdd={(title) => addTask(title)}
+              onClear={unschedule}
+              onSchedule={(id) => setScheduling({ id, value: todayKey() })}
+            />
+          )}
         </div>
       )}
 
       {mode === 'calendar' && <CalendarView chrome={false} nav={nav} />}
-      {mode === 'table' && <TypeTable typeId="task" embedded />}
+      {mode === 'board' && <TypeTable typeId="task" embedded embeddedMode="board" />}
+
+      {narrow && (
+        <Sheet open={backlogOpen} onClose={() => setBacklogOpen(false)}>
+          <Backlog
+            tasks={backlogTasks}
+            onToggle={toggle}
+            onAdd={(title) => addTask(title)}
+            onClear={unschedule}
+            onSchedule={(id) => {
+              setBacklogOpen(false);
+              setScheduling({ id, value: todayKey() });
+            }}
+            // Picking a task up to drag it is the same signal as picking
+            // "Schedule" — either way you're about to give it a day, and the
+            // days themselves are sitting right behind this sheet, covered by
+            // it. Closing on pickup (rather than on drop) is what makes them
+            // droppable at all instead of just visible once you let go.
+            onDragStart={() => setBacklogOpen(false)}
+          />
+        </Sheet>
+      )}
+
+      {scheduling && (
+        <motion.div
+          className="palette-backdrop date-backdrop"
+          onMouseDown={(e) => e.target === e.currentTarget && setScheduling(null)}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={snap}
+        >
+          <motion.div className="date-prompt" variants={dialogIn} initial="hidden" animate="shown">
+            <h3>Schedule for</h3>
+            <DateField
+              value={scheduling.value}
+              placeholder="Pick a day…"
+              onChange={(v) => setScheduling({ ...scheduling, value: v ?? '' })}
+            />
+            <div className="popover-actions">
+              <button className="btn subtle" onClick={() => setScheduling(null)}>
+                Cancel
+              </button>
+              <button
+                className="btn primary"
+                disabled={!scheduling.value}
+                onClick={() => {
+                  drop(scheduling.id, scheduling.value, null);
+                  setScheduling(null);
+                }}
+              >
+                Schedule
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
     </div>
   );
 }
