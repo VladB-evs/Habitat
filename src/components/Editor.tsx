@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Extension } from '@tiptap/core';
+import { TextSelection } from '@tiptap/pm/state';
 import { EditorContent, ReactNodeViewRenderer, useEditor } from '@tiptap/react';
 import type { Editor as EditorType } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -29,6 +30,7 @@ import { loadEmoji } from '../emoji';
 import { SlashCommands } from '../slash';
 import { TagMention } from '../tagMention';
 import { Media, storeFiles } from '../media';
+import { Spoiler } from '../spoiler';
 import { isSafeUrl, linkify, openLink } from '../links';
 import { CodeBlockView } from './CodeBlockView';
 import { MathBar } from './MathBar';
@@ -47,6 +49,18 @@ import { TableMenu } from './TableMenu';
  * a TipTap chain dispatches its transaction even when a later command in it
  * comes back false, and returning false then lets the list's own Enter run on
  * the state from before the lift — which is what used to put the bullet back.
+ *
+ * A second Backspace, right after the first lifted the line out of its list,
+ * needs its own care. By then the line is ordinary text again, so this
+ * shortcut has nothing left to lift and steps aside — but ProseMirror's own
+ * Backspace doesn't just join it to the line above the way it would for any
+ * other pair of blocks: finding a list there, it wraps the line in a *new*
+ * list item and appends it, so the bullet reappears with the old line's text
+ * tacked onto the list instead of merged into it. `joinTextblockBackward`
+ * looks like the fix but bails whenever the two lines sit at different
+ * depths, which is exactly this case — the line is top-level, the list's
+ * last line is nested inside it — so the merge is done by hand instead:
+ * drop the line's text at the end of the list's last line and remove it.
  */
 const ExitList = Extension.create({
   name: 'exitList',
@@ -74,10 +88,41 @@ const ExitList = Extension.create({
       Enter: ({ editor }) => editor.state.selection.$from.parent.content.size === 0 && lift(editor),
       Backspace: ({ editor }) => {
         const { empty, $from } = editor.state.selection;
-        // Only from the very start of an item's first line — anywhere else
-        // Backspace is ordinary editing, and joining into the item above is right.
-        if (!empty || $from.parentOffset !== 0 || $from.index($from.depth - 1) !== 0) return false;
-        return lift(editor);
+        if (!empty || $from.parentOffset !== 0) return false;
+
+        if (itemKind(editor)) {
+          // Only from the very start of an item's first line — anywhere else
+          // Backspace is ordinary editing, and joining into the item above is right.
+          if ($from.index($from.depth - 1) !== 0) return false;
+          return lift(editor);
+        }
+
+        // Not in a list — but if the line right above is one, merge into its
+        // last line by hand instead of leaving it to ProseMirror's default,
+        // which would wrap this line back into a new list item. See the class comment.
+        const cut = $from.before($from.depth);
+        const before = $from.doc.resolve(cut).nodeBefore;
+        if (!before || !['bulletList', 'orderedList', 'taskList'].includes(before.type.name)) return false;
+
+        return editor.commands.command(({ tr, dispatch }) => {
+          // Walk down the list's last branch to the end of its last line —
+          // one position in from `cut` for every level of nesting crossed.
+          let end = cut - 1;
+          let node = before;
+          while (!node.isTextblock) {
+            const child = node.lastChild;
+            if (!child) return false;
+            node = child;
+            end -= 1;
+          }
+          if (dispatch) {
+            tr.delete(cut, $from.after($from.depth));
+            tr.insert(end, $from.parent.content);
+            tr.setSelection(TextSelection.create(tr.doc, end));
+            dispatch(tr.scrollIntoView());
+          }
+          return true;
+        });
       },
       Escape: leave,
     };
@@ -255,6 +300,7 @@ export function Editor({
       Color,
       Highlight.configure({ multicolor: true }),
       Underline,
+      Spoiler,
       /**
        * Links open through the main process, never in this window, so a note can
        * never navigate the app away from itself. `validate` is the gate on what a

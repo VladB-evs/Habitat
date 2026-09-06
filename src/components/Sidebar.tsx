@@ -7,7 +7,7 @@ import { useLayout } from '../layout';
 import { softSpring, spring } from '../motion';
 import { useApp } from '../store';
 import type { SettingsInfo } from '../types';
-import { PEOPLE_TYPE, typeColor, TYPE_PALETTE } from '../util';
+import { MEDIA_TYPE, PEOPLE_TYPE, typeColor, TYPE_PALETTE } from '../util';
 import { NewHabitatModal } from './Habitats';
 import { Icon, TypeIcon } from './Icons';
 import { ColorPicker, IconPicker } from './TypeEditor';
@@ -102,8 +102,8 @@ export function Sidebar({
   const [showNewHabitat, setShowNewHabitat] = useState(false);
   const [habMenu, setHabMenu] = useState(false);
   const [info, setInfo] = useState<SettingsInfo | null>(null);
-  // Daily notes, tasks, people and tags all have their own nav entries above.
-  const upstairs = new Set(['daily', 'tag', 'task', 'event', PEOPLE_TYPE]);
+  // Daily notes, tasks, people, media and tags all have their own nav entries above.
+  const upstairs = new Set(['daily', 'tag', 'task', 'event', PEOPLE_TYPE, MEDIA_TYPE]);
   const visibleTypes = types.filter((t) => !upstairs.has(t.id));
 
   useEffect(() => {
@@ -197,6 +197,7 @@ export function Sidebar({
           <NavItem icon="circle-check" label="Tasks" active={view.kind === 'tasks'} onClick={() => navigate({ kind: 'tasks' })} />
           <NavItem icon="calendar-clock" label="Events" active={view.kind === 'events'} onClick={() => navigate({ kind: 'events' })} />
           <NavItem icon="people" label="People" active={view.kind === 'people'} onClick={() => navigate({ kind: 'people' })} />
+          <NavItem icon="film" label="Media" active={view.kind === 'media'} onClick={() => navigate({ kind: 'media' })} />
           <NavItem icon="hash" label="Tags" active={view.kind === 'tags'} onClick={() => navigate({ kind: 'tags' })} />
           {/* Boards are desktop-only — see the note in PaneView. */}
           {!narrow && (

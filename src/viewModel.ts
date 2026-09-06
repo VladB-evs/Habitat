@@ -57,9 +57,40 @@ export interface TypeView {
   dateField?: string;
   /** Task-shaped types only: keep finished work out of every view. */
   hideDone?: boolean;
+  /** Table: pixel width per column, keyed by property id or TITLE_FIELD. */
+  widths?: Record<string, number>;
+  /** Table: property ids in the order their columns are shown. */
+  columnOrder?: string[];
+  /** Object ids in the order they were dragged into, used when nothing is sorted. */
+  rowOrder?: string[];
 }
 
 export const emptyView = (): TypeView => ({ sort: null, filters: [] });
+
+/**
+ * Sort by a saved list of ids — the order columns were dragged into, or rows.
+ * Anything the list doesn't name keeps its place at the end, so a property or
+ * an object added after the drag lands last instead of jumping to the front.
+ */
+export function bySavedOrder<T extends { id: string }>(items: T[], order?: string[]): T[] {
+  if (!order?.length) return items;
+  const rank = new Map(order.map((id, i) => [id, i]));
+  return items
+    .map((x, i) => ({ x, r: rank.get(x.id) ?? order.length + i }))
+    .sort((a, b) => a.r - b.r)
+    .map((e) => e.x);
+}
+
+/** The full id list with `dragId` lifted out and dropped where `overId` sits. */
+export function reorderIds(ids: string[], dragId: string, overId: string): string[] {
+  const from = ids.indexOf(dragId);
+  const to = ids.indexOf(overId);
+  if (from < 0 || to < 0 || from === to) return ids;
+  const next = [...ids];
+  next.splice(from, 1);
+  next.splice(to, 0, dragId);
+  return next;
+}
 
 export interface ViewField {
   key: string;

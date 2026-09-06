@@ -16,6 +16,7 @@ export type NavKey =
   | 'tasks'
   | 'events'
   | 'people'
+  | 'media'
   | 'tags'
   | 'study'
   | 'types'
@@ -34,6 +35,7 @@ export const NAV_BUILTINS: NavBuiltin[] = [
   { key: 'tasks', label: 'Tasks', icon: 'circle-check' },
   { key: 'events', label: 'Events', icon: 'calendar-clock' },
   { key: 'people', label: 'People', icon: 'people' },
+  { key: 'media', label: 'Media', icon: 'film' },
   { key: 'tags', label: 'Tags', icon: 'hash' },
   { key: 'study', label: 'Study', icon: 'study' },
   { key: 'types', label: 'Types…', icon: 'table' },

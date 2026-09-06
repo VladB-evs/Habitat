@@ -97,7 +97,7 @@ const json = (s, fallback) => {
   }
 };
 
-/** The local day a review happened on, for the streak and the heat map. */
+/** The local day a review happened on, for the heat map. */
 const dayKey = (ts) => {
   const d = new Date(ts);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -372,23 +372,9 @@ function create(getDb) {
           };
         });
 
-      const from = dayKey(at - 365 * srs.DAY);
-      const history = db()
-        .prepare('SELECT day, COUNT(*) AS n FROM reviews WHERE day >= ? GROUP BY day ORDER BY day')
-        .all(from)
-        .map((r) => ({ day: r.day, n: r.n }));
-
-      const seen = new Set(history.map((h) => h.day));
-      let streak = 0;
-      // Today not being done yet must not break a streak that is still alive.
-      for (let i = seen.has(dayKey(at)) ? 0 : 1; i < 400; i++) {
-        if (!seen.has(dayKey(at - i * srs.DAY))) break;
-        streak++;
-      }
-
       const reviewedToday = db().prepare('SELECT COUNT(*) AS c FROM reviews WHERE day = ?').get(dayKey(at)).c;
 
-      return { decks, notes, totals, history, streak, reviewedToday };
+      return { decks, notes, totals, reviewedToday };
     },
 
     // ---------- notes ----------

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Editor } from '@tiptap/react';
-import { NodeSelection } from '@tiptap/pm/state';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 import { popPos } from './components/cells';
 import { Icon } from './components/Icons';
 import { useLayout } from './layout';
@@ -8,10 +8,15 @@ import { useLayout } from './layout';
 /**
  * The grip in the left margin, Notion-style: hover a block and it appears
  * beside it, drag it to move the block, click it for what else you can do.
+ * Shift-click a second row's grip to extend the selection to every row
+ * between the two — drag, Duplicate, Delete and Turn into then all act on
+ * the whole run of rows, not just the one the grip happens to sit beside.
  *
- * Only top-level blocks get one. A paragraph inside a table cell or a list item
- * is found by walking up to the direct child of the editor, so dragging always
- * moves the whole thing rather than tearing a row out of its structure.
+ * Top-level blocks get one, and so does each list item — a bullet, task, or
+ * ordered-list row is a block in its own right and drags on its own, however
+ * deep it's nested. Anything else nested (a paragraph inside a table cell, say)
+ * is found by walking up to the direct child of the editor instead, so dragging
+ * that moves the whole enclosing structure rather than tearing a piece out of it.
  */
 
 /** Height of the grip, in CSS pixels — it centres itself on a line of text. */
@@ -28,11 +33,63 @@ interface Hover {
   el: HTMLElement;
 }
 
-/** The direct child of the editor that contains this element, if any. */
-function topLevel(el: Element | null, root: HTMLElement): HTMLElement | null {
-  let node: Element | null = el;
-  while (node && node.parentElement !== root) node = node.parentElement;
-  return (node as HTMLElement) ?? null;
+/**
+ * The row at a point: the direct child of the editor that contains it, or the
+ * nearest enclosing list item — whichever is nearer — so a bullet a few levels
+ * deep still moves by itself instead of dragging its whole list.
+ *
+ * This goes through ProseMirror's own coordinate mapping rather than
+ * `document.elementFromPoint`, because a list's indent is padding on the
+ * `<ul>` itself, not on its `<li>`s — so a point in the left margin, which is
+ * exactly where this is called from, lands back on the `<ul>` for anything
+ * indented, undoing the "each row drags on its own" fix below it.
+ * `posAtCoords` instead resolves to a document position from a line's actual
+ * rendered box, however far left of it the point sits, so it always names the
+ * right row; walking its node ancestry (not the DOM's) then finds the block.
+ */
+function rowAt(editor: Editor, x: number, y: number): HTMLElement | null {
+  const found = editor.view.posAtCoords({ left: x, top: y });
+  if (!found) return null;
+  const $pos = editor.state.doc.resolve(found.pos);
+  let depth = $pos.depth;
+  while (depth > 1 && $pos.node(depth).type.name !== 'listItem' && $pos.node(depth).type.name !== 'taskItem') depth--;
+  if (depth < 1) return null;
+  const dom = editor.view.nodeDOM($pos.before(depth));
+  return dom instanceof HTMLElement ? dom : null;
+}
+
+/**
+ * The bounding box of a row's own first line of text — a native `Range`
+ * around its first character, so it reports exactly the line box the browser
+ * actually drew rather than one ProseMirror had to map a position back to.
+ * A row with no text of its own on that line (an empty paragraph, a bullet
+ * holding only an image) falls back to the row's own box.
+ */
+function firstLineRect(el: HTMLElement): DOMRect | null {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    if (!node.textContent) continue;
+    const range = document.createRange();
+    range.setStart(node, 0);
+    range.setEnd(node, 1);
+    const rect = range.getBoundingClientRect();
+    if (rect.height) return rect;
+  }
+  const box = el.getBoundingClientRect();
+  return box.height ? box : null;
+}
+
+/** The document range spanned by one row's own node — not its content, the node itself. */
+function blockRangeOf(editor: Editor, el: HTMLElement): { from: number; to: number } | null {
+  try {
+    const $pos = editor.state.doc.resolve(editor.view.posAtDOM(el, 0));
+    if (!$pos.depth) return null;
+    return { from: $pos.before($pos.depth), to: $pos.after($pos.depth) };
+  } catch {
+    // Nothing there — the document moved under us.
+    return null;
+  }
 }
 
 /**
@@ -41,18 +98,43 @@ function topLevel(el: Element | null, root: HTMLElement): HTMLElement | null {
  * press, which has only just found one under a finger.
  */
 function selectBlockIn(editor: Editor, el: HTMLElement) {
+  const range = blockRangeOf(editor, el);
+  if (!range) return null;
   const { state, view } = editor;
-  try {
-    const inside = view.posAtDOM(el, 0);
-    const $pos = state.doc.resolve(inside);
-    const at = $pos.depth ? $pos.before(1) : inside;
-    const selection = NodeSelection.create(state.doc, at);
-    view.dispatch(state.tr.setSelection(selection));
-    return { at, selection };
-  } catch {
-    // Nothing selectable there — the document moved under us.
-    return null;
-  }
+  const selection = NodeSelection.create(state.doc, range.from);
+  view.dispatch(state.tr.setSelection(selection));
+  return { from: range.from, to: range.to, selection };
+}
+
+/**
+ * Select every row between two, however different their nesting — a run of
+ * top-level paragraphs, a stretch of sibling bullets, even a paragraph down
+ * to a bullet below it. `blockRange` finds their lowest shared list (or the
+ * doc itself) and gives back the full run of its children in between, so a
+ * plain `TextSelection` across that span always lands on clean row edges.
+ */
+function selectRowRange(editor: Editor, fromEl: HTMLElement, toEl: HTMLElement) {
+  const a = blockRangeOf(editor, fromEl);
+  const b = blockRangeOf(editor, toEl);
+  if (!a || !b) return null;
+  const { state, view } = editor;
+  const lo = Math.min(a.from, b.from);
+  const hi = Math.max(a.to, b.to);
+  const range = state.doc.resolve(lo).blockRange(state.doc.resolve(hi));
+  const from = range ? range.start : lo;
+  const to = range ? range.end : hi;
+  const selection = TextSelection.create(state.doc, from, to);
+  view.dispatch(state.tr.setSelection(selection));
+  return { from, to, selection };
+}
+
+/** Is this row already covered by the current selection? Hovering it again then
+ *  keeps dragging or acting on the whole run instead of collapsing it to one row. */
+function rowInSelection(editor: Editor, el: HTMLElement): boolean {
+  const range = blockRangeOf(editor, el);
+  if (!range) return false;
+  const { from, to } = editor.state.selection;
+  return range.from >= from && range.to <= to;
 }
 
 const TURN_INTO = [
@@ -73,11 +155,13 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
   // the block opens the same menu instead.
   const { coarse } = useLayout();
   const [hover, setHover] = useState<Hover | null>(null);
-  const [menu, setMenu] = useState<{ left: number; top: number; pos: number } | null>(null);
+  const [menu, setMenu] = useState<{ left: number; top: number; from: number; to: number } | null>(null);
   const hoverRef = useRef<Hover | null>(null);
   hoverRef.current = hover;
   const leaving = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const menuOpen = menu !== null;
+  // The row a plain click last landed on — where a shift-click range starts from.
+  const anchorRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!editor || !container || coarse) return;
@@ -88,16 +172,21 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
      * line*, not the middle of its box. A heading's box carries margins and a
      * long paragraph is several lines tall — either would leave the grip
      * floating above or below the text it belongs to.
+     *
+     * This used to ask ProseMirror to map a document position back to
+     * screen coordinates (`posAtDOM` + `coordsAtPos`), which sounds right but
+     * isn't: at a plain block boundary that round trip can land on the
+     * *previous* row's line instead of this one's, depending on bias — and
+     * that showed up as the grip floating between two rows rather than on
+     * either. There's a simpler source of truth sitting right there in the
+     * DOM: a `Range` around the row's own first character reports exactly
+     * the line box the browser actually drew, no position mapping involved.
      */
     const measure = (el: HTMLElement): number | null => {
       const outer = container.getBoundingClientRect();
-      try {
-        const line = editor.view.coordsAtPos(editor.view.posAtDOM(el, 0));
-        return (line.top + line.bottom) / 2 - outer.top - GRIP / 2;
-      } catch {
-        const box = el.getBoundingClientRect();
-        return box.height ? box.top - outer.top : null;
-      }
+      const line = firstLineRect(el);
+      if (!line || !line.height) return null;
+      return (line.top + line.bottom) / 2 - outer.top - GRIP / 2;
     };
 
     /**
@@ -119,12 +208,22 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
         return;
       }
       clearTimeout(leaving.current);
-      // Whatever the pointer's own x, the block is found by looking into the
-      // text column at the pointer's height.
-      const probeX = Math.min(Math.max(x, box.left + 6), box.right - 6);
-      const el = topLevel(document.elementFromPoint(probeX, y), dom);
+      // Whatever the pointer's own x, the row is found at its height —
+      // `rowAt` maps through ProseMirror, not the DOM, so the empty margin
+      // resolves to the same row as the text itself would.
+      const probeX = Math.min(Math.max(x, box.left + 1), box.right - 1);
+      const found = rowAt(editor, probeX, y);
+      if (!found) return;
+      // Hovering anywhere inside an active multi-row selection shows one grip
+      // for the whole run, pinned to its first row — not one that jumps to
+      // whichever row within it the pointer happens to be over.
+      let el = found;
+      if (rowInSelection(editor, found)) {
+        const first = editor.view.nodeDOM(editor.state.selection.from);
+        if (first instanceof HTMLElement) el = first;
+      }
       // Same block as last time: nothing to move, and no re-render per pixel.
-      if (!el || el === hoverRef.current?.el) return;
+      if (el === hoverRef.current?.el) return;
       // An attachment brings its own grip and its own toolbar — two grips in
       // the same margin would just be in each other's way.
       if (el.querySelector('[data-drag-handle]')) return setHover(null);
@@ -189,11 +288,20 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
       from = at;
       timer = setTimeout(() => {
         timer = null;
-        const el = topLevel(document.elementFromPoint(at.x, at.y), dom);
+        const el = rowAt(editor, at.x, at.y);
         if (!el) return;
-        const picked = selectBlockIn(editor, el);
+        // Holding a row already covered by a selection made elsewhere (e.g. a
+        // shift-click on a paired mouse) opens the menu for the whole thing.
+        let picked;
+        if (rowInSelection(editor, el)) {
+          const selection = editor.state.selection;
+          picked = { from: selection.from, to: selection.to };
+        } else {
+          picked = selectBlockIn(editor, el);
+          if (picked) anchorRef.current = el;
+        }
         if (!picked) return;
-        setMenu({ ...popPos(el, 230, 380), pos: picked.at });
+        setMenu({ ...popPos(el, 230, 380), from: picked.from, to: picked.to });
       }, 480);
     };
 
@@ -226,10 +334,25 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
   // The menu outlives the hover: on touch there is no hover to have opened it.
   if (!editor || (!hover && !menu)) return null;
 
-  const selectBlock = () => (hover ? selectBlockIn(editor, hover.el) : null);
+  /**
+   * What a grip interaction (drag or click) should act on: the row under the
+   * pointer alone, unless it's already part of the current selection — in
+   * which case every row in that selection comes along, so a run picked with
+   * shift-click stays intact instead of collapsing to whichever one the
+   * pointer happens to be over.
+   */
+  const pickTarget = () => {
+    if (!hover) return null;
+    if (rowInSelection(editor, hover.el)) {
+      const selection = editor.state.selection;
+      return { from: selection.from, to: selection.to, selection };
+    }
+    anchorRef.current = hover.el;
+    return selectBlockIn(editor, hover.el);
+  };
 
   const onDragStart = (e: React.DragEvent) => {
-    const picked = selectBlock();
+    const picked = pickTarget();
     if (!picked || !hover) return e.preventDefault();
     // Hand ProseMirror the slice it is about to move; its own drop handling
     // does the rest, including where the drop marker goes.
@@ -245,10 +368,17 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
     setHover(null);
   };
 
-  const openMenu = (e: React.MouseEvent) => {
-    const picked = selectBlock();
+  const onGripClick = (e: React.MouseEvent) => {
+    if (!hover) return;
+    if (e.shiftKey && anchorRef.current && anchorRef.current !== hover.el) {
+      // Extending a range is a selection gesture on its own — it doesn't also
+      // pop the menu, the same way shift-clicking a file list doesn't.
+      selectRowRange(editor, anchorRef.current, hover.el);
+      return;
+    }
+    const picked = pickTarget();
     if (!picked) return;
-    setMenu({ ...popPos(e.currentTarget as HTMLElement, 230, 380), pos: picked.at });
+    setMenu({ ...popPos(e.currentTarget as HTMLElement, 230, 380), from: picked.from, to: picked.to });
   };
 
   const act = (run: (chain: any) => any) => {
@@ -266,8 +396,8 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
           draggable
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
-          onClick={openMenu}
-          title="Drag to move · click for options"
+          onClick={onGripClick}
+          title="Drag to move · click for options · shift-click to select a range"
           aria-label="Block options"
         >
           <Icon name="grip" size={15} />
@@ -282,8 +412,8 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
               className="menu-item"
               onClick={() =>
                 act((c) => {
-                  const node = editor.state.doc.nodeAt(menu.pos);
-                  return node ? c.insertContentAt(menu.pos + node.nodeSize, node.toJSON()).run() : c.run();
+                  const slice = editor.state.doc.slice(menu.from, menu.to);
+                  return c.insertContentAt(menu.to, slice.content.toJSON()).run();
                 })
               }
             >
@@ -295,7 +425,32 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
             <div className="menu-sep" />
             <div className="picker-group">Turn into</div>
             {TURN_INTO.map((t) => (
-              <button key={t.id} className="menu-item" onClick={() => act((c) => t.run(c.setTextSelection(menu.pos + 1)).run())}>
+              <button
+                key={t.id}
+                className="menu-item"
+                onClick={() => {
+                  // One row: the existing single-block path. A run of rows: the
+                  // shared list (or the doc itself) found again from the stored
+                  // range, then the same transform applied to each of its direct
+                  // children — right to left, so resizing a later row can't move
+                  // the position an earlier one is still waiting to be turned at.
+                  const range = editor.state.doc.resolve(menu.from).blockRange(editor.state.doc.resolve(menu.to));
+                  if (!range) return act((c) => t.run(c.setTextSelection(menu.from + 1)).run());
+                  const positions: number[] = [];
+                  editor.state.doc.nodesBetween(range.start, range.end, (_node, pos, parent) => {
+                    if (parent === range.parent) {
+                      positions.push(pos);
+                      return false;
+                    }
+                    return true;
+                  });
+                  for (let i = positions.length - 1; i >= 0; i--) {
+                    t.run(editor.chain().focus().setTextSelection(positions[i] + 1)).run();
+                  }
+                  setMenu(null);
+                  setHover(null);
+                }}
+              >
                 <Icon name={t.icon} size={13} /> {t.label}
               </button>
             ))}

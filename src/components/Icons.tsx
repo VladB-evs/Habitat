@@ -161,6 +161,7 @@ import {
   LuMeh,
   LuLaugh,
   LuCalendarClock,
+  LuEyeOff,
 } from 'react-icons/lu';
 
 const UI: Record<string, IconType> = {
@@ -232,6 +233,8 @@ const UI: Record<string, IconType> = {
   'circle-check': LuCircleCheck,
   'message-circle': LuMessageCircle,
   people: LuUsers,
+  film: LuFilm,
+  book: LuBookOpen,
   cake: LuCake,
   gift: LuGift,
   mail: LuMail,
@@ -257,6 +260,7 @@ const UI: Record<string, IconType> = {
   meh: LuMeh,
   laugh: LuLaugh,
   'calendar-clock': LuCalendarClock,
+  'eye-off': LuEyeOff,
 };
 
 export function Icon({ name, size = 16, className }: { name: string; size?: number; className?: string }) {

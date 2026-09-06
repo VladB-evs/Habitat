@@ -4,9 +4,10 @@ import { ask } from '../confirm';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
 import type { Obj, ObjType, PropDef } from '../types';
-import { ago, canChangeType, PEOPLE_TYPE, typeColor } from '../util';
+import { ago, canChangeType, MEDIA_TYPE, PEOPLE_TYPE, typeColor } from '../util';
 import { Editor } from './Editor';
 import { Icon, TypeIcon } from './Icons';
+import { MediaBody } from './MediaBody';
 import { PersonBody } from './PersonBody';
 import { PropsPanel } from './PropsPanel';
 import { SplitControls } from './SplitControls';
@@ -68,6 +69,18 @@ export function ObjectPage({ id, occurrence }: { id: string; occurrence?: string
     api.objects.update(id, { props }).then(() => objectChanged(id));
   };
 
+  /**
+   * Several properties at once, in one update — `saveProp` called twice in a
+   * row (e.g. cover then genre, straight after picking one) would have the
+   * second call build its patch from `obj.props` before the first had landed,
+   * so its save wins and quietly erases the first.
+   */
+  const saveProps = (patch: Record<string, any>) => {
+    const props = { ...obj.props, ...patch };
+    setObj({ ...obj, props });
+    api.objects.update(id, { props }).then(() => objectChanged(id));
+  };
+
   const togglePin = async () => {
     const pinned = !obj.pinned;
     setObj({ ...obj, pinned });
@@ -77,6 +90,7 @@ export function ObjectPage({ id, occurrence }: { id: string; occurrence?: string
 
   const isTag = obj.typeId === 'tag';
   const isPerson = obj.typeId === PEOPLE_TYPE;
+  const isMedia = obj.typeId === MEDIA_TYPE;
 
   const saveExtraProps = (defs: PropDef[]) => {
     setObj({ ...obj, extraProps: defs });
@@ -117,6 +131,7 @@ export function ObjectPage({ id, occurrence }: { id: string; occurrence?: string
     if (!type) return;
     if (type.id === 'daily') return navigate({ kind: 'daily' });
     if (type.id === PEOPLE_TYPE) return navigate({ kind: 'people' });
+    if (type.id === MEDIA_TYPE) return navigate({ kind: 'media' });
     navigate({ kind: 'type', typeId: type.id });
   };
 
@@ -207,6 +222,10 @@ export function ObjectPage({ id, occurrence }: { id: string; occurrence?: string
           >
             <Editor key={obj.id} content={obj.content} onSave={saveContent} />
           </PersonBody>
+        ) : isMedia ? (
+          <MediaBody obj={obj} typeDefs={type?.properties ?? []} onTitle={saveTitle} onProp={saveProp} onProps={saveProps}>
+            <Editor key={obj.id} content={obj.content} onSave={saveContent} />
+          </MediaBody>
         ) : (
           <>
             <input

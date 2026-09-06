@@ -2,19 +2,19 @@ import { lazy, Suspense, useState } from 'react';
 import { NAV_BUILTIN_MAP, typeIdOf } from '../bottomnav';
 import { useApp } from '../store';
 import type { View } from '../store';
-import { PEOPLE_TYPE, typeColor } from '../util';
+import { MEDIA_TYPE, PEOPLE_TYPE, typeColor } from '../util';
 import { Icon, TypeIcon } from './Icons';
 import { Sheet } from './Sheet';
 const SettingsModal = lazy(() => import('./SettingsModal').then((m) => ({ default: m.SettingsModal })));
 
-/** Daily notes, tasks, people and tags all have their own nav entries already —
- *  same exclusion Sidebar.tsx uses for its Types section, so the "Types…"
- *  sheet offers exactly the types that don't already have a dedicated slot. */
-const UPSTAIRS = new Set(['daily', 'tag', 'task', 'event', PEOPLE_TYPE]);
+/** Daily notes, tasks, people, media and tags all have their own nav entries
+ *  already — same exclusion Sidebar.tsx uses for its Types section, so the
+ *  "Types…" sheet offers exactly the types that don't already have a dedicated slot. */
+const UPSTAIRS = new Set(['daily', 'tag', 'task', 'event', PEOPLE_TYPE, MEDIA_TYPE]);
 
 /** Everything "More" can offer a destination for. Canvas is left out, same as
  *  the sidebar's own nav — boards are desktop-only. */
-const MORE_DESTINATIONS = ['dashboard', 'daily', 'tasks', 'events', 'people', 'tags', 'study'] as const;
+const MORE_DESTINATIONS = ['dashboard', 'daily', 'tasks', 'events', 'people', 'media', 'tags', 'study'] as const;
 
 const isBuiltinActive = (key: string, viewKind: string) =>
   key === 'study' ? viewKind === 'study' || viewKind === 'deck' || viewKind === 'studyNote' : viewKind === key;

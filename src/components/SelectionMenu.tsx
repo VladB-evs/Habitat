@@ -554,6 +554,7 @@ export function SelectionMenu({ editor, objectId }: { editor: Editor | null; obj
     mark('underline', 'Underline', 'underline', 'underline', () => chain().toggleUnderline().run());
     mark('strike', 'Strikethrough', 'strike', 'strike', () => chain().toggleStrike().run());
     mark('code', 'Inline code', 'code', 'code', () => chain().toggleCode().run());
+    mark('spoiler', 'Hide text', 'eye-off', 'spoiler', () => chain().toggleMark('spoiler').run());
 
     items.push({
       id: 'link',

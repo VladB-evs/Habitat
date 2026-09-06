@@ -1,40 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../../api';
 import { ask } from '../../confirm';
 import { dealtIn, spring, stagger } from '../../motion';
 import { useApp } from '../../store';
 import type { Deck, StudyNote, StudyOverview } from '../../types';
-import { addDays, ago, todayKey, typeColor } from '../../util';
+import { ago, typeColor } from '../../util';
 import { Icon } from '../Icons';
 import { SplitControls } from '../SplitControls';
 import { PageActions } from '../PageActions';
 import { StudySession } from './StudySession';
 import { VocabAdd } from './VocabAdd';
-
-/** Fifteen weeks of review counts — a small year-in-review. */
-function Heatmap({ history, theme }: { history: { day: string; n: number }[]; theme: string }) {
-  const cells = useMemo(() => {
-    const by = new Map(history.map((h) => [h.day, h.n]));
-    const peak = Math.max(1, ...history.map((h) => h.n));
-    const today = todayKey();
-    const out: { day: string; n: number; level: number }[] = [];
-    for (let i = 15 * 7 - 1; i >= 0; i--) {
-      const day = addDays(today, -i);
-      const n = by.get(day) ?? 0;
-      out.push({ day, n, level: n === 0 ? 0 : Math.min(4, Math.ceil((n / peak) * 4)) });
-    }
-    return out;
-  }, [history]);
-
-  return (
-    <div className="sr-heat" style={{ '--heat': typeColor('#1baf7a', theme) } as React.CSSProperties}>
-      {cells.map((c) => (
-        <span key={c.day} className={'sr-heat-cell l' + c.level} title={`${c.n} review${c.n === 1 ? '' : 's'} on ${c.day}`} />
-      ))}
-    </div>
-  );
-}
 
 /**
  * Naming a new deck, inline. Not a `prompt()` — Electron has no window.prompt,
@@ -306,19 +282,8 @@ export function StudyView() {
 
         <div className="sr-stats">
           <div className="sr-stat">
-            <span className="sr-stat-n">
-              {data?.streak ?? 0}
-              <Icon name="flame" size={15} />
-            </span>
-            <span className="sr-stat-l">day streak</span>
-          </div>
-          <div className="sr-stat">
             <span className="sr-stat-n">{data?.reviewedToday ?? 0}</span>
             <span className="sr-stat-l">reviewed today</span>
-          </div>
-          <div className="sr-stat wide">
-            <Heatmap history={data?.history ?? []} theme={theme} />
-            <span className="sr-stat-l">last 15 weeks</span>
           </div>
         </div>
       </div>

@@ -14,8 +14,10 @@ import {
   UPDATED_FIELD,
   applyFilters,
   availableModes,
+  bySavedOrder,
   emptyView,
   opsFor,
+  reorderIds,
   sortObjs,
   viewFields,
 } from '../viewModel';
@@ -59,7 +61,6 @@ function ChecklistRow({
   onProp,
   onTitle,
   fields,
-  selectMode,
 }: {
   o: Obj;
   done: boolean;
@@ -72,7 +73,6 @@ function ChecklistRow({
   onProp: (propId: string, v: any) => void;
   onTitle: (v: string) => void;
   fields: string[] | null;
-  selectMode: boolean;
 }) {
   return (
     <div
@@ -88,9 +88,7 @@ function ChecklistRow({
         if (!(e.target as HTMLElement).closest('button, input, select, textarea, a, [contenteditable]')) onOpen(e);
       }}
     >
-      {selectMode && (
-        <input type="checkbox" className="pick-box" checked={picked} onChange={onSelect} aria-label="Select" />
-      )}
+      <input type="checkbox" className="pick-box" checked={picked} onChange={onSelect} aria-label="Select" />
       <button className={'tick' + (done ? ' on' : '')} onClick={onToggle} aria-label="Toggle done">
         {done && <Icon name="check" size={11} />}
       </button>
@@ -189,7 +187,6 @@ export function TypeTable({
   const [bulkProp, setBulkProp] = useState<{ left: number; top: number } | null>(null);
   const [datePrompt, setDatePrompt] = useState<{ id: string; value: string } | null>(null);
   const [dropZone, setDropZone] = useState<'scheduled' | 'unscheduled' | null>(null);
-  const [selectMode, setSelectMode] = useState(false);
   /** null means "show them all"; otherwise the property names picked for the inline row. */
   const [inlineFields, setInlineFields] = useState<string[] | null>(null);
   const [newItem, setNewItem] = useState('');
@@ -198,6 +195,16 @@ export function TypeTable({
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const lastPicked = useRef<number | null>(null);
+  /** Column widths while one is being dragged; the view only hears about it on release. */
+  const [draftWidths, setDraftWidths] = useState<Record<string, number> | null>(null);
+  const widthRef = useRef<Record<string, number>>({});
+  const [resizing, setResizing] = useState(false);
+  const [dragCol, setDragCol] = useState<string | null>(null);
+  const [overCol, setOverCol] = useState<string | null>(null);
+  const [dragRow, setDragRow] = useState<string | null>(null);
+  /** Which row the drag is hovering, and whether the line goes under it or over. */
+  const [overRow, setOverRow] = useState<{ id: string; below: boolean } | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ o: Obj; pos: { left: number; top: number } } | null>(null);
 
   useEffect(() => {
     const load = () => api.objects.list(typeId).then(setObjs);
@@ -219,7 +226,6 @@ export function TypeTable({
       }
       setView({ ...emptyView(), ...(legacy ? { mode: legacy } : {}), ...saved, filters: saved.filters ?? [] });
     });
-    setSelectMode(false);
     setSelected(new Set());
     lastPicked.current = null;
     // Keeps the table honest when a task is ticked from a mention chip elsewhere.
@@ -257,7 +263,33 @@ export function TypeTable({
   // and off constantly — it applies to every view, including the checklist.
   const hidingDone = !!view.hideDone && !!doneProp;
   const open = (list: Obj[]) => (hidingDone ? list.filter((o) => !isDone(o)) : list);
-  const visible = open(sorted);
+  // A dragged-in order is the fallback ordering, not a competing one: the moment
+  // a sort is set it wins, which is why dropping a row clears the sort.
+  const visible = open(view.sort ? sorted : bySavedOrder(sorted, view.rowOrder));
+
+  /*
+   * Properties an object carries itself rather than the type get a column of
+   * their own, just like the type's own. They were being drawn as chips inside
+   * the name cell, which crammed them all into one column and left them out of
+   * the grid entirely — a value you can't line up, widen or sort by isn't
+   * really being treated as a property. In practice every object of a type
+   * shares one definition for each of these, so they line up as columns.
+   */
+  const extraDefs: PropDef[] = [];
+  const seenCol = new Set(type.properties.map((p) => p.id));
+  for (const o of objs)
+    for (const p of o.extraProps ?? [])
+      if (!seenCol.has(p.id)) {
+        seenCol.add(p.id);
+        extraDefs.push(p);
+      }
+
+  // Columns follow the order they were dragged into. A property added since then
+  // isn't in that list, so it lands at the end rather than at the front.
+  const cols = bySavedOrder([...type.properties, ...extraDefs], view.columnOrder);
+
+  /** True for a column that lives on the objects instead of the type's schema. */
+  const isExtra = (propId: string) => !type.properties.some((p) => p.id === propId);
 
   // Embedded is only ever the Tasks page's own "Table" tab — it already has an
   // agenda and a calendar of its own, so the one thing this instance should
@@ -268,7 +300,10 @@ export function TypeTable({
   // checklist. A saved mode can also stop being available, if its property went away.
   const mode: ViewMode = embedded ? embeddedMode : view.mode && modes.includes(view.mode) ? view.mode : doneProp ? 'checklist' : 'table';
 
-  const selectProps = type.properties.filter((p) => p.kind === 'select');
+  // Board columns can come from an extra property as readily as a schema one —
+  // the mode is already offered whenever any select field exists, and without
+  // this the Board tab on such a type quietly fell back to the table.
+  const selectProps = cols.filter((p) => p.kind === 'select');
   const groupProp = selectProps.find((p) => p.id === view.groupBy) ?? selectProps[0];
 
   const dateFields = fields.filter((f) => f.kind === 'date' || f.kind === 'datetime');
@@ -329,9 +364,15 @@ export function TypeTable({
   };
 
   const updateCell = (o: Obj, propId: string, value: any) => {
-    const props = { ...o.props, [propId]: value };
-    setObjs((list) => list.map((x) => (x.id === o.id ? { ...x, props } : x)));
-    api.objects.update(o.id, { props }).then(() => objectChanged(o.id));
+    const patch: { props: Record<string, any>; extraProps?: PropDef[] } = { props: { ...o.props, [propId]: value } };
+    // Filling in an extra-property column on a row that never carried that
+    // property hands the row the definition as well — without it the value has
+    // nothing to be read back by and simply wouldn't show.
+    const def = cols.find((p) => p.id === propId);
+    if (def && isExtra(propId) && !(o.extraProps ?? []).some((p) => p.id === propId))
+      patch.extraProps = [...(o.extraProps ?? []), def];
+    setObjs((list) => list.map((x) => (x.id === o.id ? { ...x, ...patch } : x)));
+    api.objects.update(o.id, patch).then(() => objectChanged(o.id));
   };
 
   const updateTitle = (o: Obj, title: string) => {
@@ -400,7 +441,26 @@ export function TypeTable({
     setObjs((list) => list.filter((x) => x.id !== o.id));
   };
 
+  /** Every object carrying an extra property keeps its own copy of the definition. */
+  const ownersOf = (def: PropDef) => objs.filter((o) => (o.extraProps ?? []).some((p) => p.id === def.id));
+
   const saveProp = async (def: PropDef) => {
+    // Editing an extra-property column means editing each of those copies —
+    // filtered through the type's schema first, since a property that lives
+    // there is the ordinary case.
+    if (isExtra(def.id)) {
+      const owners = ownersOf(def);
+      if (owners.length) {
+        await Promise.all(
+          owners.map((o) =>
+            api.objects.update(o.id, { extraProps: (o.extraProps ?? []).map((p) => (p.id === def.id ? def : p)) })
+          )
+        );
+        setObjs(await api.objects.list(typeId));
+        owners.forEach((o) => objectChanged(o.id));
+        return;
+      }
+    }
     const props = [...type.properties];
     const i = props.findIndex((p) => p.id === def.id);
     if (i >= 0) props[i] = def;
@@ -410,6 +470,23 @@ export function TypeTable({
   };
 
   const deleteProp = async (def: PropDef) => {
+    if (isExtra(def.id)) {
+      const owners = ownersOf(def);
+      if (owners.length) {
+        const n = owners.length;
+        if (!(await ask(`Remove property “${def.name}” from ${n} ${type.name.toLowerCase()}${n === 1 ? '' : 's'}?`))) return;
+        await Promise.all(
+          owners.map((o) => {
+            const props = { ...o.props };
+            delete props[def.id];
+            return api.objects.update(o.id, { props, extraProps: (o.extraProps ?? []).filter((p) => p.id !== def.id) });
+          })
+        );
+        setObjs(await api.objects.list(typeId));
+        owners.forEach((o) => objectChanged(o.id));
+        return;
+      }
+    }
     if (!(await ask(`Remove property “${def.name}” from all ${type.name}s?`))) return;
     await api.types.update(type.id, { properties: type.properties.filter((p) => p.id !== def.id) });
     await reloadTypes();
@@ -485,6 +562,78 @@ export function TypeTable({
     setObjs(await api.objects.list(typeId));
   };
 
+  // ---- columns and rows you can drag ----
+
+  const widths = draftWidths ?? view.widths ?? {};
+  const widthOf = (key: string) => widths[key] ?? (key === TITLE_FIELD ? 320 : 190);
+  /** The gutter, every column, and room at the end for the two buttons that live there. */
+  const tableMin = 54 + widthOf(TITLE_FIELD) + cols.reduce((n, p) => n + widthOf(p.id), 0) + 44;
+
+  /** Drag a header's right edge to set that column's width. */
+  const startResize = (key: string) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = widthOf(key);
+    widthRef.current = { ...(view.widths ?? {}) };
+    setResizing(true);
+    const move = (ev: PointerEvent) => {
+      widthRef.current = { ...widthRef.current, [key]: Math.max(90, Math.round(startW + ev.clientX - startX)) };
+      setDraftWidths(widthRef.current);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      setResizing(false);
+      setDraftWidths(null);
+      changeView({ widths: widthRef.current });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  const dropCol = (overId: string) => (e: React.DragEvent) => {
+    e.preventDefault();
+    setOverCol(null);
+    setDragCol(null);
+    const id = e.dataTransfer.getData('text/habitat-col');
+    if (!id || id === overId) return;
+    changeView({ columnOrder: reorderIds(cols.map((p) => p.id), id, overId) });
+  };
+
+  /** Above or below the row's midpoint, which is where the drop line is drawn. */
+  const dropSide = (e: React.DragEvent) => {
+    const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    return e.clientY > box.top + box.height / 2;
+  };
+
+  const overRowAt = (id: string) => (e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes('text/habitat-row')) return;
+    e.preventDefault();
+    const below = dropSide(e);
+    if (overRow?.id !== id || overRow.below !== below) setOverRow({ id, below });
+  };
+
+  /**
+   * The saved order names every object, not just the ones on screen, so
+   * reordering under a filter doesn't shuffle whatever the filter is hiding.
+   */
+  const dropRow = (overId: string) => (e: React.DragEvent) => {
+    e.preventDefault();
+    const below = dropSide(e);
+    setOverRow(null);
+    setDragRow(null);
+    const id = e.dataTransfer.getData('text/habitat-row');
+    if (!id || id === overId) return;
+    const ids = bySavedOrder(objs, view.rowOrder)
+      .map((o) => o.id)
+      .filter((x) => x !== id);
+    const at = ids.indexOf(overId);
+    if (at < 0) return;
+    ids.splice(at + (below ? 1 : 0), 0, id);
+    changeView({ sort: null, rowOrder: ids });
+  };
+
   const openHeaderMenu = (e: React.MouseEvent<HTMLButtonElement>, prop: PropDef | null) => {
     setMenu({ prop, pos: popPos(e.currentTarget, 230, 260) });
   };
@@ -509,18 +658,7 @@ export function TypeTable({
         </div>
         <PageActions>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button
-            className={'icon-btn' + (selectMode ? ' active' : '')}
-            title="Select items"
-            aria-label="Select items"
-            onClick={() => {
-              setSelectMode((v) => !v);
-              setSelected(new Set());
-            }}
-          >
-            <Icon name="check" size={15} />
-          </button>
-          {allInlineNames.length > 0 && (
+          {mode === 'checklist' && allInlineNames.length > 0 && (
             <button
               className="icon-btn"
               title="Choose inline fields"
@@ -606,7 +744,6 @@ export function TypeTable({
                     onProp={(pid, v) => updateCell(o, pid, v)}
                     onTitle={(v) => updateTitle(o, v)}
                     fields={inlineFields}
-                    selectMode={selectMode}
                     onOpen={(e) => openFrom(e, o.id)}
                     onDelete={() => removeRow(o)}
                   />
@@ -641,7 +778,6 @@ export function TypeTable({
                     onProp={(pid, v) => updateCell(o, pid, v)}
                     onTitle={(v) => updateTitle(o, v)}
                     fields={inlineFields}
-                    selectMode={selectMode}
                     onOpen={(e) => openFrom(e, o.id)}
                     onDelete={() => removeRow(o)}
                   />
@@ -672,7 +808,6 @@ export function TypeTable({
                     onProp={(pid, v) => updateCell(o, pid, v)}
                     onTitle={(v) => updateTitle(o, v)}
                     fields={inlineFields}
-                    selectMode={selectMode}
                     onOpen={(e) => openFrom(e, o.id)}
                     onDelete={() => removeRow(o)}
                   />
@@ -763,12 +898,24 @@ export function TypeTable({
         </div>
       ) : (
       <div className="table-scroll">
-        <table className="db-table">
+        <table className={'db-table' + (resizing ? ' resizing' : '')} style={{ minWidth: tableMin }}>
+          {/* Fixed widths, so a column stays where it was dragged to instead of
+              being re-shared out between the others on every render. The last
+              column has none: it soaks up whatever space is left over. */}
+          <colgroup>
+            <col className="col-gutter" />
+            <col style={{ width: widthOf(TITLE_FIELD) }} />
+            {cols.map((p) => (
+              <col key={p.id} style={{ width: widthOf(p.id) }} />
+            ))}
+            <col />
+          </colgroup>
           <thead>
             <tr>
-              <th className={'td-pick' + (selectMode ? '' : ' off')}>
+              <th className="td-pick">
                 <input
                   type="checkbox"
+                  className="pick-box"
                   checked={allSelected}
                   onChange={toggleAll}
                   aria-label={allSelected ? 'Deselect all' : 'Select all'}
@@ -779,13 +926,37 @@ export function TypeTable({
                   Name
                   {view.sort?.key === TITLE_FIELD && <span className="sort-ind">{view.sort.dir === 1 ? '▲' : '▼'}</span>}
                 </button>
+                <span className="col-resize" onPointerDown={startResize(TITLE_FIELD)} />
               </th>
-              {type.properties.map((p) => (
-                <th key={p.id}>
+              {cols.map((p) => (
+                <th
+                  key={p.id}
+                  className={(dragCol === p.id ? 'dragging' : '') + (overCol === p.id ? ' over-col' : '')}
+                  // Off while a resize is running, or the browser starts a column
+                  // drag the moment the edge handle moves a pixel.
+                  draggable={!resizing}
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData('text/habitat-col', p.id);
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDragCol(p.id);
+                  }}
+                  onDragEnd={() => {
+                    setDragCol(null);
+                    setOverCol(null);
+                  }}
+                  onDragOver={(e) => {
+                    if (!e.dataTransfer.types.includes('text/habitat-col')) return;
+                    e.preventDefault();
+                    if (overCol !== p.id) setOverCol(p.id);
+                  }}
+                  onDragLeave={() => setOverCol((c) => (c === p.id ? null : c))}
+                  onDrop={dropCol(p.id)}
+                >
                   <button className="th-btn" onClick={(e) => openHeaderMenu(e, p)}>
                     {p.name}
                     {view.sort?.key === p.id && <span className="sort-ind">{view.sort.dir === 1 ? '▲' : '▼'}</span>}
                   </button>
+                  <span className="col-resize" onPointerDown={startResize(p.id)} />
                 </th>
               ))}
               <th className="th-add">
@@ -803,24 +974,55 @@ export function TypeTable({
             {visible.map((o, rowIndex) => (
               <tr
                 key={o.id}
-                className={selected.has(o.id) ? 'picked' : ''}
+                className={
+                  (selected.has(o.id) ? 'picked' : '') +
+                  (dragRow === o.id ? ' dragging' : '') +
+                  (overRow?.id === o.id ? (overRow.below ? ' drop-below' : ' drop-above') : '')
+                }
+                onDragOver={overRowAt(o.id)}
+                onDragLeave={() => setOverRow((c) => (c?.id === o.id ? null : c))}
+                onDrop={dropRow(o.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setRowMenu({ o, pos: { left: Math.min(e.clientX, window.innerWidth - 210), top: e.clientY } });
+                }}
                 onClick={(e) => {
-                  // A row's own controls — the title field, cell editors, delete,
+                  // A row's own controls — the title field, cell editors, the grip,
                   // the Open pill — keep their behaviour. The space between them
                   // opens the object, the same way a checklist row does.
                   if ((e.target as HTMLElement).closest('button, input, select, textarea, a, [contenteditable]')) return;
-                  if (selectMode) return toggleRow(rowIndex, e.shiftKey);
                   openFrom(e, o.id);
                 }}
               >
-                <td className={'td-pick' + (selectMode ? '' : ' off')}>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(o.id)}
-                    onChange={() => {}}
-                    onClick={(e) => toggleRow(rowIndex, e.shiftKey)}
-                    aria-label="Select row"
-                  />
+                <td className="td-pick">
+                  <span className="row-gutter">
+                    <button
+                      className="row-grip"
+                      draggable
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/habitat-row', o.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                        setDragRow(o.id);
+                      }}
+                      onDragEnd={() => {
+                        setDragRow(null);
+                        setOverRow(null);
+                      }}
+                      onClick={(e) => setRowMenu({ o, pos: popPos(e.currentTarget as HTMLElement, 200, 180) })}
+                      aria-label="Row options"
+                      title="Drag to reorder · click for options"
+                    >
+                      <Icon name="grip" size={13} />
+                    </button>
+                    <input
+                      type="checkbox"
+                      className="pick-box"
+                      checked={selected.has(o.id)}
+                      onChange={() => {}}
+                      onClick={(e) => toggleRow(rowIndex, e.shiftKey)}
+                      aria-label="Select row"
+                    />
+                  </span>
                 </td>
                 <td className="td-name">
                   <div className="cell-name">
@@ -829,10 +1031,9 @@ export function TypeTable({
                       <Icon name="arrow-up-right" size={12} />
                       Open
                     </button>
-                    <InlineProps o={o} fields={inlineFields} onChange={(pid, v) => updateCell(o, pid, v)} />
                   </div>
                 </td>
-                {type.properties.map((p) => (
+                {cols.map((p) => (
                   // The label rides along on the cell so a narrow screen can
                   // print it beside the value: a table turned into cards has no
                   // header row left to read the column names from.
@@ -846,8 +1047,12 @@ export function TypeTable({
                   </td>
                 ))}
                 <td className="td-end">
-                  <button className="row-del" onClick={() => removeRow(o)} aria-label="Delete">
-                    <Icon name="trash" size={14} />
+                  <button
+                    className="row-del"
+                    onClick={(e) => setRowMenu({ o, pos: popPos(e.currentTarget as HTMLElement, 200, 180) })}
+                    aria-label="Row options"
+                  >
+                    <Icon name="more-horizontal" size={14} />
                   </button>
                 </td>
               </tr>
@@ -919,6 +1124,52 @@ export function TypeTable({
         </motion.div>
       )}
       </AnimatePresence>
+
+      {rowMenu && (
+        <>
+          <div className="backdrop" onClick={() => setRowMenu(null)} />
+          <div className="popover" style={rowMenu.pos}>
+            <button
+              className="menu-item"
+              onClick={() => {
+                openObject(rowMenu.o.id);
+                setRowMenu(null);
+              }}
+            >
+              <span className="check-slot">
+                <Icon name="arrow-up-right" size={12} />
+              </span>
+              Open
+            </button>
+            <button
+              className="menu-item"
+              onClick={() => {
+                openBeside(rowMenu.o.id);
+                setRowMenu(null);
+              }}
+            >
+              <span className="check-slot">
+                <Icon name="columns" size={12} />
+              </span>
+              Open beside
+            </button>
+            <div className="menu-sep" />
+            <button
+              className="menu-item danger"
+              onClick={() => {
+                const o = rowMenu.o;
+                setRowMenu(null);
+                removeRow(o);
+              }}
+            >
+              <span className="check-slot">
+                <Icon name="trash" size={12} />
+              </span>
+              Delete
+            </button>
+          </div>
+        </>
+      )}
 
       {menu && (
         <>

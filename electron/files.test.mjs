@@ -91,6 +91,48 @@ test('deleting the last thing pointing at a file makes it collectable', () => {
   assert.equal(files.resolve(ref.hash, ref.ext), null, 'collected once nothing refers to it');
 });
 
+// Deleting used to just remove the row and leave the blob for a manual sweep
+// to find later — a cover is a full-size image, not a stray kilobyte, and
+// leaving it behind on every delete adds up.
+test('deleting an object sweeps its now-orphaned files immediately, with no separate gc call', () => {
+  const ref = add('poster.jpg', 'image/jpeg', 'only-on-this-object');
+  const o = api['objects:create']({ typeId: 'note', title: 'Has a cover', props: { cover: [ref] } });
+  assert.ok(files.resolve(ref.hash, ref.ext), 'kept while the object exists');
+
+  api['objects:delete'](o.id);
+  assert.equal(files.resolve(ref.hash, ref.ext), null, 'the blob is gone on disk');
+  assert.equal(api['files:get'](ref.hash), null, 'and so is its row');
+});
+
+test('a file still used elsewhere survives deleting one of its owners', () => {
+  const shared = add('shared.jpg', 'image/jpeg', 'used-by-two-objects');
+  const a = api['objects:create']({ typeId: 'note', title: 'A', props: { cover: [shared] } });
+  api['objects:create']({ typeId: 'note', title: 'B', props: { cover: [shared] } });
+
+  api['objects:delete'](a.id);
+  assert.ok(files.resolve(shared.hash, shared.ext), 'still referenced by B');
+});
+
+test('bulk-deleting objects sweeps their orphaned files too', () => {
+  const r1 = add('bulk1.jpg', 'image/jpeg', 'bulk-one');
+  const r2 = add('bulk2.jpg', 'image/jpeg', 'bulk-two');
+  const a = api['objects:create']({ typeId: 'note', title: 'A', props: { cover: [r1] } });
+  const b = api['objects:create']({ typeId: 'note', title: 'B', props: { cover: [r2] } });
+
+  api['objects:bulkDelete']([a.id, b.id]);
+  assert.equal(files.resolve(r1.hash, r1.ext), null);
+  assert.equal(files.resolve(r2.hash, r2.ext), null);
+});
+
+test('deleting a whole type sweeps the files its objects held', () => {
+  const t = api['types:create']({ name: 'Scratch Type' });
+  const ref = add('scratch.jpg', 'image/jpeg', 'belongs-to-a-doomed-type');
+  api['objects:create']({ typeId: t.id, title: 'One', props: { cover: [ref] } });
+
+  api['types:delete'](t.id);
+  assert.equal(files.resolve(ref.hash, ref.ext), null, 'its file went with it');
+});
+
 test('attachment names are searchable', () => {
   const ref = add('quarterly-forecast.pdf', 'application/pdf', 'numbers');
   api['objects:create']({ typeId: 'note', title: 'Planning', content: mediaDoc(ref) });

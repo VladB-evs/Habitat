@@ -1692,18 +1692,67 @@ button.version.version-update {
 
 .db-table {
   border-collapse: collapse;
-  min-width: 100%;
+  /* Columns are sized by the <colgroup>, not by their contents: a column has to
+     stay where it was dragged to, and an auto layout re-shares the width out
+     between all of them every time a cell's text changes.
+     `width` has to be definite for that — with `min-width: 100%` alone the table
+     is auto-width, which turns the fixed algorithm off and hands the columns
+     back to their contents. The matching min-width, the total the columns add up
+     to, is set per render and is what makes the table scroll sideways instead of
+     squeezing them. */
+  table-layout: fixed;
+  width: 100%;
+}
+
+.db-table.resizing {
+  user-select: none;
+  cursor: col-resize;
 }
 
 .db-table th {
+  position: relative;
   text-align: left;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-2);
   border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   padding: 0;
   white-space: nowrap;
   user-select: none;
+}
+
+/* The last column is the leftover space, not a column of its own. */
+.db-table th:last-child,
+.db-table td:last-child {
+  border-right: none;
+}
+
+.db-table th.dragging {
+  opacity: 0.45;
+}
+
+/* Where a dragged column will land. */
+.db-table th.over-col {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* The strip you grab to set a column's width, hanging over the border it moves. */
+.col-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -3px;
+  width: 7px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+@media (hover: hover) {
+  .col-resize:hover {
+    background: linear-gradient(to right, transparent 2px, var(--accent) 2px, var(--accent) 5px, transparent 5px);
+  }
 }
 
 .th-btn {
@@ -1732,11 +1781,68 @@ button.version.version-update {
 
 .db-table td {
   border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
   padding: 0;
-  min-width: 130px;
-  max-width: 340px;
+  /* Fixed columns mean a long value has to be cut off rather than widen the
+     column it sits in. */
+  overflow: hidden;
+  text-overflow: ellipsis;
   vertical-align: middle;
   position: relative;
+}
+
+/* One height for every row, whatever a cell happens to hold. A cell's `height`
+   is only a minimum in table layout, so this holds solely because nothing in a
+   row is allowed to wrap — see the block below. */
+.db-table tbody td {
+  height: 34px;
+}
+
+/*
+ * In a table, a cell is one line. Several tags, a handful of relations or a
+ * paragraph of notes used to wrap and drag the whole row taller, which is what
+ * stops a grid reading as a grid; here they run off the end of their column
+ * and are cut off instead. These same cells still wrap wherever else they are
+ * used — the object page's property list wants the full value on show.
+ */
+.db-table tbody .select-val,
+.db-table tbody .relation-cell,
+.db-table tbody .inline-props {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+/* Chips keep their own size rather than being squeezed to fit the column. */
+.db-table tbody .opt-chip,
+.db-table tbody .chip {
+  flex: 0 0 auto;
+}
+
+.db-table tbody .relation-cell {
+  min-height: 0;
+}
+
+/* Long text is a preview in the table; the page is where it's actually written. */
+.db-table tbody .cell-input.area {
+  height: 32px;
+  min-height: 0;
+  resize: none;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.db-table tbody tr.dragging td {
+  opacity: 0.4;
+}
+
+/* Where a dragged row will land — drawn on the row it's hovering, on the side
+   the cursor is closest to. */
+.db-table tbody tr.drop-above td {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.db-table tbody tr.drop-below td {
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .db-table tbody tr {
@@ -1756,19 +1862,9 @@ button.version.version-update {
   }
 }
 
-/*
- * The flexible column. `max-width` on .db-table td was capping this at 340px, so
- * a name was clipped however wide the window got; `width: 100%` now hands it
- * every pixel the property columns don't need. It gives way only when the
- * window is genuinely narrow or there are enough properties to need the room —
- * that's what the min-width is for.
- */
-/* Qualified with .db-table so it actually outranks `.db-table td` (0,1,1) —
-   unqualified, this rule's min-width never applied at all. */
+/* Sized by the <colgroup> like every other column, and resizable the same way.
+   What space is left over goes to the empty column after the last property. */
 .db-table .td-name {
-  min-width: 280px;
-  max-width: none;
-  width: 100%;
   position: relative;
 }
 
@@ -2152,14 +2248,11 @@ input[type='date'].cell-input {
   }
 }
 
-.td-end {
-  min-width: 36px !important;
-  width: 36px;
-}
-
+/* Both sit in the leftover column at the end of the row, so neither sets a
+   width — the row's options button under the button that adds a property. */
+.td-end,
 .th-add {
-  width: 36px;
-  min-width: 36px;
+  padding-left: 2px;
 }
 
 .add-row {
@@ -4450,11 +4543,45 @@ code.var-ref-name {
   padding-top: 0;
 }
 
+.col-gutter {
+  width: 54px;
+}
+
 .td-pick {
-  width: 38px;
-  min-width: 38px !important;
-  padding-left: 10px !important;
-  text-align: center;
+  padding-left: 8px !important;
+  text-align: left;
+}
+
+/* Grip and tick sit side by side in the gutter, both out of sight until the
+   row is hovered — the row itself is the thing you're meant to see. */
+.row-gutter {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.row-grip {
+  opacity: var(--reveal-idle, 0);
+  display: inline-flex;
+  padding: 3px 0;
+  color: var(--text-3);
+  cursor: grab;
+  transition: opacity 0.12s;
+}
+
+.row-grip:active {
+  cursor: grabbing;
+}
+
+@media (hover: hover) {
+  .db-table tr:hover .row-grip,
+  .db-table tr:hover .pick-box {
+    opacity: 1;
+  }
+
+  .row-grip:hover {
+    color: var(--text);
+  }
 }
 
 .db-table tr.picked td {
@@ -5019,6 +5146,75 @@ code.var-ref-name {
    those still need dark text on top of them. */
 .editor .ProseMirror mark[data-color^='#'] {
   color: #2c2b28;
+}
+
+/* ---------- hidden text ("spoiler" mark) ---------- */
+
+/* Redacted by default: blurred, colourless, faintly alive with a diagonal
+   shimmer so it reads as "tap to reveal" rather than "broken text". A click
+   snaps it into focus, then it covers itself back up on its own. */
+.spoiler-mark {
+  position: relative;
+  border-radius: 4px;
+  padding: 0 1px;
+  cursor: pointer;
+  isolation: isolate;
+  color: transparent;
+  filter: blur(6px);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  transition: filter 0.4s cubic-bezier(0.22, 1, 0.36, 1), color 0.25s ease 0.05s,
+    background-color 0.4s ease, transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.spoiler-mark::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    color-mix(in srgb, var(--text) 22%, transparent) 50%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  animation: spoiler-shimmer 2.4s ease-in-out infinite;
+  opacity: 1;
+  transition: opacity 0.3s ease;
+}
+
+.spoiler-mark.is-revealed {
+  color: inherit;
+  filter: blur(0);
+  background: color-mix(in srgb, var(--accent, #8b7bea) 18%, transparent);
+  transform: scale(1.015);
+  animation: spoiler-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.spoiler-mark.is-revealed::after {
+  opacity: 0;
+}
+
+@keyframes spoiler-shimmer {
+  0% {
+    background-position: 220% 0;
+  }
+  100% {
+    background-position: -220% 0;
+  }
+}
+
+@keyframes spoiler-pop {
+  0% {
+    transform: scale(0.96);
+  }
+  55% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1.015);
+  }
 }
 
 /* ---------- search palette + result rows ---------- */
@@ -6039,8 +6235,11 @@ code.var-ref-name {
   text-overflow: ellipsis;
 }
 
+/* In a fixed-width column the name and its extra values compete for the same
+   room. The name is the thing being scanned for, so the values give way first
+   rather than both shrinking together. */
 .cell-name .inline-props {
-  flex: 0 1 auto;
+  flex: 0 100 auto;
   min-width: 0;
   margin-left: 0;
 }
@@ -6595,6 +6794,391 @@ code.var-ref-name {
   letter-spacing: 0.07em;
   color: var(--text-3);
   margin-bottom: 6px;
+}
+
+/* ==================== Media (movies, TV, books, comics) ==================== */
+
+.media-body {
+  padding: 0 40px 96px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.media-add {
+  flex-wrap: wrap;
+}
+
+.media-add-kind {
+  flex-shrink: 0;
+}
+
+/* ---------- the poster wall ---------- */
+
+/*
+ * Flex-wrap with a fixed card width rather than a `grid-template-columns:
+ * repeat(auto-fill, minmax(…, 1fr))` — an animated container (the pane split
+ * opening or closing) makes a `1fr` grid recompute every card's width on
+ * every frame, snapping the whole wall to a new size each time a column stops
+ * or starts fitting. Fixed-width flex items just wrap to a new row instead;
+ * nothing already on screen changes size while the pane animates.
+ */
+.poster-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.poster-card {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 148px;
+  flex: 0 0 auto;
+  text-align: left;
+  cursor: pointer;
+}
+
+.poster-art {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 11px;
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+
+.poster-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.poster-empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}
+
+.poster-status {
+  position: absolute;
+  left: 7px;
+  bottom: 7px;
+  font-size: 10px;
+  font-weight: 640;
+  padding: 3px 8px;
+  border-radius: 20px;
+  color: #fff;
+  background: color-mix(in srgb, var(--text-3) 70%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.poster-status.finished {
+  background: color-mix(in srgb, #199e70 78%, transparent);
+}
+
+.poster-status.in-progress {
+  background: color-mix(in srgb, #3987e5 78%, transparent);
+}
+
+.poster-status.dropped {
+  background: color-mix(in srgb, #e34948 72%, transparent);
+}
+
+.poster-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.poster-sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.media-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  color: #eda100;
+  flex-shrink: 0;
+}
+
+/* ---------- the media item page ---------- */
+
+.media-hero {
+  display: flex;
+  gap: 22px;
+  align-items: flex-start;
+}
+
+.media-poster {
+  position: relative;
+  flex-shrink: 0;
+  width: 140px;
+  aspect-ratio: 2 / 3;
+  border-radius: 13px;
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+
+.media-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.media-poster-empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}
+
+.media-cover-btn {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 550;
+  padding: 7px 4px;
+  color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), transparent);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+@media (hover: hover) {
+  .media-poster:hover .media-cover-btn {
+    opacity: 1;
+  }
+}
+
+@media (hover: none) {
+  .media-cover-btn {
+    opacity: 1;
+    background: rgba(0, 0, 0, 0.5);
+  }
+}
+
+.media-hero-main {
+  flex: 1;
+  min-width: 0;
+  padding-top: 2px;
+}
+
+.media-kind {
+  margin-bottom: 6px;
+}
+
+.media-title {
+  width: 100%;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  padding: 0;
+}
+
+.media-title::placeholder {
+  color: var(--text-3);
+}
+
+.media-hero-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin-top: 14px;
+}
+
+.obj-prop.inline {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-height: 0;
+}
+
+.obj-prop.inline > label {
+  width: auto;
+  padding-left: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.media-props {
+  margin-top: 22px;
+}
+
+/* ---------- the cover picker ---------- */
+
+.cover-picker {
+  width: min(560px, calc(100vw - 48px));
+  max-height: min(640px, calc(100vh - 80px));
+  display: flex;
+  flex-direction: column;
+  border-radius: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  box-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.6);
+  padding: 18px 20px 20px;
+  overflow: hidden;
+}
+
+.cover-picker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.cover-picker-head h3 {
+  font-size: 15px;
+  font-weight: 660;
+}
+
+.cover-picker-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-2);
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+
+.cover-picker-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.cover-picker-error {
+  margin-top: 10px;
+  font-size: 12.5px;
+  color: #e34948;
+}
+
+.cover-picker-empty {
+  padding: 24px 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-3);
+}
+
+.cover-picker-grid {
+  margin-top: 14px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 12px;
+}
+
+.cover-result {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 9px;
+}
+
+.cover-result-art {
+  position: relative;
+  aspect-ratio: 2 / 3;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+}
+
+.cover-result-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cover-result-busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.cover-result-title {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cover-result-sub {
+  font-size: 10.5px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cover-picker-foot {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* ---------- the detail picker ---------- */
@@ -9890,8 +10474,6 @@ figcaption {
   display: flex;
   gap: 12px;
   align-items: stretch;
-  flex: 1;
-  min-width: 280px;
 }
 
 .sr-stat {
@@ -9904,11 +10486,6 @@ figcaption {
   background: var(--bg-2);
   border: 1px solid var(--border);
   min-width: 96px;
-}
-
-.sr-stat.wide {
-  flex: 1;
-  justify-content: space-between;
 }
 
 .sr-stat-n {
@@ -9928,36 +10505,6 @@ figcaption {
 .sr-stat-l {
   font-size: 11.5px;
   color: var(--text-3);
-}
-
-/* heat map */
-
-.sr-heat {
-  display: grid;
-  grid-template-rows: repeat(7, 1fr);
-  grid-auto-flow: column;
-  gap: 3px;
-  margin-bottom: 8px;
-}
-
-.sr-heat-cell {
-  width: 9px;
-  height: 9px;
-  border-radius: 2.5px;
-  background: var(--bg-3);
-}
-
-.sr-heat-cell.l1 {
-  background: color-mix(in srgb, var(--heat) 30%, var(--bg-3));
-}
-.sr-heat-cell.l2 {
-  background: color-mix(in srgb, var(--heat) 52%, var(--bg-3));
-}
-.sr-heat-cell.l3 {
-  background: color-mix(in srgb, var(--heat) 74%, var(--bg-3));
-}
-.sr-heat-cell.l4 {
-  background: var(--heat);
 }
 
 /* ---- deck tiles ---- */
@@ -10281,17 +10828,48 @@ figcaption {
   gap: 12px;
 }
 
-.sr-card {
+/* A real flashcard: two faces of one physical card, flipped in 3D rather
+   than expanded downward. Both faces share a CSS grid cell so the card's
+   height always follows whichever face is taller — no fixed height to
+   guess at. */
+
+.sr-flip {
   width: 100%;
+  min-height: 260px;
+  cursor: pointer;
+  perspective: 1400px;
+}
+
+.sr-flip.flipped {
+  cursor: default;
+}
+
+.sr-flip-inner {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+}
+
+.sr-face {
+  grid-area: 1 / 1;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   border-radius: 20px;
   background: var(--bg-2);
   border: 1px solid var(--border);
   box-shadow: 0 24px 60px -34px rgba(0, 0, 0, 0.7);
   padding: 34px 32px;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
-.sr-card.revealed {
+.sr-face.back {
+  transform: rotateY(180deg);
   border-color: color-mix(in srgb, var(--accent) 34%, var(--border));
 }
 
@@ -10302,7 +10880,7 @@ figcaption {
   letter-spacing: 0.08em;
   color: var(--text-3);
   font-weight: 640;
-  margin-bottom: 10px;
+  margin-bottom: 14px;
 }
 
 .sr-prompt {
@@ -10315,15 +10893,13 @@ figcaption {
   white-space: pre-wrap;
 }
 
-.sr-face.back {
-  overflow: hidden;
-}
-
-.sr-rule {
-  display: block;
-  height: 1px;
-  background: var(--border);
-  margin: 22px 0 20px;
+.sr-flip-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 22px;
+  font-size: 11.5px;
+  color: var(--text-3);
 }
 
 .sr-answer {
@@ -10344,9 +10920,15 @@ figcaption {
   white-space: pre-wrap;
 }
 
+.sr-sources {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 18px;
+}
+
 .sr-source {
-  display: block;
-  margin: 18px auto 0;
   font-size: 12px;
   color: var(--text-3);
   display: inline-flex;

@@ -22,6 +22,7 @@ export type View =
   | { kind: 'studyNote'; id: string }
   | { kind: 'tags' }
   | { kind: 'people' }
+  | { kind: 'media' }
   | { kind: 'type'; typeId: string }
   /** `occurrence` is set when this was opened from one day of a repeating series
    *  on the calendar, so notes taken here can fork just that day instead of
@@ -91,6 +92,7 @@ function initialView(): View {
   if (h.startsWith('/study')) return { kind: 'study' };
   if (h.startsWith('/tags')) return { kind: 'tags' };
   if (h.startsWith('/people')) return { kind: 'people' };
+  if (h.startsWith('/media')) return { kind: 'media' };
   if (h.startsWith('/type/')) return { kind: 'type', typeId: h.slice(6) };
   if (h.startsWith('/object/')) return { kind: 'object', id: h.slice(8) };
   return { kind: 'dashboard' };

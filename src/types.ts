@@ -108,6 +108,16 @@ export interface FileRef {
   height?: number | null;
 }
 
+/** One hit from a cover search — title/year enough to tell candidates apart, plus the image to fetch. */
+export interface CoverResult {
+  id: string;
+  title: string;
+  subtitle: string;
+  year: number | null;
+  creator: string | null;
+  image: string;
+}
+
 export interface PropDef {
   id: string;
   name: string;
@@ -385,9 +395,6 @@ export interface StudyOverview {
   /** The most recent pages of writing, bodies clipped for the list. */
   notes: StudyNote[];
   totals: DeckCounts;
-  history: { day: string; n: number }[];
-  /** Consecutive days ending today (or yesterday, if today isn't done yet). */
-  streak: number;
   reviewedToday: number;
 }
 

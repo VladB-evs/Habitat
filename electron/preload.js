@@ -36,6 +36,7 @@ const CHANNELS = new Set([
   'window:trafficLights',
   'sync:status', 'sync:now', 'sync:signIn', 'sync:signOut', 'sync:config', 'sync:saveConfig',
   'tags:list', 'tags:search', 'tags:ensure', 'tags:delete',
+  'media:searchCovers', 'media:fetchCover',
 ]);
 
 contextBridge.exposeInMainWorld('habitat', {

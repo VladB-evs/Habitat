@@ -192,44 +192,53 @@ export function StudySession({
         <AnimatePresence mode="wait">
           {card && (
             <motion.div
-              key={card.id + String(shown)}
+              key={card.id}
               className="sr-card-wrap"
-              initial={{ opacity: 0, y: 14, rotateX: -6 }}
-              animate={{ opacity: 1, y: 0, rotateX: 0 }}
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -12, scale: 0.98 }}
               transition={spring}
             >
-              <div className={'sr-card' + (shown ? ' revealed' : '')}>
-                <div className="sr-face front">
-                  <span className="sr-face-label">{card.extra?.dir === 'recall' ? 'Meaning' : 'Prompt'}</span>
-                  <div className="sr-prompt">{card.front}</div>
-                </div>
+              <div
+                className={'sr-flip' + (shown ? ' flipped' : '')}
+                onClick={() => !shown && setShown(true)}
+                role="button"
+                tabIndex={0}
+                aria-label={shown ? 'Answer' : 'Tap to reveal the answer'}
+              >
+                <motion.div
+                  className="sr-flip-inner"
+                  animate={{ rotateY: shown ? 180 : 0 }}
+                  transition={{ type: 'spring', stiffness: 340, damping: 32 }}
+                >
+                  <div className="sr-face front">
+                    <span className="sr-face-label">{card.extra?.dir === 'recall' ? 'Meaning' : 'Prompt'}</span>
+                    <div className="sr-prompt">{card.front}</div>
+                    <span className="sr-flip-hint">
+                      Tap to flip <kbd>space</kbd>
+                    </span>
+                  </div>
 
-                <AnimatePresence>
-                  {shown && (
-                    <motion.div
-                      className="sr-face back"
-                      initial={{ opacity: 0, height: 0 }}
-                      animate={{ opacity: 1, height: 'auto' }}
-                      exit={{ opacity: 0, height: 0 }}
-                      transition={spring}
-                    >
-                      <span className="sr-rule" />
-                      <div className="sr-answer">{card.back}</div>
-                      {card.hint && <div className="sr-hint">{card.hint}</div>}
-                      {card.noteId && (
-                        <button className="sr-source" onClick={() => navigate({ kind: 'studyNote', id: card.noteId! })}>
-                          <Icon name="doc" size={12} /> Open the note this came from
-                        </button>
-                      )}
-                      {card.objId && (
-                        <button className="sr-source" onClick={() => openObject(card.objId!)}>
-                          <Icon name="arrow-up-right" size={12} /> Open it in your vault
-                        </button>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+                  <div className="sr-face back">
+                    <span className="sr-face-label">{card.extra?.dir === 'recall' ? 'Prompt' : 'Answer'}</span>
+                    <div className="sr-answer">{card.back}</div>
+                    {card.hint && <div className="sr-hint">{card.hint}</div>}
+                    {(card.noteId || card.objId) && (
+                      <span className="sr-sources" onClick={(e) => e.stopPropagation()}>
+                        {card.noteId && (
+                          <button className="sr-source" onClick={() => navigate({ kind: 'studyNote', id: card.noteId! })}>
+                            <Icon name="doc" size={12} /> Open the note
+                          </button>
+                        )}
+                        {card.objId && (
+                          <button className="sr-source" onClick={() => openObject(card.objId!)}>
+                            <Icon name="arrow-up-right" size={12} /> Open in vault
+                          </button>
+                        )}
+                      </span>
+                    )}
+                  </div>
+                </motion.div>
               </div>
 
               {card.state === 'new' && <span className="sr-badge new">New card</span>}

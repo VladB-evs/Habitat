@@ -193,6 +193,9 @@ export const clientUid = () => Math.random().toString(36).slice(2, 10);
 /** The People type id — its own view, its own page, hidden from the generic type list. */
 export const PEOPLE_TYPE = 'people';
 
+/** The Media type id — movies, TV shows, books and comics — its own poster wall, hidden from the generic type list. */
+export const MEDIA_TYPE = 'media';
+
 /**
  * Types an object can't be moved in or out of: a daily note is keyed by its
  * date, a tag is only a label, and a person backs the address book. The main

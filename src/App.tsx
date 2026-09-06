@@ -35,11 +35,12 @@ const DeckPage = lazy(() => import('./components/study/DeckPage').then((m) => ({
 const StudyNotePage = lazy(() => import('./components/study/StudyNotePage').then((m) => ({ default: m.StudyNotePage })));
 import { TagsView } from './components/TagsView';
 import { People } from './components/People';
+import { Media } from './components/Media';
 import { SearchPalette } from './components/SearchPalette';
 import { AskPanel } from './components/AskPanel';
 import { Icon } from './components/Icons';
 import { pageIn, snap, softSpring, spring } from './motion';
-import { PEOPLE_TYPE, viewport } from './util';
+import { MEDIA_TYPE, PEOPLE_TYPE, viewport } from './util';
 
 const viewKey = (v: View) =>
   v.kind === 'type'
@@ -97,9 +98,16 @@ function PaneView({ view }: { view: View }) {
         )}
         {view.kind === 'tags' && <TagsView />}
         {view.kind === 'people' && <People />}
-        {/* People has its own view rather than the generic table. */}
+        {view.kind === 'media' && <Media />}
+        {/* People and Media have their own views rather than the generic table. */}
         {view.kind === 'type' &&
-          (view.typeId === PEOPLE_TYPE ? <People /> : <TypeTable key={view.typeId} typeId={view.typeId} />)}
+          (view.typeId === PEOPLE_TYPE ? (
+            <People />
+          ) : view.typeId === MEDIA_TYPE ? (
+            <Media />
+          ) : (
+            <TypeTable key={view.typeId} typeId={view.typeId} />
+          ))}
         {view.kind === 'object' && <ObjectPage key={view.id} id={view.id} occurrence={view.occurrence} />}
         {view.kind === 'template' && <TemplatePage key={view.id} id={view.id} />}
       </motion.div>

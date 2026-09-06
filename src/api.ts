@@ -8,6 +8,7 @@ import type {
   CanvasSummary,
   Card,
   CardKind,
+  CoverResult,
   DailyMeta,
   DashLayout,
   Deck,
@@ -406,6 +407,17 @@ export const api = {
     birthdays: (within = 60): Promise<Person[]> => inv('people:birthdays', { within }),
     /** The catalogue of optional details a person can be given. */
     fields: (): Promise<PersonFieldGroup[]> => inv('people:fields'),
+  },
+  media: {
+    /** Movie art comes from Wikipedia, TV from TVmaze, books and comics from Open Library — routed by `kind`. */
+    searchCovers: (kind: string, query: string): Promise<CoverResult[]> => inv('media:searchCovers', { kind, query }),
+    /**
+     * Downloads a chosen cover into the vault's own file store and returns its
+     * reference, along with whatever genre that same source could tell us
+     * about the pick — `id` is the result's own id, needed to look that up.
+     */
+    fetchCover: (url: string, name: string, kind: string, id: string): Promise<{ file: FileRef; genre: string[] }> =>
+      inv('media:fetchCover', { url, name, kind, id }),
   },
   importObsidian: (
     mode: 'vault' | 'daily'

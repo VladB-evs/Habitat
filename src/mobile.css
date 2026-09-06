@@ -301,6 +301,40 @@
   width: auto;
 }
 
+/* A card is as tall as its lines and as wide as the screen, so none of the
+   grid's fixed sizing applies: no column widths, no dividers, no clipping. */
+:root[data-narrow] .db-table {
+  table-layout: auto;
+  /* The width the columns add up to is set inline, and means nothing to a stack
+     of cards — left alone it would make the page scroll sideways for no reason. */
+  min-width: 0 !important;
+  width: auto;
+}
+
+:root[data-narrow] .db-table td,
+:root[data-narrow] .db-table tbody td {
+  height: auto;
+  overflow: visible;
+  border-right: none;
+}
+
+/* A card is a line per property with the whole width to itself, so the values
+   wrap the way they always did — one line per cell is a grid's constraint, not
+   a card's. */
+:root[data-narrow] .db-table tbody .select-val,
+:root[data-narrow] .db-table tbody .relation-cell,
+:root[data-narrow] .db-table tbody .inline-props {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+:root[data-narrow] .db-table tbody .cell-input.area {
+  height: auto;
+  white-space: pre-wrap;
+  overflow: auto;
+  resize: vertical;
+}
+
 /* The header row's only job was naming the columns, and each cell now names
    itself. */
 :root[data-narrow] .db-table thead {
@@ -363,13 +397,9 @@
   padding: 0;
 }
 
-/* The select checkbox likewise, opposite it, and only while selecting. */
+/* The select checkbox likewise, opposite it. */
 :root[data-narrow] .db-table td.td-pick {
   padding: 0 0 4px;
-}
-
-:root[data-narrow] .db-table td.td-pick.off {
-  display: none;
 }
 
 :root[data-narrow] .add-row {

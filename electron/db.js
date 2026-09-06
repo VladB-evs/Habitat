@@ -7,6 +7,7 @@ const { DatabaseSync } = require('node:sqlite');
 const files = require('./files');
 const canvas = require('./canvas');
 const study = require('./study');
+const media = require('./media');
 const recur = require('./recur');
 const synclog = require('./synclog');
 
@@ -793,6 +794,33 @@ function referencedHashes() {
   return used;
 }
 
+/**
+ * Delete every stored file nothing refers to any more. Reference counting
+ * would drift; walking what's actually there is slower but always right.
+ * Shared by the manual "free up space" sweep and by deleting an object —
+ * a cover or attachment that went with it shouldn't just sit there unlinked.
+ */
+function gcFiles() {
+  const used = referencedHashes();
+  let removed = 0;
+  let freed = 0;
+  const drop = db.prepare('DELETE FROM files WHERE hash = ?');
+  for (const f of db.prepare('SELECT hash, ext, size FROM files').all()) {
+    if (used.has(f.hash)) continue;
+    freed += files.remove(f.hash, f.ext) || f.size;
+    drop.run(f.hash);
+    removed++;
+  }
+  // Blobs the database never knew about — a crash between write and insert.
+  const known = new Set(db.prepare('SELECT hash FROM files').all().map((r) => r.hash));
+  for (const stored of files.listStored()) {
+    if (known.has(stored.hash)) continue;
+    freed += files.remove(stored.hash, stored.ext) || stored.size;
+    removed++;
+  }
+  return { removed, freed };
+}
+
 // ---------- core operations ----------
 
 
@@ -1464,6 +1492,22 @@ const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300
 // the sidebar's type list. So it gets the connection and nothing else.
 const studyApi = study.create(() => db);
 
+/**
+ * Take bytes into the store and remember what they are. Returns the reference
+ * that gets embedded in a note or a property — everything a view needs to draw
+ * the thing without another lookup. Shared by `files:add` (bytes from the
+ * renderer) and Media's cover fetch (bytes downloaded in the main process).
+ */
+function addFileBytes(buffer, name, mime, width, height) {
+  if (!buffer.length) throw new Error('that file is empty');
+  const { hash, ext, size } = files.store(buffer, name);
+  db.prepare(
+    `INSERT INTO files (hash, name, mime, ext, size, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(hash) DO UPDATE SET width = COALESCE(excluded.width, files.width), height = COALESCE(excluded.height, files.height)`
+  ).run(hash, String(name || 'file'), String(mime || ''), ext, size, width ?? null, height ?? null, now());
+  return { hash, name: String(name || 'file'), mime: String(mime || ''), ext, size, width: width ?? null, height: height ?? null };
+}
+
 const api = {
   // Boards and decks keep their own tables and their own modules; they are spread
   // in here so every channel is still reachable from one place.
@@ -1472,6 +1516,7 @@ const api = {
     fileRow: (hash) => db.prepare('SELECT * FROM files WHERE hash = ?').get(String(hash)) ?? null,
   }),
   ...studyApi,
+  ...media.channels({ addFile: addFileBytes }),
 
   'types:list': () => db.prepare('SELECT * FROM types ORDER BY builtin DESC, created_at').all().map(parseType),
 
@@ -1502,6 +1547,7 @@ const api = {
     for (const o of objs) deleteObject(o.id);
     db.prepare('DELETE FROM templates WHERE type_id = ?').run(id);
     db.prepare('DELETE FROM types WHERE id = ?').run(id);
+    gcFiles();
     return true;
   },
 
@@ -1711,10 +1757,17 @@ const api = {
   'objects:create': (p) => createObject(p),
   'objects:update': (p) => updateObjectForOccurrence(p),
   'objects:setType': (p) => setObjectType(p),
-  'objects:delete': (id) => deleteObject(id),
+  // A cover or attachment a deleted object was the last reference to
+  // shouldn't just sit there unlinked — see gcFiles().
+  'objects:delete': (id) => {
+    const ok = deleteObject(id);
+    gcFiles();
+    return ok;
+  },
 
   'objects:bulkDelete': (ids) => {
     for (const id of ids || []) deleteObject(id);
+    gcFiles();
     return { deleted: (ids || []).length };
   },
 
@@ -2432,16 +2485,7 @@ const api = {
    * that gets embedded in a note or a property — everything a view needs to draw
    * the thing without another lookup.
    */
-  'files:add': ({ name, mime, data, width, height } = {}) => {
-    const buffer = Buffer.from(data);
-    if (!buffer.length) throw new Error('that file is empty');
-    const { hash, ext, size } = files.store(buffer, name);
-    db.prepare(
-      `INSERT INTO files (hash, name, mime, ext, size, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(hash) DO UPDATE SET width = COALESCE(excluded.width, files.width), height = COALESCE(excluded.height, files.height)`
-    ).run(hash, String(name || 'file'), String(mime || ''), ext, size, width ?? null, height ?? null, now());
-    return { hash, name: String(name || 'file'), mime: String(mime || ''), ext, size, width: width ?? null, height: height ?? null };
-  },
+  'files:add': ({ name, mime, data, width, height } = {}) => addFileBytes(Buffer.from(data), name, mime, width, height),
 
   'files:get': (hash) => db.prepare('SELECT * FROM files WHERE hash = ?').get(String(hash)) ?? null,
 
@@ -2462,30 +2506,7 @@ const api = {
     };
   },
 
-  /**
-   * Delete every stored file nothing refers to any more. Reference counting would
-   * drift; walking what's actually there is slower but always right.
-   */
-  'files:gc': () => {
-    const used = referencedHashes();
-    let removed = 0;
-    let freed = 0;
-    const drop = db.prepare('DELETE FROM files WHERE hash = ?');
-    for (const f of db.prepare('SELECT hash, ext, size FROM files').all()) {
-      if (used.has(f.hash)) continue;
-      freed += files.remove(f.hash, f.ext) || f.size;
-      drop.run(f.hash);
-      removed++;
-    }
-    // Blobs the database never knew about — a crash between write and insert.
-    const known = new Set(db.prepare('SELECT hash FROM files').all().map((r) => r.hash));
-    for (const stored of files.listStored()) {
-      if (known.has(stored.hash)) continue;
-      freed += files.remove(stored.hash, stored.ext) || stored.size;
-      removed++;
-    }
-    return { removed, freed };
-  },
+  'files:gc': () => gcFiles(),
 
   'automations:list': () => loadAutomations(),
 
@@ -2912,6 +2933,18 @@ function migrate() {
       upd.run(JSON.stringify(defs.map((p) => (p.targetTypeId === 'person' ? { ...p, targetTypeId: PEOPLE_TYPE } : p))), t.id);
     }
   });
+
+  // Media — movies, TV shows, books and comics — ships as a builtin type on
+  // every vault, new or existing, the same way People does.
+  runOnce('media-v1', () => media.ensureMediaType(db, now));
+
+  // By/Year are dropped for Started/Finished — dates for when something was
+  // actually watched or read, which is what this module is for.
+  runOnce('media-v2', () => media.migrateMediaProps(db));
+
+  // Comments duplicated the note body every object already has — dropped from
+  // the type, and erased from any object that had already written one.
+  runOnce('media-v3', () => media.dropCommentsProp(db));
 
   /**
    * Relationship becomes a multi-select — someone can be a colleague and a
