@@ -25,26 +25,39 @@ export function moodMeta(score: number | undefined) {
 
 export function MoodPicker({ value, onPick }: { value?: number; onPick: (score: number | null) => void }) {
   return (
-    <div className="mood-row">
+    <div className="mood-row" role="radiogroup" aria-label="Daily mood">
       {MOODS.map((m) => {
         const on = value === m.score;
         return (
           <motion.button
             key={m.score}
             type="button"
+            role="radio"
+            aria-checked={on}
             className={'mood-btn' + (on ? ' on' : '')}
             style={{ '--mood-color': m.color } as CSSProperties}
             // Tapping your current mood again clears it — the same low-friction
             // "didn't mean to log that" undo as everything else in the app.
             onClick={() => onPick(on ? null : m.score)}
-            whileHover={{ y: -2 }}
-            whileTap={{ scale: 0.92 }}
+            whileTap={{ scale: 0.94 }}
             transition={spring}
-            title={m.label}
+            title={on ? `${m.label} (click to clear)` : m.label}
             aria-label={m.label}
-            aria-pressed={on}
           >
-            <Icon name={m.icon} size={18} />
+            {on && (
+              <motion.span
+                layoutId="mood-sel"
+                className="mood-sel"
+                transition={spring}
+              />
+            )}
+            <motion.span
+              className="mood-icon-wrap"
+              animate={{ scale: on ? 1.1 : 1 }}
+              transition={spring}
+            >
+              <Icon name={m.icon} size={18} />
+            </motion.span>
             <span className="mood-label">{m.label}</span>
           </motion.button>
         );

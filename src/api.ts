@@ -418,6 +418,8 @@ export const api = {
      */
     fetchCover: (url: string, name: string, kind: string, id: string): Promise<{ file: FileRef; genre: string[] }> =>
       inv('media:fetchCover', { url, name, kind, id }),
+    tmdbStatus: (): Promise<{ hasKey: boolean; maskedKey: string | null }> => inv('media:tmdbStatus'),
+    setTmdbKey: (key: string): Promise<{ hasKey: boolean; maskedKey: string | null }> => inv('media:setTmdbKey', { key }),
   },
   importObsidian: (
     mode: 'vault' | 'daily'
@@ -453,7 +455,15 @@ export const api = {
       name: string;
       flavor: string;
       dir?: string;
+      icon?: string;
+      aura?: string;
     }): Promise<{ id: string; dbPath: string } | { error: string }> => inv('habitats:create', p),
+    update: (p: {
+      id: string;
+      name?: string;
+      icon?: string;
+      aura?: string;
+    }): Promise<{ ok: boolean } | null> => inv('habitats:update', p),
     switchTo: (id: string): Promise<{ id: string; dbPath: string } | null> => inv('habitats:switch', { id }),
     /** Adopts a habitat that already exists on disk, e.g. one synced from another machine. */
     open: (): Promise<{ id: string; name: string; dbPath: string } | { error: string } | null> => inv('habitats:open'),
@@ -463,6 +473,8 @@ export const api = {
       userName?: string;
       people?: { name: string; nickname?: string }[];
       dir?: string;
+      icon?: string;
+      aura?: string;
     }): Promise<boolean> => inv('habitats:onboard', p),
     remove: (id: string): Promise<{ ok: boolean; onboarding?: boolean; activeId?: string } | null> =>
       inv('habitats:delete', { id }),

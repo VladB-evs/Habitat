@@ -14,7 +14,6 @@ export type NavKey =
   | 'dashboard'
   | 'daily'
   | 'tasks'
-  | 'events'
   | 'people'
   | 'media'
   | 'tags'
@@ -33,7 +32,6 @@ export const NAV_BUILTINS: NavBuiltin[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'grid' },
   { key: 'daily', label: 'Daily Notes', icon: 'calendar' },
   { key: 'tasks', label: 'Tasks', icon: 'circle-check' },
-  { key: 'events', label: 'Events', icon: 'calendar-clock' },
   { key: 'people', label: 'People', icon: 'people' },
   { key: 'media', label: 'Media', icon: 'film' },
   { key: 'tags', label: 'Tags', icon: 'hash' },
@@ -56,7 +54,9 @@ export function loadNav(): NavKey[] {
   try {
     const raw = localStorage.getItem(STORE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
-    if (Array.isArray(parsed) && parsed.length && parsed.every((k) => typeof k === 'string')) return parsed as NavKey[];
+    if (Array.isArray(parsed) && parsed.length && parsed.every((k) => typeof k === 'string')) {
+      return parsed.map((k) => (k === 'events' || k === 'calendar' ? 'tasks' : k)) as NavKey[];
+    }
   } catch {
     // Corrupt value from a future version or manual edit — fall through to the default.
   }

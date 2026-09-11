@@ -157,6 +157,16 @@
   padding: 0 14px 20px;
 }
 
+:root[data-narrow] .dash-grid {
+  grid-template-columns: 1fr;
+  grid-auto-rows: auto;
+  gap: 12px;
+}
+
+:root[data-narrow] .dash-grid > .w-wrap {
+  grid-column: 1 / -1 !important;
+}
+
 :root[data-narrow] .picker-grid {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -167,6 +177,42 @@
 :root[data-narrow] .cv-tiles,
 :root[data-narrow] .sr-decks {
   grid-template-columns: minmax(0, 1fr);
+}
+
+:root[data-narrow] .poster-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+:root[data-narrow] .poster-card {
+  width: auto;
+}
+
+:root[data-narrow] .media-body {
+  padding: 0 16px calc(74px + var(--bottom-nav-h));
+  gap: 12px;
+}
+
+:root[data-narrow] .media-toolbar {
+  gap: 8px;
+}
+
+:root[data-narrow] .media-filter-select {
+  flex: 1 1 calc(50% - 4px);
+  min-width: 0;
+  font-size: 12px;
+  padding: 0 6px;
+}
+
+:root[data-narrow] .media-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+
+:root[data-narrow] .media-toolbar .btn {
+  flex-shrink: 0;
+  height: 32px;
 }
 
 /* The agenda already stacks its backlog below 900px; it just needs the padding
@@ -693,11 +739,34 @@
    and the dot already say which pane is focused, so the words go and the close
    button stays. Side-by-side goes too — a narrow window only ever stacks. */
 
-:root[data-narrow] .pane-name,
-:root[data-narrow] .pane-active-tag,
-:root[data-narrow] .split-controls .icon-btn[aria-label='Split right'],
+:root[data-narrow] .pane-bar .pane-name,
+:root[data-narrow] .pane-bar .pane-active-tag,
 :root[data-narrow] .pane-bar .icon-btn[aria-label='Split side by side'] {
   display: none;
+}
+
+:root[data-narrow] .mobile-pane-tab .pane-name {
+  display: inline-flex !important;
+}
+
+:root[data-narrow] .split-popover {
+  position: fixed;
+  top: auto;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  left: 14px;
+  right: 14px;
+  width: auto;
+  max-width: none;
+  z-index: 100;
+}
+
+:root[data-narrow] .split-controls:has(.split-popover)::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 95;
 }
 
 /* ---------- a page that isn't available here ---------- */
@@ -1034,3 +1103,187 @@
   -webkit-user-select: text;
   user-select: text;
 }
+
+/* ---------- Habitat Genesis & Identity Mobile Adaptations ---------- */
+
+:root[data-narrow] .habitat-stage {
+  padding: calc(14px + var(--safe-top, 0px)) 12px calc(20px + var(--safe-bottom, 0px));
+}
+
+:root[data-narrow] .habitat-stage-card {
+  width: 100%;
+  max-width: none;
+  padding: 24px 16px 20px;
+  border-radius: 20px;
+  transform: none !important;
+}
+
+:root[data-narrow] .habitat-customization-deck {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+:root[data-narrow] .habitat-custom-row {
+  width: 100%;
+  justify-content: space-between;
+}
+
+:root[data-narrow] .habitat-popover-menu.align-left,
+:root[data-narrow] .habitat-popover-menu.align-right {
+  right: 0;
+  left: auto;
+  max-width: min(290px, calc(100vw - 32px));
+}
+
+:root[data-narrow] .habitat-popover-search,
+:root[data-narrow] .habitat-custom-hex-input {
+  font-size: 16px; /* Prevents iOS auto-zoom */
+}
+
+/* Touch Hit Area Expansions */
+:root[data-coarse] .habitat-icon-choice,
+:root[data-coarse] .habitat-more-btn {
+  min-width: 32px;
+  min-height: 32px;
+}
+
+:root[data-coarse] .habitat-aura-gem,
+:root[data-coarse] .habitat-aura-more-gem {
+  min-width: 24px;
+  min-height: 24px;
+}
+
+/* Keyboard is up or short screen (e.g. landscape phone or soft keyboard) */
+:root[data-short] .habitat-core-anchor,
+:root[data-short] .habitat-stage-sub {
+  display: none;
+}
+
+:root[data-short] .habitat-stage-card {
+  padding: 16px 14px;
+}
+
+:root[data-short] .habitat-stage-title {
+  font-size: 19px;
+  margin-bottom: 8px;
+}
+
+:root[data-short] .habitat-customization-deck {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  gap: 8px;
+}
+
+:root[data-short] .habitat-storage-ribbon {
+  margin-bottom: 12px;
+  padding: 6px 10px;
+}
+
+:root[data-narrow] .habitat-stage-input-box {
+  padding: 1px 12px;
+}
+
+/* Preferences / Settings Modal - data-narrow adaptations */
+:root[data-narrow] .prefs-backdrop {
+  padding: 0;
+  align-items: stretch;
+  justify-content: stretch;
+  background: var(--bg);
+}
+
+:root[data-narrow] .prefs {
+  width: 100vw;
+  max-width: 100vw;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 0;
+  border: none;
+  box-shadow: none;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+:root[data-narrow] .prefs-mobile-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(12px + var(--safe-top, 0px)) 16px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+:root[data-narrow] .prefs-mobile-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+}
+
+:root[data-narrow] .prefs-rail {
+  width: 100%;
+  flex-direction: row;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+  gap: 6px;
+  background: var(--bg-2);
+  flex-shrink: 0;
+}
+
+:root[data-narrow] .prefs-rail::-webkit-scrollbar {
+  display: none;
+}
+
+:root[data-narrow] .prefs-rail h2 {
+  display: none;
+}
+
+:root[data-narrow] .prefs-tab {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 6px 13px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 500;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+:root[data-narrow] .prefs-tab.on {
+  background: var(--accent);
+  color: #ffffff;
+  border-color: var(--accent);
+}
+
+:root[data-narrow] .prefs-tab.on svg {
+  color: #ffffff;
+}
+
+:root[data-narrow] .prefs-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+:root[data-narrow] .prefs-head {
+  display: none;
+}
+
+:root[data-narrow] .prefs-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 16px 14px calc(28px + var(--safe-bottom, 0px));
+}
+
+

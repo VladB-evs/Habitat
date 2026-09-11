@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../api';
 import { ask } from '../confirm';
 import type { DailyMeta, Obj } from '../types';
-import { addDays, ago, fmtMonthYear, monthCells, monthStartKey, relBadge, todayKey } from '../util';
+import { addDays, ago, fmtMonthYear, monthCells, monthStartKey, relBadge, todayKey, weekOf } from '../util';
 import { dealtIn, snap, spring, stagger } from '../motion';
 import { DayTasks } from './DayTasks';
 import { Editor } from './Editor';
@@ -103,16 +103,42 @@ export function DailyNotes() {
     setMetas((list) => list.filter((x) => x.id !== m.id));
   };
 
-  // The strip is centred on the open day rather than pinned to a calendar week,
-  // so today (or whatever you picked) always sits in the middle.
-  const week = Array.from({ length: 7 }, (_, i) => addDays(dateKey, i - 3));
   const today = todayKey();
+  const week = weekOf(dateKey);
+  const [weekDir, setWeekDir] = useState(0);
+  const prevWeekRef = useRef(week[0]);
+
+  const changeDate = (newKey: string) => {
+    const newWeekStart = weekOf(newKey)[0];
+    if (newWeekStart !== prevWeekRef.current) {
+      setWeekDir(newWeekStart > prevWeekRef.current ? 1 : -1);
+      prevWeekRef.current = newWeekStart;
+    }
+    setDateKey(newKey);
+  };
+
   const metaMap = new Map(metas.map((m) => [m.dateKey, m.snippet]));
   const moodMap = new Map(metas.map((m) => [m.dateKey, m.mood]));
   const hasEntry = (k: string) => !!metaMap.get(k) || moodMap.has(k);
   const badge = relBadge(dateKey);
 
-  const step = (n: number) => setDateKey(mode === 'day' ? addDays(dateKey, n) : monthStartKey(dateKey, n));
+  const step = (n: number) => {
+    if (mode === 'day') {
+      changeDate(addDays(dateKey, n));
+    } else {
+      setDateKey(monthStartKey(dateKey, n));
+    }
+  };
+
+  const wheelLockRef = useRef(0);
+  const onCarouselWheel = (e: React.WheelEvent) => {
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (Math.abs(delta) < 20) return;
+    const now = Date.now();
+    if (now - wheelLockRef.current < 160) return;
+    wheelLockRef.current = now;
+    step(delta > 0 ? 1 : -1);
+  };
 
   return (
     <div className="daily-page">
@@ -136,7 +162,7 @@ export function DailyNotes() {
               <button className="icon-btn" onClick={() => step(-1)} aria-label="Previous">
                 <Icon name="chevron-left" />
               </button>
-              <button className="today-btn" onClick={() => setDateKey(today)}>
+              <button className="today-btn" onClick={() => changeDate(today)}>
                 Today
               </button>
               <button className="icon-btn" onClick={() => step(1)} aria-label="Next">
@@ -159,7 +185,7 @@ export function DailyNotes() {
                 <button
                   className="daily-list-main"
                   onClick={() => {
-                    setDateKey(m.dateKey);
+                    changeDate(m.dateKey);
                     setMode('day');
                   }}
                 >
@@ -198,7 +224,7 @@ export function DailyNotes() {
                 (hasEntry(c.key) ? ' has' : '')
               }
               onClick={() => {
-                setDateKey(c.key);
+                changeDate(c.key);
                 setMode('day');
               }}
             >
@@ -212,38 +238,46 @@ export function DailyNotes() {
         </motion.div>
       ) : (
         <>
-          <motion.div className="day-strip" layout transition={spring}>
-            <AnimatePresence initial={false} mode="popLayout">
-              {week.map((k) => {
-                const d = new Date(k + 'T12:00:00');
-                return (
-                  <motion.button
-                    key={k}
-                    layout
-                    className={
-                      'day-pill' +
-                      (k === dateKey ? ' sel' : '') +
-                      (k === today ? ' today' : '') +
-                      (hasEntry(k) ? ' has' : '')
-                    }
-                    initial={{ opacity: 0, scale: 0.82 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.82 }}
-                    transition={spring}
-                    whileHover={{ y: -3 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => setDateKey(k)}
-                  >
-                    {/* One highlight shared by every pill, so it glides to the day you pick. */}
-                    {k === dateKey && <motion.span layoutId="day-sel" className="day-sel" transition={spring} />}
-                    <span className="dow">{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
-                    <span className="num">{d.getDate()}</span>
-                    <span className="dot" style={moodMap.get(k) != null ? { background: moodMeta(moodMap.get(k))?.color } : undefined} />
-                  </motion.button>
-                );
-              })}
+          <div className="day-strip-wrap" onWheel={onCarouselWheel}>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={week[0]}
+                className="day-strip"
+                initial={{ opacity: 0, x: weekDir > 0 ? 18 : -18 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: weekDir > 0 ? -18 : 18 }}
+                transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+              >
+                {week.map((k) => {
+                  const d = new Date(k + 'T12:00:00');
+                  const isSel = k === dateKey;
+                  return (
+                    <motion.button
+                      key={k}
+                      className={
+                        'day-pill' +
+                        (isSel ? ' sel' : '') +
+                        (k === today ? ' today' : '') +
+                        (hasEntry(k) ? ' has' : '')
+                      }
+                      whileHover={{ y: -2 }}
+                      whileTap={{ scale: 0.96 }}
+                      onClick={() => changeDate(k)}
+                    >
+                      {/* One highlight shared by every pill, so it glides to the day you pick. */}
+                      {isSel && <motion.span layoutId="day-sel" className="day-sel" transition={spring} />}
+                      <span className="dow">{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
+                      <span className="num">{d.getDate()}</span>
+                      <span
+                        className="dot"
+                        style={moodMap.get(k) != null ? { background: moodMeta(moodMap.get(k))?.color } : undefined}
+                      />
+                    </motion.button>
+                  );
+                })}
+              </motion.div>
             </AnimatePresence>
-          </motion.div>
+          </div>
 
           <AnimatePresence mode="wait" initial={false}>
             <motion.div

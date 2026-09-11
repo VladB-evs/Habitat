@@ -8,11 +8,10 @@ import { softSpring, spring } from '../motion';
 import { useApp } from '../store';
 import type { SettingsInfo } from '../types';
 import { MEDIA_TYPE, PEOPLE_TYPE, typeColor, TYPE_PALETTE } from '../util';
-import { NewHabitatModal } from './Habitats';
+import { getAuraColor } from './Habitats';
 import { Icon, TypeIcon } from './Icons';
 import { ColorPicker, IconPicker } from './TypeEditor';
 import { VersionBadge } from './VersionBadge';
-const SettingsModal = lazy(() => import('./SettingsModal').then((m) => ({ default: m.SettingsModal })));
 
 function NavItem({
   icon,
@@ -20,24 +19,48 @@ function NavItem({
   label,
   active,
   onClick,
+  onSplit,
 }: {
   icon?: string;
   leading?: ReactNode;
   label: string;
   active: boolean;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
+  onSplit?: () => void;
 }) {
   return (
-    <motion.button
-      className={'nav-item' + (active ? ' active' : '')}
-      onClick={onClick}
-      whileHover={{ x: 3 }}
-      whileTap={{ scale: 0.97 }}
-      transition={spring}
-    >
-      {icon ? <Icon name={icon} /> : <span className="nav-lead">{leading}</span>}
-      <span className="nav-label">{label}</span>
-    </motion.button>
+    <div className="nav-item-row">
+      <motion.button
+        className={'nav-item' + (active ? ' active' : '')}
+        onClick={(e) => {
+          if (e.altKey && onSplit) {
+            e.preventDefault();
+            onSplit();
+          } else {
+            onClick(e);
+          }
+        }}
+        whileHover={{ x: 2 }}
+        whileTap={{ scale: 0.97 }}
+        transition={spring}
+      >
+        {icon ? <Icon name={icon} /> : <span className="nav-lead">{leading}</span>}
+        <span className="nav-label">{label}</span>
+      </motion.button>
+      {onSplit && (
+        <button
+          className="nav-split-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSplit();
+          }}
+          title={`Open ${label} in side pane`}
+          aria-label={`Open ${label} in side pane`}
+        >
+          <Icon name="columns" size={11} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -95,11 +118,9 @@ export function Sidebar({
   onCollapse: () => void;
   pinned?: boolean;
 }) {
-  const { types, view, navigate, theme, setTheme } = useApp();
+  const { types, view, navigate, openPageBeside, theme, setTheme, openSettings, openNewHabitat } = useApp();
   const { narrow } = useLayout();
   const [showNewType, setShowNewType] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showNewHabitat, setShowNewHabitat] = useState(false);
   const [habMenu, setHabMenu] = useState(false);
   const [info, setInfo] = useState<SettingsInfo | null>(null);
   // Daily notes, tasks, people, media and tags all have their own nav entries above.
@@ -133,23 +154,29 @@ export function Sidebar({
         <>
           <div className="backdrop" onClick={() => setHabMenu(false)} />
           <div className="popover hab-menu">
-            {info.habitats.map((h) => (
-              <div className="tpl-row" key={h.id}>
-                <button className="menu-item" onClick={() => switchHabitat(h.id)}>
-                  <span className="check-slot">{h.id === info.activeId ? <Icon name="check" size={13} /> : null}</span>
-                  {h.name}
-                </button>
-                <button className="icon-btn" onClick={() => deleteHabitat(h)} aria-label="Delete habitat" title="Delete habitat">
-                  <Icon name="trash" size={13} />
-                </button>
-              </div>
-            ))}
+            {info.habitats.map((h) => {
+              const hAura = getAuraColor(h.aura);
+              return (
+                <div className="tpl-row" key={h.id}>
+                  <button className="menu-item" onClick={() => switchHabitat(h.id)}>
+                    <span className="check-slot">{h.id === info.activeId ? <Icon name="check" size={13} /> : null}</span>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', color: hAura, marginRight: 2 }}>
+                      <Icon name={h.icon || 'sprout'} size={14} />
+                    </span>
+                    {h.name}
+                  </button>
+                  <button className="icon-btn" onClick={() => deleteHabitat(h)} aria-label="Delete habitat" title="Delete habitat">
+                    <Icon name="trash" size={13} />
+                  </button>
+                </div>
+              );
+            })}
             <div className="menu-sep" />
             <button
               className="menu-item"
               onClick={() => {
                 setHabMenu(false);
-                setShowNewHabitat(true);
+                openNewHabitat();
               }}
             >
               <Icon name="plus" size={14} /> New habitat…
@@ -170,44 +197,112 @@ export function Sidebar({
 
       <div className="sidebar-inner">
         <button className="logo switcher" onClick={() => setHabMenu((v) => !v)}>
-          <span className="logo-mark">
-            <Icon name="sprout" size={17} />
+          <span
+            className="logo-mark"
+            style={{
+              color: getAuraColor(active?.aura),
+            }}
+          >
+            <Icon name={active?.icon || 'sprout'} size={17} />
           </span>
           <span className="logo-name">{active?.name ?? 'Habitat'}</span>
           <Icon name="chevron-down" size={12} className="logo-chev" />
         </button>
 
-        <button className="search-btn" onClick={onSearch}>
-          <Icon name="search" />
-          <span>Search</span>
-          <kbd>⌘K</kbd>
-        </button>
-
-        {onAsk && (
-          <button className="search-btn ask" onClick={onAsk}>
-            <Icon name="sparkles" />
-            <span>Ask</span>
-            <kbd>⌘J</kbd>
+        <div className="sidebar-search-bar" onClick={onSearch}>
+          <button
+            type="button"
+            className="sidebar-search-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSearch();
+            }}
+            title="Search (⌘K)"
+          >
+            <Icon name="search" />
+            <span>Search</span>
+            <kbd>⌘K</kbd>
           </button>
-        )}
+
+          {onAsk && (
+            <>
+              <span className="sidebar-search-divider" aria-hidden="true" />
+              <button
+                type="button"
+                className="sidebar-ask-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAsk();
+                }}
+                title="Ask AI (⌘J)"
+              >
+                <Icon name="sparkles" />
+                <span>Ask</span>
+                <kbd>⌘J</kbd>
+              </button>
+            </>
+          )}
+        </div>
 
         <nav className="sidebar-nav">
-          <NavItem icon="grid" label="Dashboard" active={view.kind === 'dashboard'} onClick={() => navigate({ kind: 'dashboard' })} />
-          <NavItem icon="calendar" label="Daily Notes" active={view.kind === 'daily'} onClick={() => navigate({ kind: 'daily' })} />
-          <NavItem icon="circle-check" label="Tasks" active={view.kind === 'tasks'} onClick={() => navigate({ kind: 'tasks' })} />
-          <NavItem icon="calendar-clock" label="Events" active={view.kind === 'events'} onClick={() => navigate({ kind: 'events' })} />
-          <NavItem icon="people" label="People" active={view.kind === 'people'} onClick={() => navigate({ kind: 'people' })} />
-          <NavItem icon="film" label="Media" active={view.kind === 'media'} onClick={() => navigate({ kind: 'media' })} />
-          <NavItem icon="hash" label="Tags" active={view.kind === 'tags'} onClick={() => navigate({ kind: 'tags' })} />
+          <NavItem
+            icon="grid"
+            label="Dashboard"
+            active={view.kind === 'dashboard'}
+            onClick={() => navigate({ kind: 'dashboard' })}
+            onSplit={() => openPageBeside({ kind: 'dashboard' })}
+          />
+          <NavItem
+            icon="calendar"
+            label="Daily Notes"
+            active={view.kind === 'daily'}
+            onClick={() => navigate({ kind: 'daily' })}
+            onSplit={() => openPageBeside({ kind: 'daily' })}
+          />
+          <NavItem
+            icon="circle-check"
+            label="Tasks"
+            active={view.kind === 'tasks'}
+            onClick={() => navigate({ kind: 'tasks' })}
+            onSplit={() => openPageBeside({ kind: 'tasks' })}
+          />
+          <NavItem
+            icon="people"
+            label="People"
+            active={view.kind === 'people'}
+            onClick={() => navigate({ kind: 'people' })}
+            onSplit={() => openPageBeside({ kind: 'people' })}
+          />
+          <NavItem
+            icon="film"
+            label="Media"
+            active={view.kind === 'media'}
+            onClick={() => navigate({ kind: 'media' })}
+            onSplit={() => openPageBeside({ kind: 'media' })}
+          />
+          <NavItem
+            icon="hash"
+            label="Tags"
+            active={view.kind === 'tags'}
+            onClick={() => navigate({ kind: 'tags' })}
+            onSplit={() => openPageBeside({ kind: 'tags' })}
+          />
           {/* Boards are desktop-only — see the note in PaneView. */}
           {!narrow && (
-            <NavItem icon="canvas" label="Canvas" active={view.kind === 'canvas'} onClick={() => navigate({ kind: 'canvas' })} />
+            <NavItem
+              icon="canvas"
+              label="Canvas"
+              active={view.kind === 'canvas'}
+              onClick={() => navigate({ kind: 'canvas' })}
+              onSplit={() => openPageBeside({ kind: 'canvas' })}
+            />
           )}
           <NavItem
             icon="study"
             label="Study"
             active={view.kind === 'study' || view.kind === 'deck'}
             onClick={() => navigate({ kind: 'study' })}
+            onSplit={() => openPageBeside({ kind: 'study' })}
           />
         </nav>
 
@@ -241,6 +336,7 @@ export function Sidebar({
               label={t.name}
               active={view.kind === 'type' && view.typeId === t.id}
               onClick={() => navigate({ kind: 'type', typeId: t.id })}
+              onSplit={() => openPageBeside({ kind: 'type', typeId: t.id })}
             />
           ))}
         </div>
@@ -248,7 +344,7 @@ export function Sidebar({
 
       <div className="sidebar-footer">
         <div style={{ display: 'flex', gap: 2 }}>
-          <button className="icon-btn" onClick={() => setShowSettings(true)} aria-label="Settings">
+          <button className="icon-btn" onClick={openSettings} aria-label="Settings">
             <Icon name="settings" />
           </button>
           <button
@@ -265,13 +361,6 @@ export function Sidebar({
         </div>
         <VersionBadge />
       </div>
-
-      {showSettings && (
-        <Suspense fallback={null}>
-          <SettingsModal onClose={() => setShowSettings(false)} />
-        </Suspense>
-      )}
-      {showNewHabitat && <NewHabitatModal onClose={() => setShowNewHabitat(false)} />}
     </aside>
   );
 }

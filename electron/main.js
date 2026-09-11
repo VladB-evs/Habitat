@@ -243,7 +243,7 @@ function createWindow() {
 
   const view = process.env.HABITAT_VIEW || '';
   if (process.env.HABITAT_DEV) {
-    win.loadURL('http://127.0.0.1:5173/' + (view ? '#' + view : ''));
+    win.loadURL('http://127.0.0.1:5180/' + (view ? '#' + view : ''));
   } else {
     const index = path.join(__dirname, '..', 'dist', 'index.html');
     win.loadFile(index, view ? { hash: view } : undefined);
@@ -940,7 +940,7 @@ function boot() {
     pickFolderDialog('Choose a folder for this habitat', 'Habitat will create its own subfolder here, named after it.')
   );
 
-  ipcMain.handle('habitats:create', (_e, { name, flavor, dir }) => {
+  ipcMain.handle('habitats:create', (_e, { name, flavor, dir, icon, aura }) => {
     const id = randomUUID().replace(/-/g, '').slice(0, 10);
     const habitatName = String(name || '').trim();
     if (!habitatName) return { error: 'name-required' };
@@ -957,12 +957,32 @@ function boot() {
     if (!envMode) {
       const cfg = loadConfig();
       saveConfig({
-        habitats: [...(cfg.habitats || []), { id, name: habitatName, dbPath: file, flavor }],
+        habitats: [
+          ...(cfg.habitats || []),
+          { id, name: habitatName, dbPath: file, flavor, icon: icon || 'sprout', aura: aura || 'amber' },
+        ],
         activeId: id,
         onboarded: true,
       });
     }
     return { id, dbPath: file };
+  });
+
+  ipcMain.handle('habitats:update', (_e, { id, name, icon, aura }) => {
+    if (envMode) return { ok: false };
+    const cfg = loadConfig();
+    const habitats = (cfg.habitats || []).map((h) =>
+      h.id === id
+        ? {
+            ...h,
+            ...(name !== undefined ? { name: String(name).trim() || h.name } : {}),
+            ...(icon !== undefined ? { icon } : {}),
+            ...(aura !== undefined ? { aura } : {}),
+          }
+        : h
+    );
+    saveConfig({ habitats });
+    return { ok: true, habitats };
   });
 
   /**
@@ -1012,7 +1032,7 @@ function boot() {
     return { id, dbPath: target.dbPath };
   });
 
-  ipcMain.handle('habitats:onboard', (_e, { name, flavor, userName, people, dir }) => {
+  ipcMain.handle('habitats:onboard', (_e, { name, flavor, userName, people, dir, icon, aura }) => {
     const habitatName = String(name || 'My Habitat').trim() || 'My Habitat';
     const parent = dir || path.join(app.getPath('userData'), 'Habitats');
     // Same folder-per-habitat convention as habitats:create, so the very first habitat
@@ -1027,7 +1047,9 @@ function boot() {
     if (!envMode) {
       const cfg = loadConfig();
       const habitats = (cfg.habitats || []).map((h) =>
-        h.id === cfg.activeId ? { ...h, name: habitatName, flavor, dbPath: file } : h
+        h.id === cfg.activeId
+          ? { ...h, name: habitatName, flavor, dbPath: file, icon: icon || 'sprout', aura: aura || 'amber' }
+          : h
       );
       saveConfig({ habitats, onboarded: true });
     }

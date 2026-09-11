@@ -118,25 +118,8 @@ export interface CalendarNav {
 }
 
 export function useCalendarNav(): CalendarNav {
-  const { narrow } = useLayout();
-  const [saved, setModeState] = useState<CalMode>(
-    () => (localStorage.getItem('habitat:cal-mode') as CalMode) || 'week'
-  );
-  /**
-   * Seven columns of a 390px screen are 50px each — narrower than the text of a
-   * single event. A phone gets the day view instead of the week, whatever the
-   * saved preference says, and the preference is left alone so the desktop
-   * still opens on the week you chose. Month doesn't have that problem — it
-   * was never going to fit event text either way, so it's already just dots —
-   * and stays available.
-   */
-  const mode = narrow && saved === 'week' ? 'day' : saved;
+  const [mode, setMode] = useState<CalMode>('month');
   const [anchor, setAnchor] = useState(todayKey());
-
-  const setMode = (m: CalMode) => {
-    setModeState(m);
-    localStorage.setItem('habitat:cal-mode', m);
-  };
 
   const step = (n: number) =>
     setAnchor(mode === 'month' ? monthStartKey(anchor, n) : addDays(anchor, mode === 'week' ? n * 7 : n));
@@ -249,9 +232,15 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
         if (!body) return setDraft(null);
         if (!g.moved) {
           const { dayIndex, minute } = gridPoint(e, body, days.length);
+          const dayKey = days[dayIndex];
+          const startMinute = clamp(snapTo(minute), 0, DAY_MINUTES - NEW_MINUTES);
+          if (dayKey < todayKey() || (dayKey === todayKey() && startMinute < nowMinute)) {
+            setDraft(null);
+            return;
+          }
           setDraft({
-            dayKey: days[dayIndex],
-            startMinute: clamp(snapTo(minute), 0, DAY_MINUTES - NEW_MINUTES),
+            dayKey,
+            startMinute,
             minutes: NEW_MINUTES,
           });
         }
@@ -274,7 +263,8 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
               minutes: p.minutes,
               occurrence: p.repeats ? p.from : null,
             })
-            .then((made) => objectChanged(made?.id ?? p.id));
+            .then((made) => objectChanged(made?.id ?? p.id))
+            .catch((err) => alert(err?.message || 'Failed to reschedule'));
         }
         return null;
       });
@@ -322,6 +312,14 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
 
   const create = async (typeId: string, title: string, repeat: string | null) => {
     if (!draft) return;
+    if (draft.dayKey < todayKey()) {
+      alert(`Cannot schedule in the past (${draft.dayKey})`);
+      return;
+    }
+    if (draft.dayKey === todayKey() && draft.startMinute < nowMinute) {
+      alert('Cannot schedule before current time today');
+      return;
+    }
     const made = await api.scheduleNew({ typeId, title, repeat, ...draft });
     setComposer(null);
     setDraft(null);
@@ -423,6 +421,31 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
                     setAnchor(c.key);
                     setModeSaved('day');
                   }}
+                  onDragOver={(e) => {
+                    if (!e.dataTransfer.types.includes('text/habitat-task')) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                  }}
+                  onDrop={(e) => {
+                    if (!e.dataTransfer.types.includes('text/habitat-task')) return;
+                    e.preventDefault();
+                    const id = e.dataTransfer.getData('text/habitat-task');
+                    const due = e.dataTransfer.getData('text/habitat-due');
+                    if (due && c.key > due) {
+                      alert(`Cannot schedule task past its due date (${due})`);
+                      return;
+                    }
+                    if (c.key < todayKey()) {
+                      alert(`Cannot schedule in the past (${c.key})`);
+                      return;
+                    }
+                    if (id) {
+                      api
+                        .reschedule({ id, dayKey: c.key, startMinute: null })
+                        .then((made) => objectChanged(made?.id ?? id))
+                        .catch((err) => alert(err?.message || 'Failed to schedule'));
+                    }
+                  }}
                 >
                   <span className="cal-num">{c.day}</span>
                   {dayEntries.length > 0 && (
@@ -464,7 +487,35 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
         <div className="cal-allday" style={{ ['--cal-days' as any]: days.length }}>
           <div className="cal-gutter-head">All day</div>
           {days.map((d, i) => (
-            <div key={d} className="cal-allday-cell">
+            <div
+              key={d}
+              className="cal-allday-cell"
+              onDragOver={(e) => {
+                if (!e.dataTransfer.types.includes('text/habitat-task')) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={(e) => {
+                if (!e.dataTransfer.types.includes('text/habitat-task')) return;
+                e.preventDefault();
+                const id = e.dataTransfer.getData('text/habitat-task');
+                const due = e.dataTransfer.getData('text/habitat-due');
+                if (due && d > due) {
+                  alert(`Cannot schedule task past its due date (${due})`);
+                  return;
+                }
+                if (d < todayKey()) {
+                  alert(`Cannot schedule in the past (${d})`);
+                  return;
+                }
+                if (id) {
+                  api
+                    .reschedule({ id, dayKey: d, startMinute: null })
+                    .then((made) => objectChanged(made?.id ?? id))
+                    .catch((err) => alert(err?.message || 'Failed to schedule'));
+                }
+              }}
+            >
               {allDay[i].map((e) => (
                 <button
                   key={e.id + e.dayKey}
@@ -504,6 +555,38 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
                 key={d}
                 className={'cal-col' + (isToday ? ' today' : '')}
                 onPointerDown={startNew}
+                onDragOver={(e) => {
+                  if (!e.dataTransfer.types.includes('text/habitat-task')) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = 'move';
+                }}
+                onDrop={(e) => {
+                  if (!e.dataTransfer.types.includes('text/habitat-task')) return;
+                  e.preventDefault();
+                  const id = e.dataTransfer.getData('text/habitat-task');
+                  const due = e.dataTransfer.getData('text/habitat-due');
+                  if (!id) return;
+                  if (due && d > due) {
+                    alert(`Cannot schedule task past its due date (${due})`);
+                    return;
+                  }
+                  if (d < todayKey()) {
+                    alert(`Cannot schedule in the past (${d})`);
+                    return;
+                  }
+                  const body = bodyRef.current;
+                  if (!body) return;
+                  const { minute } = gridPoint(e, body, days.length);
+                  const startMinute = clamp(snapTo(minute), 0, DAY_MINUTES - 60);
+                  if (d === todayKey() && startMinute < nowMinute) {
+                    alert('Cannot schedule before current time today');
+                    return;
+                  }
+                  api
+                    .reschedule({ id, dayKey: d, startMinute, minutes: 60 })
+                    .then((made) => objectChanged(made?.id ?? id))
+                    .catch((err) => alert(err?.message || 'Failed to schedule'));
+                }}
               >
                 {Array.from({ length: 24 }, (_, h) => (
                   <div key={h} className="cal-hour" />

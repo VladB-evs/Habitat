@@ -28,7 +28,7 @@ function stamp(v: string | undefined): number | null {
 const fmtWhen = (ts: number) =>
   new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-function TimerBody({ config }: WidgetProps) {
+function TimerBody({ config, w = 2, h = 1 }: WidgetProps) {
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -41,9 +41,9 @@ function TimerBody({ config }: WidgetProps) {
 
   if (from == null && to == null) {
     return (
-      <div className="w-timer">
-        <div className="w-label">{label}</div>
-        <div className="w-empty">Set a date in this widget's settings.</div>
+      <div className={'w-timer' + (h === 1 ? ' compact' : '')}>
+        <div className="w-label" title={label}>{label}</div>
+        <div className="w-empty">Set a date in settings.</div>
       </div>
     );
   }
@@ -51,23 +51,39 @@ function TimerBody({ config }: WidgetProps) {
   // Counting down to `to` while it's still ahead; otherwise counting up from whichever anchor applies.
   const counting = to != null && to > now ? to : null;
   const since = counting == null ? (to != null ? to : (from as number)) : 0;
+  const targetTs = counting != null ? counting : since;
 
   const pct =
     config.showProgress !== false && from != null && to != null && to > from
       ? Math.min(100, Math.max(0, ((now - from) / (to - from)) * 100))
       : null;
 
+  // Single-line compact date when compact to guarantee no line wrapping
+  const dateStr =
+    h === 1 || (w != null && w <= 2)
+      ? new Date(targetTs).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+      : fmtWhen(targetTs);
+
+  const subText = counting != null ? `until ${dateStr}` : `since ${dateStr}`;
+
   return (
-    <div className="w-timer">
-      <div className="w-label">{label}</div>
+    <div className={'w-timer' + (h === 1 ? ' compact' : '')}>
+      <div className="w-label" title={label}>{label}</div>
       <div className="w-big">{counting != null ? span(counting - now) : span(now - since)}</div>
-      <div className="w-sub">{counting != null ? `until ${fmtWhen(counting)}` : `since ${fmtWhen(since)}`}</div>
-      {pct != null && (
-        <div className="w-bar" title={`${Math.round(pct)}%`}>
+      <div className="w-sub" title={fmtWhen(targetTs)}>{subText}</div>
+      {pct != null && h >= 2 && (
+        <>
+          <div className="w-bar" title={`${Math.round(pct)}%`}>
+            <span style={{ width: `${pct}%` }} />
+          </div>
+          <div className="w-sub">{Math.round(pct)}% elapsed</div>
+        </>
+      )}
+      {pct != null && h === 1 && (
+        <div className="w-bar compact" title={`${Math.round(pct)}% elapsed`}>
           <span style={{ width: `${pct}%` }} />
         </div>
       )}
-      {pct != null && <div className="w-sub">{Math.round(pct)}% elapsed</div>}
     </div>
   );
 }
@@ -118,6 +134,9 @@ export const TIMER_WIDGET: WidgetDef = {
   center: true,
   defaultW: 2,
   defaultH: 1,
+  minW: 1,
+  minH: 1,
+  maxH: 4,
   defaultConfig: { label: '', from: '', to: '', showProgress: true },
   Body: TimerBody,
   Settings: TimerSettings,

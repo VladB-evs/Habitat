@@ -117,3 +117,36 @@ test('the window is the window: nothing outside it is reported as a day', () => 
   assert.equal(a.days[6].dayKey, '2027-06-13');
   assert.equal(dayOf(a, '2027-06-19'), undefined);
 });
+
+test('a task with a future due date stays in the backlog, while doing date places it on the schedule', () => {
+  const t1 = api['objects:create']({ typeId: 'task', title: 'Due next week', props: { due: '2027-06-25', status: 'Todo' } });
+  const t2 = api['objects:create']({ typeId: 'task', title: 'Doing Tuesday', props: { doing: '2027-06-08', due: '2027-06-25', status: 'Todo' } });
+
+  const a = agenda();
+  const backlogItem = a.backlog.find((x) => x.id === t1.id);
+  assert.ok(backlogItem, 'due date alone does not remove task from backlog');
+  assert.equal(backlogItem.due, '2027-06-25');
+  assert.equal(backlogItem.when, null);
+
+  const schedItem = dayOf(a, '2027-06-08').tasks.find((x) => x.id === t2.id);
+  assert.ok(schedItem, 'doing date places task on the schedule');
+  assert.equal(schedItem.due, '2027-06-25');
+  assert.equal(schedItem.when, '2027-06-08');
+});
+
+test('scheduling a task past its due date is refused', () => {
+  const t = api['objects:create']({ typeId: 'task', title: 'Strict deadline', props: { due: '2027-06-15', status: 'Todo' } });
+  assert.throws(
+    () => api['calendar:reschedule']({ id: t.id, dayKey: '2027-06-16', startMinute: null, allowPast: true }),
+    /Cannot schedule task past its due date/
+  );
+});
+
+test('scheduling in past days or before current time today is refused', () => {
+  const t = api['objects:create']({ typeId: 'task', title: 'Time guard', props: { status: 'Todo' } });
+  assert.throws(
+    () => api['calendar:reschedule']({ id: t.id, dayKey: '2020-01-01', startMinute: null }),
+    /Cannot schedule in the past/
+  );
+});
+

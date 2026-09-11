@@ -109,10 +109,15 @@ test('an open-ended rule is capped rather than materialised forever', () => {
   assert.ok(rows.length > 300 && rows.length <= 367, `capped around a year out, got ${rows.length}`);
 });
 
-test('events never show up on the Tasks page — its calendar, its reschedule, its agenda', () => {
-  const ev = api['events:create']({ title: 'Standalone', startsAt: '2027-06-01T09:00' });
-  assert.equal(api['calendar:range']({ from: '2027-06-01', to: '2027-06-01' }).length, 0);
-  assert.equal(api['calendar:reschedule']({ id: ev.id, dayKey: '2027-06-02', startMinute: 600 }), null);
-  const day = api['agenda:range']({ from: '2027-06-01', days: 1 }).days[0];
-  assert.ok(!day.events.some((e) => e.id === ev.id) && !day.tasks.some((t) => t.id === ev.id));
+test('events show up on the calendar, can be rescheduled, and appear on the agenda', () => {
+  const ev = api['events:create']({ title: 'Standalone', startsAt: '2027-06-01T09:00', endsAt: '2027-06-01T10:00' });
+  const cal = api['calendar:range']({ from: '2027-06-01', to: '2027-06-01' });
+  assert.equal(cal.filter((e) => e.id === ev.id).length, 1);
+  const rescheduled = api['calendar:reschedule']({ id: ev.id, dayKey: '2027-06-02', startMinute: 600, minutes: 60 });
+  assert.ok(rescheduled);
+  assert.equal(rescheduled.props.startsAt, '2027-06-02T10:00');
+  assert.equal(rescheduled.props.endsAt, '2027-06-02T11:00');
+  const day = api['agenda:range']({ from: '2027-06-02', days: 1 }).days[0];
+  assert.ok(day.events.some((e) => e.id === ev.id));
 });
+

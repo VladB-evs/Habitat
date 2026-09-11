@@ -10,10 +10,12 @@ import {
   useTransform,
 } from 'motion/react';
 import { api } from './api';
-import { AppProvider, useApp } from './store';
+import { AppProvider, useApp, getViewInfo } from './store';
+import { getObject } from './objects';
 import { openLink } from './links';
 import type { View } from './store';
-import { Onboarding } from './components/Habitats';
+import { Onboarding, NewHabitatModal } from './components/Habitats';
+const SettingsModal = lazy(() => import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal })));
 import { Sidebar } from './components/Sidebar';
 import { SidebarDrawer } from './components/SidebarDrawer';
 import { BottomNav } from './components/BottomNav';
@@ -24,7 +26,6 @@ import { useLayout } from './layout';
 import { Dashboard } from './components/Dashboard';
 import { DailyNotes } from './components/DailyNotes';
 import { TasksPage } from './components/TasksPage';
-import { EventsPage } from './components/EventsPage';
 import { TypeTable } from './components/TypeTable';
 import { ObjectPage } from './components/ObjectPage';
 import { TemplatePage } from './components/TemplatePage';
@@ -38,7 +39,7 @@ import { People } from './components/People';
 import { Media } from './components/Media';
 import { SearchPalette } from './components/SearchPalette';
 import { AskPanel } from './components/AskPanel';
-import { Icon } from './components/Icons';
+import { Icon, TypeIcon } from './components/Icons';
 import { pageIn, snap, softSpring, spring } from './motion';
 import { MEDIA_TYPE, PEOPLE_TYPE, viewport } from './util';
 
@@ -65,7 +66,6 @@ function PaneView({ view }: { view: View }) {
         {view.kind === 'dashboard' && <Dashboard />}
         {view.kind === 'daily' && <DailyNotes />}
         {view.kind === 'tasks' && <TasksPage />}
-        {view.kind === 'events' && <EventsPage />}
         {/* Boards are a pointer-and-space interaction — panning a graph, dragging
             connections between cards — and they do not survive the trip down to
             390px. The entry is hidden there, but a link or a restored URL can
@@ -140,8 +140,61 @@ function PaneBody({ view }: { view: View }) {
   );
 }
 
+function PaneTitle({ view, prefix }: { view: View; prefix?: string }) {
+  const { types } = useApp();
+  const info = getViewInfo(view, types);
+  const [title, setTitle] = useState(info.title);
+
+  useEffect(() => {
+    if (view?.kind === 'object') {
+      let alive = true;
+      getObject(view.id).then((o) => {
+        if (alive && o?.title) setTitle(o.title);
+      });
+      return () => {
+        alive = false;
+      };
+    } else {
+      setTitle(info.title);
+    }
+  }, [view, info.title]);
+
+  return (
+    <span className="pane-name">
+      {view.kind === 'type' ? (
+        <TypeIcon icon={info.icon} size={13} />
+      ) : (
+        <Icon name={info.icon} size={13} />
+      )}
+      <span className="pane-name-label">
+        {prefix && <span className="pane-prefix">{prefix}</span>}
+        {title}
+      </span>
+    </span>
+  );
+}
+
 function Shell() {
-  const { panes, dir, active, setActive, split, closing, requestClose, endClose, view, back, canBack } = useApp();
+  const {
+    panes,
+    dir,
+    active,
+    setActive,
+    split,
+    toggleSplitDir,
+    swapPanes,
+    closing,
+    requestClose,
+    endClose,
+    view,
+    back,
+    canBack,
+    types,
+    settingsOpen,
+    closeSettings,
+    newHabitatOpen,
+    closeNewHabitat,
+  } = useApp();
   const { narrow, keyboard } = useLayout();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
@@ -498,101 +551,144 @@ function Shell() {
         </>
       )}
 
-      <div ref={mainRef} className={'main-area ' + (dir === 'row' ? 'dir-row' : 'dir-col')}>
-        {/* Panes need no exit animation of their own: by the time one is taken
-            out of the list it has already collapsed to nothing. */}
-        <AnimatePresence initial={false}>
-          {panes.flatMap((p, i) => [
-            ...(i === 1
-              ? [
-                  <motion.div
-                    key="divider"
-                    className="split-divider"
-                    onPointerDown={startDivider}
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: closing === null ? 1 : 0 }}
-                    exit={{ opacity: 0 }}
-                    transition={snap}
-                  />,
-                ]
-              : []),
-            <motion.section
-              // Keyed by the pane itself, not its position: closing the left
-              // pane must animate the left pane away, not hand its identity to
-              // the right one.
-              key={p.id}
-              className={'pane' + (isSplit ? (i === active ? ' focused' : ' dimmed') : '')}
-              style={isSplit && i === 0 ? { flexBasis: mainBasis, flexGrow: 0, flexShrink: 0 } : undefined}
-              initial={i === 0 ? false : { opacity: 0, x: dir === 'row' ? 44 : 0, y: dir === 'col' ? 44 : 0 }}
-              // The one being closed fades as it collapses; the other holds
-              // still and simply widens.
-              animate={{ opacity: closing === i ? 0 : 1, x: 0, y: 0 }}
-              transition={softSpring}
-              onMouseDownCapture={() => setActive(i)}
-            >
-              {/* Only in a split. On a single pane the split buttons live in
-                  the page's own header, via <SplitControls />. */}
-              {isSplit && (
-                <div className="pane-bar">
-                  <motion.span className="pane-dot" animate={{ scale: i === active ? 1 : 0.8 }} transition={spring} />
-                  <span className="pane-name">{i === 0 ? 'Main' : 'Side view'}</span>
-                  <AnimatePresence>
-                    {i === active && (
-                      <motion.span
-                        className="pane-active-tag"
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.8 }}
-                        transition={spring}
-                      >
-                        active
-                      </motion.span>
-                    )}
-                  </AnimatePresence>
-                  <span className="spacer" />
-                  <motion.button
-                    className={'icon-btn' + (dir === 'row' ? ' active' : '')}
-                    onClick={() => split('row')}
-                    aria-label="Split side by side"
-                    title="Side by side"
-                    whileHover={{ scale: 1.12 }}
-                    whileTap={{ scale: 0.9 }}
-                  >
-                    <Icon name="columns" size={13} />
-                  </motion.button>
-                  <motion.button
-                    className={'icon-btn' + (dir === 'col' ? ' active' : '')}
-                    onClick={() => split('col')}
-                    aria-label="Split stacked"
-                    title="Stacked"
-                    whileHover={{ scale: 1.12 }}
-                    whileTap={{ scale: 0.9 }}
-                  >
-                    <Icon name="rows" size={13} />
-                  </motion.button>
-                  <motion.button
-                    className="icon-btn"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      requestClose(i);
-                    }}
-                    aria-label="Close pane"
-                    title="Close this pane"
-                    whileHover={{ scale: 1.12, rotate: 90 }}
-                    whileTap={{ scale: 0.9 }}
-                  >
-                    <Icon name="x" size={13} />
-                  </motion.button>
-                </div>
-              )}
-              <PaneBody view={p.stack[p.stack.length - 1]} />
-            </motion.section>,
-          ])}
-        </AnimatePresence>
+      {narrow && isSplit && (
+        <div className="mobile-pane-bar">
+          <div className="mobile-pane-tabs">
+            {panes.map((p, i) => {
+              const topView = p.stack[p.stack.length - 1];
+              return (
+                <button
+                  key={p.id}
+                  className={'mobile-pane-tab' + (i === active ? ' active' : '')}
+                  onClick={() => setActive(i)}
+                >
+                  <PaneTitle view={topView} prefix={i === 0 ? 'Main: ' : 'Side: '} />
+                  {i === 1 && (
+                    <span
+                      className="mobile-pane-tab-close"
+                      role="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        requestClose(1);
+                      }}
+                      aria-label="Close side pane"
+                    >
+                      <Icon name="x" size={11} />
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div ref={mainRef} className={'main-area ' + (narrow ? 'mobile-area' : (dir === 'row' ? 'dir-row' : 'dir-col'))}>
+        {narrow && isSplit ? (
+          <motion.section
+            key={panes[active].id}
+            className="pane focused mobile-active-pane"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={softSpring}
+          >
+            <PaneBody view={panes[active].stack[panes[active].stack.length - 1]} />
+          </motion.section>
+        ) : (
+          <AnimatePresence initial={false}>
+            {panes.flatMap((p, i) => [
+              ...(i === 1 && !narrow
+                ? [
+                    <motion.div
+                      key="divider"
+                      className="split-divider"
+                      onPointerDown={startDivider}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: closing === null ? 1 : 0 }}
+                      exit={{ opacity: 0 }}
+                      transition={snap}
+                    />,
+                  ]
+                : []),
+              <motion.section
+                key={p.id}
+                className={'pane' + (isSplit ? (i === active ? ' focused' : ' dimmed') : '')}
+                style={isSplit && i === 0 && !narrow ? { flexBasis: mainBasis, flexGrow: 0, flexShrink: 0 } : undefined}
+                initial={i === 0 ? false : { opacity: 0, x: dir === 'row' ? 44 : 0, y: dir === 'col' ? 44 : 0 }}
+                animate={{ opacity: closing === i ? 0 : 1, x: 0, y: 0 }}
+                transition={softSpring}
+                onMouseDownCapture={() => setActive(i)}
+              >
+                {/* Desktop split pane-bar */}
+                {isSplit && !narrow && (
+                  <div className="pane-bar">
+                    <motion.span className="pane-dot" animate={{ scale: i === active ? 1 : 0.8 }} transition={spring} />
+                    <PaneTitle view={p.stack[p.stack.length - 1]} prefix={i === 0 ? 'Main: ' : 'Side: '} />
+                    <AnimatePresence>
+                      {i === active && (
+                        <motion.span
+                          className="pane-active-tag"
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          transition={spring}
+                        >
+                          active
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                    <span className="spacer" />
+                    <motion.button
+                      className="icon-btn"
+                      onClick={swapPanes}
+                      aria-label="Swap panes"
+                      title="Swap panes (⇄)"
+                      whileHover={{ scale: 1.12 }}
+                      whileTap={{ scale: 0.9 }}
+                    >
+                      <Icon name="arrow-left-right" size={12} />
+                    </motion.button>
+                    <motion.button
+                      className={'icon-btn' + (dir === 'row' ? ' active' : '')}
+                      onClick={toggleSplitDir}
+                      aria-label={dir === 'row' ? 'Stack panes vertically' : 'Place panes side by side'}
+                      title={dir === 'row' ? 'Stack vertically' : 'Side by side'}
+                      whileHover={{ scale: 1.12 }}
+                      whileTap={{ scale: 0.9 }}
+                    >
+                      <Icon name={dir === 'row' ? 'rows' : 'columns'} size={12} />
+                    </motion.button>
+                    <motion.button
+                      className="icon-btn"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        requestClose(i);
+                      }}
+                      aria-label="Close pane"
+                      title="Close this pane"
+                      whileHover={{ scale: 1.12, rotate: 90 }}
+                      whileTap={{ scale: 0.9 }}
+                    >
+                      <Icon name="x" size={13} />
+                    </motion.button>
+                  </div>
+                )}
+                <PaneBody view={p.stack[p.stack.length - 1]} />
+              </motion.section>,
+            ])}
+          </AnimatePresence>
+        )}
       </div>
 
       {paletteOpen && <SearchPalette onClose={() => setPaletteOpen(false)} />}
       {askOpen && <AskPanel onClose={() => setAskOpen(false)} />}
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsModal onClose={closeSettings} />
+        </Suspense>
+      )}
+      {newHabitatOpen && <NewHabitatModal onClose={closeNewHabitat} />}
       {/* One host for every "are you sure?" in the app — see src/confirm.tsx. */}
       <ConfirmHost />
     </div>

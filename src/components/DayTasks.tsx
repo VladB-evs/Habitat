@@ -6,8 +6,8 @@ import type { Obj } from '../types';
 import { Icon } from './Icons';
 
 /** Tickable task list for one day, with quick-add. Used by Daily Notes and the Dashboard. */
-export function DayTasks({ dateKey }: { dateKey: string }) {
-  const { openFrom, types } = useApp();
+export function DayTasks({ dateKey, maxTasks }: { dateKey: string; maxTasks?: number }) {
+  const { openFrom, navigate, types } = useApp();
   const [tasks, setTasks] = useState<Obj[]>([]);
   const [newTask, setNewTask] = useState('');
   const hasTaskType = types.some((t) => t.id === 'task');
@@ -48,9 +48,15 @@ export function DayTasks({ dateKey }: { dateKey: string }) {
 
   if (!hasTaskType) return null;
 
+  const hasMax = typeof maxTasks === 'number' && maxTasks > 0;
+  // If maxTasks is set and tasks exceed maxTasks, reserve 1 slot for the 'more' button
+  const limit = hasMax ? (tasks.length > maxTasks ? Math.max(1, maxTasks - 1) : maxTasks) : tasks.length;
+  const visibleTasks = hasMax ? tasks.slice(0, limit) : tasks;
+  const remaining = tasks.length - visibleTasks.length;
+
   return (
     <div className="day-tasks">
-      {tasks.map((t) => {
+      {visibleTasks.map((t) => {
         const done = t.props.status === 'Done';
         const rolled = !!t.props.rolled && !done;
         return (
@@ -81,19 +87,32 @@ export function DayTasks({ dateKey }: { dateKey: string }) {
           </div>
         );
       })}
-      <div className="day-task add">
-        <span className="tick ghost">
-          <Icon name="plus" size={11} />
-        </span>
-        <input
-          className="day-task-input"
-          spellCheck
-          placeholder="Add a task…"
-          value={newTask}
-          onChange={(e) => setNewTask(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && add()}
-        />
-      </div>
+
+      {remaining > 0 && (
+        <button
+          type="button"
+          className="day-tasks-more"
+          onClick={() => navigate({ kind: 'tasks' })}
+        >
+          +{remaining} more in Tasks →
+        </button>
+      )}
+
+      {(!hasMax || (tasks.length < maxTasks && remaining === 0)) && (
+        <div className="day-task add">
+          <span className="tick ghost">
+            <Icon name="plus" size={11} />
+          </span>
+          <input
+            className="day-task-input"
+            spellCheck
+            placeholder="Add a task…"
+            value={newTask}
+            onChange={(e) => setNewTask(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && add()}
+          />
+        </div>
+      )}
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { GuideLink } from '../docs';
 import { useApp } from '../store';
-import type { UserVar } from '../types';
+import type { UserVar, HabitatInfo } from '../types';
 import { clientUid } from '../util';
 import { ApiSettings } from './ApiSettings';
 import { UpdateSettings } from './UpdateSettings';
@@ -11,6 +11,7 @@ import { NavigationSettings } from './NavigationSettings';
 import { SyncSettings } from './SyncSettings';
 import { TelegramSettings } from './TelegramSettings';
 import { Icon } from './Icons';
+import { HabitatIconPicker, HabitatAuraPicker, getAuraColor, getAuraGlow, getAuraBg } from './Habitats';
 
 const TABS = [
   { id: 'general', label: 'General', icon: 'settings' },
@@ -53,14 +54,31 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<Tab>('general');
   const [code, setCode] = useState('');
 
+  const [habitats, setHabitats] = useState<HabitatInfo[]>([]);
+  const [activeHabitatId, setActiveHabitatId] = useState<string>('');
+
   useEffect(() => {
-    api.settings.get().then((s) => setDbPath(s.dbPath));
+    api.settings.get().then((s) => {
+      setDbPath(s.dbPath);
+      setHabitats(s.habitats || []);
+      setActiveHabitatId(s.activeId || '');
+    });
     api.vars.list().then(setVars);
     api.habitat.code().then(setCode);
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
+
+  const activeHabitat = habitats.find((h) => h.id === activeHabitatId);
+
+  const updateActiveHabitat = async (patch: { name?: string; icon?: string; aura?: string }) => {
+    if (!activeHabitatId) return;
+    setHabitats((prev) =>
+      prev.map((h) => (h.id === activeHabitatId ? { ...h, ...patch } : h))
+    );
+    await api.habitats.update({ id: activeHabitatId, ...patch });
+  };
 
   const saveVars = (list: UserVar[]) => {
     setVars(list);
@@ -133,6 +151,12 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div className="prefs">
+        <div className="prefs-mobile-bar">
+          <div className="prefs-mobile-title">Settings</div>
+          <button className="icon-btn" onClick={onClose} aria-label="Close settings">
+            <Icon name="x" size={16} />
+          </button>
+        </div>
         <nav className="prefs-rail">
           <h2>Settings</h2>
           {TABS.map((t) => (
@@ -156,6 +180,47 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <div className="prefs-body">
             {tab === 'general' && (
               <>
+                {activeHabitat && (
+                  <section className="set-sec">
+                    <div className="set-title">Habitat Identity</div>
+                    <div className="habitat-settings-card">
+                      <div className="habitat-settings-preview-row">
+                        <div
+                          className="habitat-settings-emblem"
+                          style={{
+                            background: getAuraBg(activeHabitat.aura),
+                            borderColor: getAuraColor(activeHabitat.aura),
+                            color: getAuraColor(activeHabitat.aura),
+                            boxShadow: `0 0 16px ${getAuraGlow(activeHabitat.aura)}`,
+                          }}
+                        >
+                          <Icon name={activeHabitat.icon || 'sprout'} size={22} />
+                        </div>
+                        <input
+                          type="text"
+                          className="habitat-settings-name-input"
+                          value={activeHabitat.name}
+                          placeholder="Habitat name"
+                          onChange={(e) => updateActiveHabitat({ name: e.target.value })}
+                        />
+                      </div>
+
+                      <div className="habitat-settings-deck">
+                        <HabitatIconPicker
+                          value={activeHabitat.icon || 'sprout'}
+                          onPick={(icon) => updateActiveHabitat({ icon })}
+                          align="right"
+                        />
+                        <HabitatAuraPicker
+                          value={activeHabitat.aura || 'amber'}
+                          onPick={(aura) => updateActiveHabitat({ aura })}
+                          align="right"
+                        />
+                      </div>
+                    </div>
+                  </section>
+                )}
+
                 <section className="set-sec">
                   <div className="set-group">
                     <div className="set-item">

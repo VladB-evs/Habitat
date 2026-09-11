@@ -2,17 +2,23 @@ import { createContext, useContext, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import type { DashWidget, ObjType, Stats } from '../types';
 
-/** A widget's height, in these row units — the one piece of sizing a widget
- *  still controls. Width no longer exists as a concept: a widget always fills
- *  whichever column it's in. Shared with the CSS so a `defaultH` of 1 always
- *  means the same 92px whether it comes from styles.css or an inline style. */
+/** Height in row units (92px base) + 16px gap. */
 export const ROW_H = 92;
 export const GAP = 16;
+export const MIN_H = 1;
+export const MAX_H = 14;
+export const COLS = 6;
 
 export interface WidgetProps {
   /** Instance id — unique per placed widget, stable across renders. */
   id: string;
   config: Record<string, any>;
+  /** Optional function to directly update this widget's config. */
+  set?: (patch: Record<string, any>) => void;
+  /** Width in columns (1 to 6). */
+  w?: number;
+  /** Height in row units (1 to 14). */
+  h?: number;
 }
 
 export interface WidgetSettingsProps {
@@ -35,14 +41,13 @@ export interface WidgetDef {
   center?: boolean;
   /** Section heading above the body; `null` for none. */
   title?: (config: Record<string, any>) => string | null;
-  /** Fixed height in row units — no longer user-resizable, so this is the
-   *  final word on how tall the widget draws. `defaultW`/`minW` from the old
-   *  grid era are harmless leftovers on individual widget defs; nothing reads
-   *  them anymore now that a widget always fills its column's width. */
+  /** Default width in columns: 1 = half width (1 col), 2 = full width (2 cols). */
   defaultW?: number;
+  /** Default height in row units. */
   defaultH: number;
   minW?: number;
   minH?: number;
+  maxH?: number;
   defaultConfig?: Record<string, any>;
   /** Widgets that need something in the vault (a task type, say) hide themselves when it's missing. */
   requires?: (types: ObjType[]) => boolean;
@@ -85,10 +90,15 @@ export const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.ma
 export const uid = () => Math.random().toString(36).slice(2, 10);
 
 export function makeWidget(def: WidgetDef, col = 0): DashWidget {
-  return { id: uid(), kind: def.kind, col, config: { ...(def.defaultConfig || {}) } };
+  return {
+    id: uid(),
+    kind: def.kind,
+    col,
+    w: def.defaultW ?? 3,
+    h: def.defaultH ?? 2,
+    config: { ...(def.defaultConfig || {}) },
+  };
 }
 
-/** A widget's fixed pixel height, from its `defaultH` row units — same formula
- *  the old grid used for `gridRow: span h`, just applied directly now that
- *  there's no grid track to size it for. */
-export const widgetHeight = (h: number) => h * ROW_H + (h - 1) * GAP;
+/** A widget's pixel height, computed from its row units `h`. */
+export const widgetHeight = (h: number) => Math.max(1, h) * ROW_H + (Math.max(1, h) - 1) * GAP;

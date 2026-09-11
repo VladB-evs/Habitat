@@ -25,6 +25,10 @@ export interface AgendaTask {
   title: string;
   /** The day it sits on — its next occurrence when it repeats — or null. */
   when: string | null;
+  /** Deadline by which work must finish, or null. */
+  due?: string | null;
+  /** Day scheduled to work on this, or null. */
+  doing?: string | null;
   startMinute: number | null;
   minutes: number | null;
   done: boolean;
@@ -141,6 +145,8 @@ export interface HabitatInfo {
   name: string;
   dbPath: string;
   flavor: string;
+  icon?: string;
+  aura?: string;
 }
 
 export interface SettingsInfo {
@@ -627,14 +633,12 @@ export interface UserVar {
 export interface DashWidget {
   id: string;
   kind: string;
-  /** 0 = left column, 1 = right. Ignored on a narrow window, where every
-   *  widget stacks into one reorderable list regardless of which column it's
-   *  in — the column split only matters once there's room for two. */
+  /** 0 = left column, 1 = right column (or fallback placement). */
   col: number;
   config: Record<string, any>;
-  /** Pre-column layouts stored a grid width/height (or, earlier still, a
-   *  'small' | 'medium' | 'large' size) — migrated on load, see normalize(). */
+  /** Width span: 1 = half width (1 column on desktop), 2 = full width (2 columns). */
   w?: number;
+  /** Height in row units (1..8, default from widget definition). */
   h?: number;
   size?: string;
 }

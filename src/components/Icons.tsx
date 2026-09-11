@@ -4,6 +4,7 @@ import {
   LuAlarmClock,
   LuAnchor,
   LuArrowLeft,
+  LuArrowLeftRight,
   LuAward,
   LuBanknote,
   LuBell,
@@ -194,6 +195,7 @@ const UI: Record<string, IconType> = {
   'chevron-down': LuChevronDown,
   pencil: LuPencil,
   'arrow-left': LuArrowLeft,
+  'arrow-left-right': LuArrowLeftRight,
   'arrow-up-right': LuArrowUpRight,
   sun: LuSun,
   moon: LuMoon,
@@ -261,10 +263,12 @@ const UI: Record<string, IconType> = {
   laugh: LuLaugh,
   'calendar-clock': LuCalendarClock,
   'eye-off': LuEyeOff,
+  sunrise: LuSunrise,
+  notebook: LuNotebook,
 };
 
 export function Icon({ name, size = 16, className }: { name: string; size?: number; className?: string }) {
-  const C = UI[name];
+  const C = UI[name] || TYPE_ICONS[name];
   if (!C) return null;
   return <C size={size} className={className} style={name === 'star-filled' ? { fill: 'currentColor' } : undefined} />;
 }

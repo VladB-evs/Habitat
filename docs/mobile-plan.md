@@ -515,7 +515,7 @@ stops riding above the keyboard and the split stops making room.
 ## 4. Verification loop
 
 Start the app as usual (`npm run dev`); the dev bridge comes up alongside it and
-logs its port. Then open **http://127.0.0.1:5173** in a browser and size the window
+logs its port. Then open **http://127.0.0.1:5180** in a browser and size the window
 to the viewport you care about. The page talks to whatever vault the Electron
 instance has open.
 

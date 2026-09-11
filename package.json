@@ -1,12 +1,12 @@
 {
   "name": "habitat",
   "productName": "Habitat",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "private": true,
   "description": "Object-based personal knowledge base — Notion databases × Capacities daily notes × Anytype design.",
   "main": "electron/main.js",
   "scripts": {
-    "dev": "node scripts/dev-app-name.mjs && concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5173 && HABITAT_DEV=1 electron .\"",
+    "dev": "node scripts/dev-app-name.mjs && concurrently -k -s first \"vite\" \"wait-on tcp:127.0.0.1:5180 && HABITAT_DEV=1 electron .\"",
     "build": "vite build",
     "build:ai": "node scripts/build-ai.mjs",
     "typecheck": "tsc --noEmit",

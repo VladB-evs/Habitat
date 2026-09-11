@@ -21,7 +21,7 @@ const CHANNELS = new Set([
   'spellcheck:get', 'spellcheck:set',
   'profile:get', 'import:obsidianVault', 'export:vault',
   'people:list', 'people:get', 'people:create', 'people:self', 'people:birthdays', 'people:fields',
-  'habitats:create', 'habitats:open', 'habitats:switch', 'habitats:onboard', 'habitats:delete', 'habitats:pickFolder',
+  'habitats:create', 'habitats:open', 'habitats:switch', 'habitats:onboard', 'habitats:delete', 'habitats:pickFolder', 'habitats:update',
   'vars:list', 'vars:save',
   'automations:list', 'automations:save', 'automations:tick', 'automations:run', 'automations:appStart', 'automations:preview',
   'telegram:get', 'telegram:save', 'telegram:test', 'telegram:poll', 'telegram:pair', 'telegram:unpair',
@@ -36,7 +36,7 @@ const CHANNELS = new Set([
   'window:trafficLights',
   'sync:status', 'sync:now', 'sync:signIn', 'sync:signOut', 'sync:config', 'sync:saveConfig',
   'tags:list', 'tags:search', 'tags:ensure', 'tags:delete',
-  'media:searchCovers', 'media:fetchCover',
+  'media:searchCovers', 'media:fetchCover', 'media:tmdbStatus', 'media:setTmdbKey',
 ]);
 
 contextBridge.exposeInMainWorld('habitat', {

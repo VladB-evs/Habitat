@@ -54,11 +54,14 @@ export function ApiSettings() {
   const [reveal, setReveal] = useState(false);
   const [notice, setNotice] = useState('');
   const [appDir, setAppDir] = useState('/path/to/Habitat');
+  const [tmdbStatus, setTmdbStatus] = useState<{ hasKey: boolean; maskedKey: string | null } | null>(null);
+  const [tmdbInput, setTmdbInput] = useState('');
 
   useEffect(() => {
     api.http.config().then(setCfg);
     api.http.status().then(setStatus);
     api.app.info().then((i) => setAppDir(i.appDir));
+    api.media.tmdbStatus().then(setTmdbStatus).catch(() => {});
   }, []);
 
   if (!cfg) return null;
@@ -224,6 +227,64 @@ export function ApiSettings() {
               </div>
             </div>
           </details>
+        </div>
+      </section>
+
+      <section className="set-sec">
+        <div className="set-title">The Movie Database (TMDb)</div>
+        <div className="set-group">
+          <div className="set-item">
+            <div>
+              <div className="set-name">API Key</div>
+              <div className="set-note">
+                Used for movie and TV poster searches, release years, and genre tags.
+                {tmdbStatus?.hasKey ? ` Active (${tmdbStatus.maskedKey}).` : ' Unset (using Wikipedia fallback).'}
+              </div>
+            </div>
+            <div className="set-ctl">
+              <input
+                type="password"
+                className="field mono"
+                style={{ width: 220 }}
+                placeholder={tmdbStatus?.hasKey ? '••••••••' : 'API Key or Access Token'}
+                value={tmdbInput}
+                onChange={(e) => setTmdbInput(e.target.value)}
+              />
+              <button
+                className="btn"
+                disabled={!tmdbInput.trim()}
+                onClick={async () => {
+                  const res = await api.media.setTmdbKey(tmdbInput.trim());
+                  setTmdbStatus(res);
+                  setTmdbInput('');
+                  setNotice('TMDb API key saved.');
+                }}
+              >
+                Save
+              </button>
+              {tmdbStatus?.hasKey && (
+                <button
+                  className="btn subtle"
+                  onClick={async () => {
+                    const res = await api.media.setTmdbKey('');
+                    setTmdbStatus(res);
+                    setNotice('TMDb API key removed.');
+                  }}
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="set-item">
+            <div className="set-note">
+              Keys are free for personal use at{' '}
+              <a href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">
+                themoviedb.org/settings/api
+              </a>
+              . When asked for an Application URL, simply enter <code>http://localhost</code> (no domain required). Stored in your vault&apos;s private configuration and never exported.
+            </div>
+          </div>
         </div>
       </section>
 

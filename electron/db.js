@@ -149,8 +149,18 @@ function scheduledDays(obj, anchorKey, from, to) {
  * reading and moving always agree about which of several dates is "the" one; an empty
  * one is still offered, so something unscheduled can be given a time.
  */
-const scheduleDef = (defs, props, kind) =>
-  defs.find((p) => p.kind === kind && props[p.id]) || defs.find((p) => p.kind === kind);
+const scheduleDef = (defs, props, kind) => {
+  if (kind === 'date') {
+    return (
+      defs.find((p) => p.kind === 'date' && p.id === 'doing') ||
+      defs.find((p) => p.kind === 'date' && props[p.id] && p.id !== 'due') ||
+      defs.find((p) => p.kind === 'date' && p.id !== 'due') ||
+      defs.find((p) => p.kind === 'date' && props[p.id]) ||
+      defs.find((p) => p.kind === 'date')
+    );
+  }
+  return defs.find((p) => p.kind === kind && props[p.id]) || defs.find((p) => p.kind === kind);
+};
 
 /**
  * Take one day out of a series and give it its own object.
@@ -1459,10 +1469,13 @@ function rolloverTasks() {
     // A series keeps its anchor: dragging "every Monday" forward each morning
     // would rewrite the rule's whole future from a date that was never missed.
     if (recur.parseRule(p[REPEAT_PROP])) continue;
-    if (p.due && p.due < today && p.status !== 'Done') {
-      p.due = today;
-      p.rolled = true;
-      upd.run(JSON.stringify(p), now(), r.id);
+    if (p.doing && p.doing < today && p.status !== 'Done') {
+      // Only roll doing date forward if doing date doesn't exceed due date
+      if (!p.due || today <= String(p.due).slice(0, 10)) {
+        p.doing = today;
+        p.rolled = true;
+        upd.run(JSON.stringify(p), now(), r.id);
+      }
     }
   }
 }
@@ -1516,7 +1529,11 @@ const api = {
     fileRow: (hash) => db.prepare('SELECT * FROM files WHERE hash = ?').get(String(hash)) ?? null,
   }),
   ...studyApi,
-  ...media.channels({ addFile: addFileBytes }),
+  ...media.channels({
+    addFile: addFileBytes,
+    getKv: (k) => api['kv:get'](k),
+    setKv: (k, v) => api['kv:set']({ key: k, value: v }),
+  }),
 
   'types:list': () => db.prepare('SELECT * FROM types ORDER BY builtin DESC, created_at').all().map(parseType),
 
@@ -1561,12 +1578,12 @@ const api = {
   /**
    * Everything in the vault, for export.
    *
-   * `httpApi` and `telegram` are held back on purpose: they hold the API bearer
-   * token and the Telegram bot token, and an export is a file people copy to a
-   * drive or hand to someone else. Nothing else in kv is a secret.
+   * `httpApi`, `telegram` and `tmdb_api_key` are held back on purpose: they hold
+   * private keys/tokens, and an export is a file people copy to a drive or hand
+   * to someone else. Nothing else in kv is a secret.
    */
   'export:data': () => {
-    const secret = new Set(['httpApi', 'telegram']);
+    const secret = new Set(['httpApi', 'telegram', 'tmdb_api_key']);
     return {
       app: 'habitat',
       exportedAt: now(),
@@ -1605,10 +1622,7 @@ const api = {
       // time, which is all the fallback below the two real date properties
       // means. Without this every journal entry showed up on the month grid
       // as an all-day "event" the same as a task or a real event.
-      // Events live on their own page now (see the `events:*` channels) — not
-      // mixed into the Tasks calendar, which is what type_id === 'event' would
-      // otherwise fall into via its own `startsAt`.
-      if (row.type_id === 'tag' || row.type_id === 'daily' || row.type_id === 'event') continue;
+      if (row.type_id === 'tag' || row.type_id === 'daily') continue;
       const type = types.get(row.type_id);
       const obj = parseObj(row);
       const defs = [...(type ? type.properties : []), ...obj.extraProps];
@@ -1622,12 +1636,14 @@ const api = {
 
       const anchor = timed
         ? localKey(startsAt)
-        : dayDef
-          ? String(obj.props[dayDef.id]).slice(0, 10)
-          : row.date_key || null;
+        : obj.props.doing
+          ? String(obj.props.doing).slice(0, 10)
+          : dayDef
+            ? String(obj.props[dayDef.id]).slice(0, 10)
+            : row.date_key || null;
       if (!anchor) continue;
 
-      const repeats = !!ruleOf(obj);
+      const repeats = !!(ruleOf(obj) || obj.props.seriesId);
       // A run of days — a holiday, a flight with a stopover — is one entry per
       // day it covers, and the days after the first are all-day: the hours it
       // started at say nothing about the middle of a week away.
@@ -1677,36 +1693,70 @@ const api = {
    * day and a copy takes it, which is what "move next Tuesday's standup" means.
    * Pass `scope: 'all'` to shift the whole series instead.
    */
-  'calendar:reschedule': ({ id, dayKey, startMinute = null, minutes = null, occurrence = null, scope = 'one' }) => {
+  'calendar:reschedule': ({ id, dayKey, startMinute = null, minutes = null, occurrence = null, scope = 'one', allowPast = false }) => {
     const key = String(dayKey || '').slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return null;
 
+    const today = localToday();
+    const now = new Date();
+    const nowMinute = now.getHours() * 60 + now.getMinutes();
+
+    if (!allowPast) {
+      if (key < today) {
+        throw new Error(`Cannot schedule in the past (${key})`);
+      }
+      if (key === today && startMinute !== null && startMinute < nowMinute) {
+        throw new Error(`Cannot schedule before current time today`);
+      }
+    }
+
     const row = db.prepare('SELECT * FROM objects WHERE id = ?').get(id);
     if (!row) return null;
-    // A daily note is its date, a tag is only a label, and an Event lives on its
-    // own page with its own editing — none of them belong to this grid.
-    if (row.type_id === 'daily' || row.type_id === 'tag' || row.type_id === 'event') return null;
+    if (row.type_id === 'daily' || row.type_id === 'tag') return null;
 
     const type = getType(row.type_id);
     const obj = parseObj(row);
     const defs = [...(type ? type.properties : []), ...obj.extraProps];
     const props = { ...obj.props };
 
+    if (row.type_id === 'task' && obj.props.due) {
+      const dueKey = String(obj.props.due).slice(0, 10);
+      if (key > dueKey) {
+        throw new Error(`Cannot schedule task past its due date (${dueKey})`);
+      }
+    }
+
     if (occurrence && scope !== 'all' && ruleOf(obj)) {
       const detached = detachOccurrence(obj, defs, String(occurrence).slice(0, 10));
       if (!detached) return null;
-      return api['calendar:reschedule']({ id: detached.id, dayKey: key, startMinute, minutes });
+      return api['calendar:reschedule']({ id: detached.id, dayKey: key, startMinute, minutes, allowPast });
     }
 
     if (startMinute === null) {
       const dayDef = scheduleDef(defs, obj.props, 'date');
-      if (!dayDef) return null;
-      props[dayDef.id] = key;
+      if (dayDef) {
+        props[dayDef.id] = key;
+        delete props.startsAt;
+        delete props.endsAt;
+        delete props.duration;
+      } else {
+        const timeDef = scheduleDef(defs, obj.props, 'datetime');
+        if (!timeDef) return null;
+        props[timeDef.id] = `${key}T00:00`;
+      }
     } else {
       const timeDef = scheduleDef(defs, obj.props, 'datetime');
       if (!timeDef) return null;
       props[timeDef.id] = stamp(key, Math.max(0, Math.min(24 * 60 - 1, Math.round(startMinute))));
-      if (Number.isFinite(minutes) && minutes > 0) props[DURATION_PROP] = Math.round(minutes);
+      if (defs.some((p) => p.id === 'doing')) {
+        props.doing = key;
+      }
+      if (Number.isFinite(minutes) && minutes > 0) {
+        if (defs.some((p) => p.id === DURATION_PROP)) props[DURATION_PROP] = Math.round(minutes);
+        if (defs.some((p) => p.id === END_PROP)) {
+          props[END_PROP] = stamp(key, Math.max(0, Math.min(24 * 60 - 1, Math.round(startMinute + minutes))));
+        }
+      }
     }
 
     updateObject({ id, patch: { props } });
@@ -1727,7 +1777,12 @@ const api = {
     if (!timeDef) return null;
 
     const props = { [timeDef.id]: stamp(key, Math.max(0, Math.min(24 * 60 - 1, Math.round(startMinute)))) };
-    if (Number.isFinite(minutes) && minutes > 0) props[DURATION_PROP] = Math.round(minutes);
+    if (Number.isFinite(minutes) && minutes > 0) {
+      if (type.properties.some((p) => p.id === DURATION_PROP)) props[DURATION_PROP] = Math.round(minutes);
+      if (type.properties.some((p) => p.id === END_PROP)) {
+        props[END_PROP] = stamp(key, Math.max(0, Math.min(24 * 60 - 1, Math.round(startMinute + minutes))));
+      }
+    }
     // Normalised through the parser, so only a rule the calendar can read is stored.
     const rule = recur.parseRule(repeat);
     if (rule) props[REPEAT_PROP] = recur.formatRule(rule);
@@ -2215,9 +2270,7 @@ const api = {
     const events = new Map();
 
     for (const row of rows) {
-      // Events are their own page now, not this one's "something that happens"
-      // fallback — that branch is what Meeting still uses.
-      if (row.type_id === 'daily' || row.type_id === 'tag' || row.type_id === 'event') continue;
+      if (row.type_id === 'daily' || row.type_id === 'tag') continue;
       const type = types.get(row.type_id);
       const obj = parseObj(row);
       const defs = [...(type ? type.properties : []), ...obj.extraProps];
@@ -2228,9 +2281,9 @@ const api = {
       const startsAt = timeDef ? readStamp(obj.props[timeDef.id]) : null;
       const anchor = startsAt
         ? localKey(startsAt)
-        : dayDef
-          ? String(obj.props[dayDef.id]).slice(0, 10)
-          : null;
+        : (status
+          ? (obj.props.doing ? String(obj.props.doing).slice(0, 10) : null)
+          : (dayDef ? String(obj.props[dayDef.id]).slice(0, 10) : null));
       const rule = ruleOf(obj);
 
       if (status) {
@@ -2242,17 +2295,25 @@ const api = {
           when = ahead[0] || scheduledDays(obj, anchor, anchor, today).pop() || anchor;
         }
         const done = isDoneObject(obj, type, when);
+        const due = obj.props.due ? String(obj.props.due).slice(0, 10) : null;
+        const doing = obj.props.doing ? String(obj.props.doing).slice(0, 10) : null;
+        const isOverdue = !done && (
+          (!!when && when < today) ||
+          (!!due && due < today)
+        );
         const card = {
           id: obj.id,
           typeId: obj.typeId,
           typeName: type ? type.name : obj.typeId,
           title: obj.title || 'Untitled',
           when,
+          due,
+          doing,
           startMinute: startsAt ? startsAt.getHours() * 60 + startsAt.getMinutes() : null,
           minutes: startsAt ? minutesOf(obj.props, startsAt) : null,
           done,
           repeats: !!rule,
-          overdue: !!when && when < today && !done,
+          overdue: isOverdue,
           rolled: !!obj.props.rolled,
           partOf,
         };
@@ -2260,10 +2321,10 @@ const api = {
         if (partOf) {
           if (!nested.has(partOf)) nested.set(partOf, []);
           nested.get(partOf).push(card);
-        } else if (!when) {
-          if (!done) backlog.push(card);
         } else if (card.overdue) {
           overdue.push(card);
+        } else if (!when) {
+          if (!done) backlog.push(card);
         } else if (byDay.has(when)) {
           byDay.get(when).tasks.push(card);
         }
@@ -2335,7 +2396,7 @@ const api = {
 
     return {
       days: dayList,
-      overdue: overdue.sort((a, b) => (a.when || '').localeCompare(b.when || '')),
+      overdue: overdue.sort((a, b) => (a.due || a.when || '').localeCompare(b.due || b.when || '')),
       backlog: backlog.sort((a, b) => b.id.localeCompare(a.id)),
     };
   },
@@ -3095,6 +3156,21 @@ function migrate() {
   // not a fold back into Task. Every vault gets it, the same way People and
   // Tag are universal rather than tied to a flavor.
   runOnce('event-type-v2', () => ensureEventType());
+
+  runOnce('task-doing-date-v1', () => {
+    const type = getType('task');
+    if (!type) return;
+    if (type.properties.some((p) => p.id === 'doing')) return;
+    const dueIdx = type.properties.findIndex((p) => p.id === 'due');
+    const nextProps = [...type.properties];
+    const doingDef = { id: 'doing', name: 'Doing Date', kind: 'date' };
+    if (dueIdx !== -1) {
+      nextProps.splice(dueIdx + 1, 0, doingDef);
+    } else {
+      nextProps.push(doingDef);
+    }
+    db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(JSON.stringify(nextProps), 'task');
+  });
 }
 
 /** Run a one-time data migration, remembered in the kv table. */
@@ -3140,6 +3216,7 @@ const FLAVOR_TYPES = {
       properties: [
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
+        { id: 'doing', name: 'Doing Date', kind: 'date' },
         { id: 'startsAt', name: 'Starts', kind: 'datetime' },
         { id: 'endsAt', name: 'Ends', kind: 'datetime' },
         { id: 'location', name: 'Where', kind: 'text' },
@@ -3178,6 +3255,7 @@ const FLAVOR_TYPES = {
       properties: [
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
+        { id: 'doing', name: 'Doing Date', kind: 'date' },
         { id: 'project', name: 'Project', kind: 'relation', targetTypeId: 'project' },
         { id: 'startsAt', name: 'Starts', kind: 'datetime' },
         { id: 'endsAt', name: 'Ends', kind: 'datetime' },
@@ -3208,6 +3286,7 @@ const FLAVOR_TYPES = {
       properties: [
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
+        { id: 'doing', name: 'Doing Date', kind: 'date' },
         { id: 'course', name: 'Course', kind: 'relation', targetTypeId: 'course' },
         { id: 'startsAt', name: 'Starts', kind: 'datetime' },
         { id: 'endsAt', name: 'Ends', kind: 'datetime' },
@@ -3238,6 +3317,7 @@ const FLAVOR_TYPES = {
       properties: [
         { id: 'status', name: 'Status', kind: 'select', options: ['Todo', 'Doing', 'Done'] },
         { id: 'due', name: 'Due', kind: 'date' },
+        { id: 'doing', name: 'Doing Date', kind: 'date' },
         { id: 'project', name: 'Project', kind: 'relation', targetTypeId: 'project' },
         { id: 'startsAt', name: 'Starts', kind: 'datetime' },
         { id: 'endsAt', name: 'Ends', kind: 'datetime' },

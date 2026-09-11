@@ -10,11 +10,7 @@ import { clientUid } from './util';
 export type View =
   | { kind: 'dashboard' }
   | { kind: 'daily' }
-  /** Tasks and the calendar are one page: two ways of reading the same things. */
   | { kind: 'tasks' }
-  /** Meetings, flights, anything you need to go to or join — its own page, not
-   *  Tasks. See EventsPage.tsx. */
-  | { kind: 'events' }
   /** No id is the gallery of boards; an id is one board, open. */
   | { kind: 'canvas'; id?: string }
   | { kind: 'study' }
@@ -31,6 +27,30 @@ export type View =
   | { kind: 'template'; id: string };
 
 export type SplitDir = 'row' | 'col';
+export type LinkTarget = 'current' | 'side';
+
+export function getViewInfo(v: View | undefined, types?: ObjType[]): { title: string; icon: string } {
+  if (!v) return { title: 'Home', icon: 'grid' };
+  switch (v.kind) {
+    case 'dashboard': return { title: 'Dashboard', icon: 'grid' };
+    case 'daily': return { title: 'Daily Notes', icon: 'calendar' };
+    case 'tasks': return { title: 'Tasks', icon: 'circle-check' };
+    case 'people': return { title: 'People', icon: 'people' };
+    case 'media': return { title: 'Media', icon: 'film' };
+    case 'tags': return { title: 'Tags', icon: 'hash' };
+    case 'canvas': return { title: 'Canvas', icon: 'canvas' };
+    case 'study': return { title: 'Study', icon: 'study' };
+    case 'deck': return { title: 'Deck', icon: 'deck' };
+    case 'studyNote': return { title: 'Study Note', icon: 'doc' };
+    case 'type': {
+      const t = types?.find((x) => x.id === v.typeId);
+      return { title: t?.name || 'Type', icon: t?.icon || 'table' };
+    }
+    case 'template': return { title: 'Template', icon: 'doc' };
+    case 'object': return { title: 'Note', icon: 'doc' };
+    default: return { title: 'Page', icon: 'doc' };
+  }
+}
 
 interface Pane {
   /**
@@ -51,6 +71,11 @@ interface AppCtx {
   active: number;
   setActive: (i: number) => void;
   split: (dir: SplitDir) => void;
+  toggleSplitDir: () => void;
+  swapPanes: () => void;
+  openPageBeside: (v: View) => void;
+  linkTarget: LinkTarget;
+  setLinkTarget: (t: LinkTarget) => void;
   /** Which pane is on its way out, so the shell can animate it before it goes. */
   closing: number | null;
   requestClose: (i: number) => void;
@@ -60,8 +85,8 @@ interface AppCtx {
   back: () => void;
   canBack: boolean;
   openObject: (id: string, occurrence?: string) => void;
-  /** Click handler for anything that opens an object: ⌘/⌃/⇧-click sends it to the other pane. */
-  openFrom: (e: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }, id: string, occurrence?: string) => void;
+  /** Click handler for anything that opens an object: opens in-place or beside based on linkTarget/modifiers */
+  openFrom: (e: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean }, id: string, occurrence?: string) => void;
   openBeside: (id: string, occurrence?: string) => void;
   /** Swaps the current object view onto another id in place, without pushing
    *  history — for when notes taken on a repeating occurrence fork it into a
@@ -73,6 +98,12 @@ interface AppCtx {
    *  edited from Settings' Navigation tab rather than from the bar itself. */
   bottomNav: NavKey[];
   setBottomNav: (keys: NavKey[]) => void;
+  settingsOpen: boolean;
+  openSettings: () => void;
+  closeSettings: () => void;
+  newHabitatOpen: boolean;
+  openNewHabitat: () => void;
+  closeNewHabitat: () => void;
 }
 
 const Ctx = createContext<AppCtx>(null!);
@@ -82,9 +113,8 @@ export const useApp = () => useContext(Ctx);
 function initialView(): View {
   const h = window.location.hash.replace(/^#/, '');
   if (h.startsWith('/daily')) return { kind: 'daily' };
-  // /calendar is where the calendar used to live, and links to it still work.
-  if (h.startsWith('/tasks') || h.startsWith('/calendar')) return { kind: 'tasks' };
-  if (h.startsWith('/events')) return { kind: 'events' };
+  if (h.startsWith('/tasks')) return { kind: 'tasks' };
+  if (h.startsWith('/calendar') || h.startsWith('/events')) return { kind: 'tasks' };
   if (h.startsWith('/canvas/')) return { kind: 'canvas', id: h.slice(8) };
   if (h.startsWith('/canvas')) return { kind: 'canvas' };
   if (h.startsWith('/deck/')) return { kind: 'deck', id: h.slice(6) };
@@ -115,6 +145,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPanes((ps) => ps.map((p, i) => (i === Math.min(active, ps.length - 1) ? { ...p, stack: [...p.stack.slice(-40), v] } : p))),
     [active]
   );
+
+  const [linkTarget, setLinkTargetState] = useState<LinkTarget>(() => {
+    return (localStorage.getItem('habitat:link-target') as LinkTarget) || 'current';
+  });
+
+  const setLinkTarget = useCallback((target: LinkTarget) => {
+    setLinkTargetState(target);
+    localStorage.setItem('habitat:link-target', target);
+  }, []);
 
   const [closing, setClosing] = useState<number | null>(null);
 
@@ -163,16 +202,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setActive(1);
   }, []);
 
+  const openPageBeside = useCallback((v: View) => {
+    setPanes((ps) =>
+      ps.length === 1
+        ? [ps[0], { id: clientUid(), stack: [v] }]
+        : ps.map((p, i) => (i === 1 ? { ...p, stack: [...p.stack.slice(-40), v] } : p))
+    );
+    setActive(1);
+  }, []);
+
+  const swapPanes = useCallback(() => {
+    setPanes((ps) => {
+      if (ps.length !== 2) return ps;
+      return [ps[1], ps[0]];
+    });
+    setActive((a) => (a === 0 ? 1 : 0));
+  }, []);
+
   /**
-   * Everything opens in the side view. ⌘/⌃ (or ⇧) is the escape hatch: it opens
-   * the object full-width in the pane you clicked from.
+   * By default, items open in place in the current pane.
+   * If linkTarget is set to 'side', or the user holds Alt/Option (or Cmd/Ctrl),
+   * the item opens beside in the secondary pane.
    */
   const openFrom = useCallback(
-    (e: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }, id: string, occurrence?: string) => {
-      if (e.metaKey || e.ctrlKey || e.shiftKey) openObject(id, occurrence);
-      else openBeside(id, occurrence);
+    (e: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean; altKey?: boolean }, id: string, occurrence?: string) => {
+      const modifier = !!(e.altKey || e.metaKey || e.ctrlKey);
+      const wantBeside = linkTarget === 'side' ? !modifier : modifier;
+      if (wantBeside) openBeside(id, occurrence);
+      else openObject(id, occurrence);
     },
-    [openBeside, openObject]
+    [linkTarget, openBeside, openObject]
   );
 
   const retarget = useCallback(
@@ -209,6 +268,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [narrow]
   );
 
+  const toggleSplitDir = useCallback(() => {
+    setDir((d) => (d === 'row' ? 'col' : 'row'));
+  }, []);
+
   // Splitting side by side and *then* narrowing the window has to end up stacked
   // too, or the panes are left as two unusable columns.
   useEffect(() => {
@@ -238,6 +301,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     saveNav(keys);
   }, []);
 
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [newHabitatOpen, setNewHabitatOpen] = useState(false);
+
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const openNewHabitat = useCallback(() => setNewHabitatOpen(true), []);
+  const closeNewHabitat = useCallback(() => setNewHabitatOpen(false), []);
+
   return (
     <Ctx.Provider
       value={{
@@ -248,6 +319,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         active,
         setActive,
         split,
+        toggleSplitDir,
+        swapPanes,
+        openPageBeside,
+        linkTarget,
+        setLinkTarget,
         closing,
         requestClose,
         endClose,
@@ -263,6 +339,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setTheme,
         bottomNav,
         setBottomNav,
+        settingsOpen,
+        openSettings,
+        closeSettings,
+        newHabitatOpen,
+        openNewHabitat,
+        closeNewHabitat,
       }}
     >
       {children}

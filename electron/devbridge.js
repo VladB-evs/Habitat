@@ -30,6 +30,8 @@ const { randomBytes, timingSafeEqual } = require('crypto');
 
 /** Where `npm run dev` serves the renderer from. */
 const DEV_ORIGINS = new Set([
+  'http://127.0.0.1:5180',
+  'http://localhost:5180',
   'http://127.0.0.1:5173',
   'http://localhost:5173',
 ]);
@@ -168,7 +170,7 @@ function start(channels, extra = {}) {
 
   server.listen(PORT, LAN ? '0.0.0.0' : '127.0.0.1', () => {
     if (!LAN) {
-      console.log(`[dev bridge] http://127.0.0.1:${PORT} — open the app at http://127.0.0.1:5173`);
+      console.log(`[dev bridge] http://127.0.0.1:${PORT} — open the app at http://127.0.0.1:5180`);
       return;
     }
     const host = `http://${lanAddress()}:${PORT}`;

@@ -257,12 +257,17 @@ export function People() {
   return (
     <div className="page people-page">
       <header className="page-head">
-        <div className="page-title">
-          <span className="type-emoji big">
-            <Icon name="people" size={22} />
-          </span>
-          <h1>People</h1>
-          <span className="count-badge">{people.length}</span>
+        <div className="page-head-top">
+          <div className="page-title">
+            <span className="type-emoji big">
+              <Icon name="people" size={22} />
+            </span>
+            <h1>People</h1>
+            <span className="count-badge">{people.length}</span>
+          </div>
+          <div className="split-controls-top">
+            <SplitControls />
+          </div>
         </div>
         <PageActions>
         <div className="people-tools">
@@ -283,10 +288,12 @@ export function People() {
               <Icon name="rows3" size={13} />
             </button>
           </div>
-          <button className="btn primary" onClick={() => setAdding(true)}>
-            <Icon name="plus" size={14} /> Add person
+          <button className="btn primary people-page-btn" onClick={() => setAdding(true)}>
+            <Icon name="plus" size={14} /> <span>Add<span className="btn-text-extra"> person</span></span>
           </button>
-          <SplitControls />
+          <div className="split-controls-desktop">
+            <SplitControls />
+          </div>
         </div>
         </PageActions>
       </header>

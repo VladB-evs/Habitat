@@ -1,11 +1,10 @@
-import { lazy, Suspense, useState } from 'react';
+import { useState } from 'react';
 import { NAV_BUILTIN_MAP, typeIdOf } from '../bottomnav';
 import { useApp } from '../store';
 import type { View } from '../store';
 import { MEDIA_TYPE, PEOPLE_TYPE, typeColor } from '../util';
 import { Icon, TypeIcon } from './Icons';
 import { Sheet } from './Sheet';
-const SettingsModal = lazy(() => import('./SettingsModal').then((m) => ({ default: m.SettingsModal })));
 
 /** Daily notes, tasks, people, media and tags all have their own nav entries
  *  already — same exclusion Sidebar.tsx uses for its Types section, so the
@@ -14,7 +13,7 @@ const UPSTAIRS = new Set(['daily', 'tag', 'task', 'event', PEOPLE_TYPE, MEDIA_TY
 
 /** Everything "More" can offer a destination for. Canvas is left out, same as
  *  the sidebar's own nav — boards are desktop-only. */
-const MORE_DESTINATIONS = ['dashboard', 'daily', 'tasks', 'events', 'people', 'media', 'tags', 'study'] as const;
+const MORE_DESTINATIONS = ['dashboard', 'daily', 'tasks', 'people', 'media', 'tags', 'study'] as const;
 
 const isBuiltinActive = (key: string, viewKind: string) =>
   key === 'study' ? viewKind === 'study' || viewKind === 'deck' || viewKind === 'studyNote' : viewKind === key;
@@ -28,10 +27,9 @@ const isBuiltinActive = (key: string, viewKind: string) =>
  * there, so they ride along at the bottom of the same sheet.
  */
 export function BottomNav({ onSearch, onAsk }: { onSearch: () => void; onAsk?: () => void }) {
-  const { types, view, navigate, theme, bottomNav } = useApp();
+  const { types, view, navigate, theme, bottomNav, openSettings, openNewHabitat } = useApp();
   const [typesOpen, setTypesOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const pickableTypes = types.filter((t) => !UPSTAIRS.has(t.id));
   // Only offer a destination here if it isn't already sitting in the bar —
   // otherwise "More" would mostly just repeat the buttons beside it.
@@ -150,19 +148,23 @@ export function BottomNav({ onSearch, onAsk }: { onSearch: () => void; onAsk?: (
           className="menu-item"
           onClick={() => {
             setMoreOpen(false);
-            setShowSettings(true);
+            openNewHabitat();
+          }}
+        >
+          <Icon name="plus" size={15} />
+          New habitat…
+        </button>
+        <button
+          className="menu-item"
+          onClick={() => {
+            setMoreOpen(false);
+            openSettings();
           }}
         >
           <Icon name="settings" size={15} />
           Settings
         </button>
       </Sheet>
-
-      {showSettings && (
-        <Suspense fallback={null}>
-          <SettingsModal onClose={() => setShowSettings(false)} />
-        </Suspense>
-      )}
     </>
   );
 }

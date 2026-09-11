@@ -34,6 +34,7 @@ export function TaskLine({
   onToggle,
   showEvent = true,
   moveAction,
+  actions,
   onDragStart,
 }: {
   task: AgendaTask;
@@ -43,6 +44,7 @@ export function TaskLine({
    *  the backlog and a day — dragging never reaches a touch screen at all, so
    *  without this the backlog has no way in from a phone. */
   moveAction?: { icon: string; label: string; onClick: () => void };
+  actions?: { icon: string; label: string; onClick: () => void }[];
   /** Fired the moment a real drag begins (not the `moveAction` guard below) —
    *  the backlog sheet uses this to get itself out of the way, since the days
    *  it's meant to be dropped onto sit right behind it and a drag can't reach
@@ -67,6 +69,7 @@ export function TaskLine({
         }
         e.dataTransfer.setData('text/habitat-task', task.id);
         e.dataTransfer.setData('text/habitat-minute', String(task.startMinute ?? ''));
+        if (task.due) e.dataTransfer.setData('text/habitat-due', task.due);
         e.dataTransfer.effectAllowed = 'move';
         onDragStart?.();
       }}
@@ -78,6 +81,14 @@ export function TaskLine({
         {task.done && <Icon name="check" size={11} />}
       </button>
       <span className="ag-task-title">{task.title}</span>
+      {task.due && (
+        <span
+          className={'ag-task-due' + (task.due < todayKey() && !task.done ? ' overdue' : '')}
+          title={`Due ${task.due}`}
+        >
+          <Icon name="calendar-clock" size={11} /> Due {task.due}
+        </span>
+      )}
       {task.startMinute !== null && <span className="ag-task-time">{clock(task.startMinute)}</span>}
       {task.repeats && (
         <span className="repeat-mark" title="Repeats">
@@ -94,7 +105,23 @@ export function TaskLine({
           <Icon name="history" size={11} /> Carried over
         </span>
       )}
-      {moveAction && (
+      {actions?.map((act) => (
+        <button
+          key={act.label}
+          className="ag-task-move"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            act.onClick();
+          }}
+          aria-label={act.label}
+          title={act.label}
+        >
+          <Icon name={act.icon} size={12} />
+          {act.label}
+        </button>
+      ))}
+      {!actions && moveAction && (
         <button
           className="ag-task-move"
           onPointerDown={(e) => e.stopPropagation()}
@@ -117,7 +144,7 @@ export function TaskLine({
  * An event, drawn as a block rather than a line: it is a thing that happens, not
  * something to tick off, and the tasks it carries sit inside it.
  */
-function EventBlock({ event, onToggle }: { event: AgendaEvent; onToggle: (t: AgendaTask) => void }) {
+export function EventBlock({ event, onToggle }: { event: AgendaEvent; onToggle: (t: AgendaTask) => void }) {
   const { openFrom, types, theme } = useApp();
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
@@ -297,6 +324,7 @@ export function Backlog({
   onAdd,
   onClear,
   onSchedule,
+  onMoveToToday,
   onDragStart,
 }: {
   tasks: AgendaTask[];
@@ -306,6 +334,8 @@ export function Backlog({
   /** The touch-friendly way onto a day — opens a "Schedule for" prompt instead
    *  of needing a drag onto a day section. See TaskLine's `moveAction`. */
   onSchedule: (taskId: string) => void;
+  /** Fast 1-click move to today */
+  onMoveToToday?: (taskId: string) => void;
   /** Passed straight through to each TaskLine — see its own `onDragStart`. */
   onDragStart?: () => void;
 }) {
@@ -335,15 +365,21 @@ export function Backlog({
       </header>
 
       <div className="ag-backlog-body">
-        {tasks.map((t) => (
-          <TaskLine
-            key={t.id}
-            task={t}
-            onToggle={onToggle}
-            moveAction={{ icon: 'calendar-days', label: 'Schedule', onClick: () => onSchedule(t.id) }}
-            onDragStart={onDragStart}
-          />
-        ))}
+        {tasks.map((t) => {
+          const taskActions = [
+            ...(onMoveToToday ? [{ icon: 'sun', label: 'Today', onClick: () => onMoveToToday(t.id) }] : []),
+            { icon: 'calendar-days', label: 'Schedule', onClick: () => onSchedule(t.id) },
+          ];
+          return (
+            <TaskLine
+              key={t.id}
+              task={t}
+              onToggle={onToggle}
+              actions={taskActions}
+              onDragStart={onDragStart}
+            />
+          );
+        })}
         <div className="ag-task add">
           <span className="tick ghost">
             <Icon name="plus" size={11} />

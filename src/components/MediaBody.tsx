@@ -16,9 +16,9 @@ const POSTER_ICON: Record<string, string> = {
 /**
  * A media entry's page: the poster up front, the facts that describe it
  * beside that, then whatever's been written about it in the note body below —
- * there's no separate Comments field duplicating that. Kind, Status, Rating,
- * Cover and Started/Finished come from the Media type itself; anything else
- * (Genre, or a detail someone added by hand) falls into the plain list.
+ * there's no separate Comments field duplicating that. Everything the Media
+ * type defines sits in the hero; a property added to this one object by hand
+ * falls into the plain list underneath.
  */
 export function MediaBody({
   obj,
@@ -45,10 +45,11 @@ export function MediaBody({
   const kind = String(obj.props.kind || 'Movie');
   const cover: FileRef | undefined = (Array.isArray(obj.props.cover) ? obj.props.cover : [])[0];
 
-  // Kind, Status, Rating, Cover, Started and Finished all ride in the hero;
-  // everything else — Genre, or something added by hand — falls into the
-  // plain property list.
-  const heroIds = new Set(['kind', 'status', 'rating', 'cover', 'started', 'finished']);
+  // Everything the type defines rides in the hero — genre included, which used
+  // to sit alone under a divider below while the space beside the poster went
+  // empty. Only something added to this one object by hand falls through to the
+  // plain list underneath.
+  const heroIds = new Set(['kind', 'status', 'rating', 'cover', 'started', 'finished', 'genre']);
   const rest = [...typeDefs.filter((p) => !heroIds.has(p.id)), ...obj.extraProps];
 
   return (
@@ -104,6 +105,12 @@ export function MediaBody({
               <div className="obj-prop inline">
                 <label>{kind === 'Movie' ? 'Watched' : 'Finished'}</label>
                 <Cell def={byId.get('finished')!} value={obj.props.finished} onChange={(v) => onProp('finished', v)} />
+              </div>
+            )}
+            {byId.get('genre') && (
+              <div className="obj-prop inline wide">
+                <label>Genre</label>
+                <Cell def={byId.get('genre')!} value={obj.props.genre} onChange={(v) => onProp('genre', v)} />
               </div>
             )}
           </div>

@@ -124,7 +124,7 @@ test('a daily journal entry never appears on the calendar', () => {
 
 // ---------- moving and creating from the grid ----------
 
-const move = (p) => api['calendar:reschedule'](p);
+const move = (p) => api['calendar:reschedule']({ allowPast: true, ...p });
 
 test('a drag moves an entry to another day and hour, keeping its length', () => {
   const m = api['objects:create']({
@@ -157,7 +157,7 @@ test('a resize writes the new length without moving the start', () => {
 });
 
 test('an all-day entry moves between days through its date property', () => {
-  const t = api['objects:create']({ typeId: 'task', title: 'Allday', props: { due: '2026-08-04' } });
+  const t = api['objects:create']({ typeId: 'task', title: 'Allday', props: { doing: '2026-08-04' } });
 
   move({ id: t.id, dayKey: '2026-08-06', startMinute: null });
 
