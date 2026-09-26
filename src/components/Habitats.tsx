@@ -9,16 +9,17 @@ export const FLAVORS = [
 ];
 
 export const AURAS = [
-  { id: 'amber', name: 'Amber Sol', color: '#f59e0b', glow: 'rgba(245, 158, 11, 0.45)', bg: 'rgba(245, 158, 11, 0.12)' },
-  { id: 'emerald', name: 'Emerald Grove', color: '#10b981', glow: 'rgba(16, 185, 129, 0.45)', bg: 'rgba(16, 185, 129, 0.12)' },
-  { id: 'violet', name: 'Cosmic Violet', color: '#a855f7', glow: 'rgba(168, 85, 247, 0.45)', bg: 'rgba(168, 85, 247, 0.12)' },
-  { id: 'cyan', name: 'Glacier Cyan', color: '#06b6d4', glow: 'rgba(6, 182, 212, 0.45)', bg: 'rgba(6, 182, 212, 0.12)' },
-  { id: 'rose', name: 'Solar Rose', color: '#f43f5e', glow: 'rgba(244, 63, 94, 0.45)', bg: 'rgba(244, 63, 94, 0.12)' },
+  { id: 'amber', name: 'Amber Sol', color: '#f59e0b', glow: 'rgba(245, 158, 11, 0.45)', bg: 'rgba(245, 158, 11, 0.12)', onAccent: '#221a04' },
+  { id: 'emerald', name: 'Emerald Grove', color: '#10b981', glow: 'rgba(16, 185, 129, 0.45)', bg: 'rgba(16, 185, 129, 0.12)', onAccent: '#ffffff' },
+  { id: 'violet', name: 'Cosmic Violet', color: '#a855f7', glow: 'rgba(168, 85, 247, 0.45)', bg: 'rgba(168, 85, 247, 0.12)', onAccent: '#ffffff' },
+  { id: 'cyan', name: 'Glacier Cyan', color: '#06b6d4', glow: 'rgba(6, 182, 212, 0.45)', bg: 'rgba(6, 182, 212, 0.12)', onAccent: '#062026' },
+  { id: 'rose', name: 'Solar Rose', color: '#f43f5e', glow: 'rgba(244, 63, 94, 0.45)', bg: 'rgba(244, 63, 94, 0.12)', onAccent: '#ffffff' },
 ];
 
 export function getAuraColor(auraIdOrHex?: string): string {
   if (!auraIdOrHex) return '#f59e0b';
   if (auraIdOrHex.startsWith('#')) return auraIdOrHex;
+  if (/^[0-9A-Fa-f]{6}$/.test(auraIdOrHex)) return '#' + auraIdOrHex;
   const match = AURAS.find((a) => a.id === auraIdOrHex);
   return match ? match.color : '#f59e0b';
 }
@@ -42,6 +43,52 @@ export function getAuraBg(auraIdOrHex?: string): string {
   }
   return 'rgba(245, 158, 11, 0.12)';
 }
+
+export function getOnAccent(auraIdOrHex?: string): string {
+  if (!auraIdOrHex) return '#221a04';
+  const match = AURAS.find((a) => a.id === auraIdOrHex || a.color.toLowerCase() === auraIdOrHex.toLowerCase());
+  if (match?.onAccent) return match.onAccent;
+
+  const hex = auraIdOrHex.startsWith('#') ? auraIdOrHex : getAuraColor(auraIdOrHex);
+  let c = hex.replace('#', '');
+  if (c.length === 3) c = c.split('').map((x) => x + x).join('');
+  const num = parseInt(c, 16);
+  if (isNaN(num)) return '#221a04';
+  const r = (num >> 16) & 255;
+  const g = (num >> 8) & 255;
+  const b = num & 255;
+
+  const toLinear = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  const L = 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+  return L >= 0.38 ? '#151514' : '#ffffff';
+}
+
+export function applyHabitatAccent(auraIdOrHex?: string): void {
+  if (typeof document === 'undefined') return;
+  const color = getAuraColor(auraIdOrHex);
+  const glow = getAuraGlow(auraIdOrHex);
+  const bg = getAuraBg(auraIdOrHex);
+  const onAccent = getOnAccent(auraIdOrHex);
+
+  const root = document.documentElement;
+  root.style.setProperty('--accent', color);
+  root.style.setProperty('--on-accent', onAccent);
+  root.style.setProperty('--hab-aura', color);
+  root.style.setProperty('--hab-aura-glow', glow);
+  root.style.setProperty('--hab-aura-bg', bg);
+  root.style.setProperty('--mention-fg', color);
+}
+
+// Automatically apply cached aura on module initialization
+try {
+  const cachedAura = typeof localStorage !== 'undefined' ? localStorage.getItem('habitat:aura') : null;
+  if (cachedAura) {
+    applyHabitatAccent(cachedAura);
+  }
+} catch {}
 
 function hexToRgba(hex: string, alpha: number): string {
   let c = hex.replace('#', '');
@@ -546,6 +593,11 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
         }
       }
 
+      applyHabitatAccent(auraValue);
+      try {
+        localStorage.setItem('habitat:aura', auraValue);
+      } catch {}
+
       // Trigger exhilarating launch sequence!
       setIsWarping(true);
       setSuccess(true);
@@ -651,7 +703,7 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
         animate={
           isWarping
             ? { opacity: 0, scale: 1.08, y: -20, filter: 'blur(10px)' }
-            : { opacity: 1, scale: 1, y: 0, filter: 'blur(0px)' }
+            : { opacity: 1, scale: 1, y: 0, filter: 'none' }
         }
         transition={{ type: 'spring', stiffness: 300, damping: 28 }}
       >

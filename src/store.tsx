@@ -6,11 +6,12 @@ import { loadNav, saveNav } from './bottomnav';
 import { useLayout } from './layout';
 import type { ObjType } from './types';
 import { clientUid } from './util';
+import { applyHabitatAccent } from './components/Habitats';
 
 export type View =
   | { kind: 'dashboard' }
   | { kind: 'daily' }
-  | { kind: 'tasks' }
+  | { kind: 'tasks'; tab?: 'schedule' | 'calendar' | 'board' }
   /** No id is the gallery of boards; an id is one board, open. */
   | { kind: 'canvas'; id?: string }
   | { kind: 'study' }
@@ -34,7 +35,7 @@ export function getViewInfo(v: View | undefined, types?: ObjType[]): { title: st
   switch (v.kind) {
     case 'dashboard': return { title: 'Dashboard', icon: 'grid' };
     case 'daily': return { title: 'Daily Notes', icon: 'calendar' };
-    case 'tasks': return { title: 'Tasks', icon: 'circle-check' };
+    case 'tasks': return { title: v.tab === 'calendar' ? 'Calendar' : 'Tasks', icon: v.tab === 'calendar' ? 'calendar-clock' : 'circle-check' };
     case 'people': return { title: 'People', icon: 'people' };
     case 'media': return { title: 'Media', icon: 'film' };
     case 'tags': return { title: 'Tags', icon: 'hash' };
@@ -43,6 +44,7 @@ export function getViewInfo(v: View | undefined, types?: ObjType[]): { title: st
     case 'deck': return { title: 'Deck', icon: 'deck' };
     case 'studyNote': return { title: 'Study Note', icon: 'doc' };
     case 'type': {
+      if (v.typeId === 'event') return { title: 'Calendar', icon: 'calendar-clock' };
       const t = types?.find((x) => x.id === v.typeId);
       return { title: t?.name || 'Type', icon: t?.icon || 'table' };
     }
@@ -113,8 +115,9 @@ export const useApp = () => useContext(Ctx);
 function initialView(): View {
   const h = window.location.hash.replace(/^#/, '');
   if (h.startsWith('/daily')) return { kind: 'daily' };
+  if (h.startsWith('/tasks/calendar') || h.startsWith('/calendar') || h.startsWith('/events') || h === '/type/event')
+    return { kind: 'tasks', tab: 'calendar' };
   if (h.startsWith('/tasks')) return { kind: 'tasks' };
-  if (h.startsWith('/calendar') || h.startsWith('/events')) return { kind: 'tasks' };
   if (h.startsWith('/canvas/')) return { kind: 'canvas', id: h.slice(8) };
   if (h.startsWith('/canvas')) return { kind: 'canvas' };
   if (h.startsWith('/deck/')) return { kind: 'deck', id: h.slice(6) };
@@ -123,6 +126,7 @@ function initialView(): View {
   if (h.startsWith('/tags')) return { kind: 'tags' };
   if (h.startsWith('/people')) return { kind: 'people' };
   if (h.startsWith('/media')) return { kind: 'media' };
+  if (h.startsWith('/type/event')) return { kind: 'tasks', tab: 'calendar' };
   if (h.startsWith('/type/')) return { kind: 'type', typeId: h.slice(6) };
   if (h.startsWith('/object/')) return { kind: 'object', id: h.slice(8) };
   return { kind: 'dashboard' };
@@ -140,9 +144,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const pane = panes[Math.min(active, panes.length - 1)];
   const view = pane.stack[pane.stack.length - 1];
 
+  const normalizeView = (v: View): View =>
+    v.kind === 'type' && v.typeId === 'event' ? { kind: 'tasks', tab: 'calendar' } : v;
+
   const navigate = useCallback(
-    (v: View) =>
-      setPanes((ps) => ps.map((p, i) => (i === Math.min(active, ps.length - 1) ? { ...p, stack: [...p.stack.slice(-40), v] } : p))),
+    (v: View) => {
+      const target = normalizeView(v);
+      setPanes((ps) =>
+        ps.map((p, i) => (i === Math.min(active, ps.length - 1) ? { ...p, stack: [...p.stack.slice(-40), target] } : p))
+      );
+    },
     [active]
   );
 
@@ -203,10 +214,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const openPageBeside = useCallback((v: View) => {
+    const target = normalizeView(v);
     setPanes((ps) =>
       ps.length === 1
-        ? [ps[0], { id: clientUid(), stack: [v] }]
-        : ps.map((p, i) => (i === 1 ? { ...p, stack: [...p.stack.slice(-40), v] } : p))
+        ? [ps[0], { id: clientUid(), stack: [target] }]
+        : ps.map((p, i) => (i === 1 ? { ...p, stack: [...p.stack.slice(-40), target] } : p))
     );
     setActive(1);
   }, []);
@@ -285,6 +297,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     reloadTypes();
   }, [reloadTypes]);
+
+  useEffect(() => {
+    api.settings.get().then((s) => {
+      const activeHab = s?.habitats?.find((h) => h.id === s?.activeId);
+      if (activeHab?.aura) {
+        applyHabitatAccent(activeHab.aura);
+        try {
+          localStorage.setItem('habitat:aura', activeHab.aura);
+        } catch {}
+      }
+    });
+
+    const onHabChange = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.aura) {
+        applyHabitatAccent(detail.aura);
+      }
+    };
+    window.addEventListener('habitat:change', onHabChange);
+    return () => window.removeEventListener('habitat:change', onHabChange);
+  }, []);
 
   const setTheme = useCallback((t: string) => {
     setThemeState(t);

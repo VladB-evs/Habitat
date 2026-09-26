@@ -2128,6 +2128,7 @@ button.version.version-update {
   background: var(--bg-2);
   text-align: left;
   overflow: hidden;
+  cursor: pointer;
 }
 
 @media (hover: hover) {
@@ -2139,6 +2140,19 @@ button.version.version-update {
 
 .cal-cell.out {
   opacity: 0.38;
+}
+
+.cal-cell.past {
+  opacity: 0.65;
+}
+
+.cal-day-head.past {
+  opacity: 0.65;
+}
+
+.cal-col.past {
+  opacity: 0.75;
+  background-color: color-mix(in srgb, var(--text-3) 4%, transparent);
 }
 
 .cal-cell.today {
@@ -2185,12 +2199,9 @@ button.version.version-update {
 }
 
 .cal-cell-chips .cal-chip {
-  cursor: default;
+  cursor: pointer;
 }
 
-/* Events' own month grid chip actually opens something on click (the Tasks
-   page's month view doesn't — that whole cell just navigates uniformly), so
-   it keeps the pointer cursor `.cal-chip` normally has. */
 .cal-cell-chips .cal-chip.clickable {
   cursor: pointer;
 }
@@ -3184,7 +3195,7 @@ textarea.field {
   -webkit-overflow-scrolling: touch;
   -webkit-app-region: drag;
   user-select: none;
-  padding: calc(24px + env(safe-area-inset-top, 0px)) 16px calc(28px + env(safe-area-inset-bottom, 0px));
+  padding: calc(36px + env(safe-area-inset-top, 0px)) 24px calc(40px + env(safe-area-inset-bottom, 0px));
 }
 
 /* Background Constellation Canvas */
@@ -3200,14 +3211,13 @@ textarea.field {
 /* Radiant Ambient Nebula Orbs */
 .habitat-stage-ambient {
   position: fixed;
-  top: 15%;
+  top: 40%;
   left: 50%;
-  transform: translateX(-50%);
-  width: 680px;
-  height: 480px;
+  transform: translate(-50%, -50%);
+  width: min(900px, 92vw);
+  height: min(650px, 80vh);
   border-radius: 50%;
-  background: radial-gradient(circle, var(--hab-aura-glow, rgba(245, 158, 11, 0.35)) 0%, var(--hab-aura-bg, rgba(245, 158, 11, 0.1)) 42%, transparent 70%);
-  filter: blur(80px);
+  background: radial-gradient(ellipse 65% 55% at 50% 50%, var(--hab-aura-glow, rgba(245, 158, 11, 0.35)) 0%, var(--hab-aura-bg, rgba(245, 158, 11, 0.1)) 40%, transparent 70%);
   pointer-events: none;
   z-index: 1;
   opacity: 0.9;
@@ -3217,13 +3227,12 @@ textarea.field {
 
 .habitat-stage-ambient-secondary {
   position: fixed;
-  bottom: 8%;
-  right: 18%;
-  width: 440px;
-  height: 440px;
+  bottom: 0;
+  right: 5%;
+  width: min(500px, 50vw);
+  height: min(500px, 50vh);
   border-radius: 50%;
-  background: radial-gradient(circle, var(--hab-aura-bg, rgba(245, 158, 11, 0.08)) 0%, transparent 65%);
-  filter: blur(90px);
+  background: radial-gradient(circle at 50% 50%, var(--hab-aura-bg, rgba(245, 158, 11, 0.08)) 0%, transparent 65%);
   pointer-events: none;
   z-index: 1;
   opacity: 0.7;
@@ -3231,11 +3240,11 @@ textarea.field {
 
 @keyframes habitatAmbientPulse {
   0% {
-    transform: translateX(-50%) scale(0.92) translate3d(0, 0, 0);
+    transform: translate(-50%, -50%) scale(0.94);
     opacity: 0.75;
   }
   100% {
-    transform: translateX(-50%) scale(1.08) translate3d(0, -10px, 0);
+    transform: translate(-50%, -50%) scale(1.06);
     opacity: 1;
   }
 }
@@ -3508,6 +3517,7 @@ textarea.field {
   background: rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.08);
   margin-bottom: 20px;
+  overflow: visible;
 }
 
 .habitat-custom-row {
@@ -3515,6 +3525,7 @@ textarea.field {
   align-items: center;
   gap: 10px;
   position: relative;
+  overflow: visible;
 }
 
 .habitat-custom-label {
@@ -3528,12 +3539,12 @@ textarea.field {
 
 .habitat-icon-grid {
   display: flex;
-  gap: 5px;
+  gap: 6px;
   align-items: center;
   flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
+  overflow: visible;
+  padding: 6px 4px;
+  margin: -6px -4px;
 }
 
 .habitat-icon-grid::-webkit-scrollbar {
@@ -3565,6 +3576,7 @@ textarea.field {
   background: var(--hab-aura-bg, rgba(245, 158, 11, 0.15));
   border-color: var(--hab-aura, #f59e0b);
   transform: scale(1.08);
+  box-shadow: 0 0 12px 2px var(--hab-aura-glow, rgba(245, 158, 11, 0.35));
 }
 
 .habitat-aura-grid {
@@ -3572,9 +3584,9 @@ textarea.field {
   gap: 8px;
   align-items: center;
   flex-wrap: nowrap;
-  overflow-x: auto;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
+  overflow: visible;
+  padding: 6px 6px;
+  margin: -6px -6px;
 }
 
 .habitat-aura-grid::-webkit-scrollbar {
@@ -3602,7 +3614,7 @@ textarea.field {
 
 .habitat-aura-gem.active {
   transform: scale(1.25);
-  box-shadow: 0 0 12px 2px var(--hab-aura, #f59e0b);
+  box-shadow: 0 0 14px 3px var(--hab-aura, #f59e0b);
   border-color: #ffffff;
 }
 
@@ -3632,6 +3644,7 @@ textarea.field {
   border-color: var(--hab-aura, #f59e0b);
   color: var(--hab-aura, #f59e0b);
   background: var(--hab-aura-bg, rgba(245, 158, 11, 0.12));
+  box-shadow: 0 0 10px 1px var(--hab-aura-glow, rgba(245, 158, 11, 0.35));
 }
 
 .habitat-aura-more-gem {
@@ -3661,7 +3674,7 @@ textarea.field {
   border-color: var(--hab-aura, #f59e0b);
   border-style: solid;
   color: #ffffff;
-  box-shadow: 0 0 10px 1px var(--hab-aura, #f59e0b);
+  box-shadow: 0 0 12px 2px var(--hab-aura, #f59e0b);
   transform: scale(1.2);
 }
 
@@ -3800,12 +3813,15 @@ textarea.field {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 14px;
+  overflow: visible;
 }
 
 .habitat-settings-preview-row {
   display: flex;
   align-items: center;
   gap: 14px;
+  overflow: visible;
+  padding: 2px 0;
 }
 
 .habitat-settings-emblem {
@@ -3843,6 +3859,7 @@ textarea.field {
   gap: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
+  overflow: visible;
 }
 
 .habitat-settings-row {
@@ -3851,6 +3868,7 @@ textarea.field {
   justify-content: space-between;
   gap: 12px;
   position: relative;
+  overflow: visible;
 }
 
 .habitat-settings-label {
@@ -3865,10 +3883,17 @@ textarea.field {
 /* Settings Modal Specific Overrides */
 .habitat-settings-card .habitat-custom-row {
   justify-content: space-between;
+  overflow: visible;
 }
 
 .habitat-settings-card .habitat-custom-label {
   color: var(--text-3);
+}
+
+.habitat-settings-card .habitat-icon-grid,
+.habitat-settings-card .habitat-aura-grid {
+  overflow: visible;
+  padding: 6px 4px;
 }
 
 .habitat-settings-card .habitat-icon-choice {
@@ -3883,6 +3908,9 @@ textarea.field {
 .habitat-settings-card .habitat-icon-choice.active {
   color: var(--hab-aura, #f59e0b);
   background: var(--hab-aura-bg, rgba(245, 158, 11, 0.15));
+  border-color: var(--hab-aura, #f59e0b);
+  transform: scale(1.08);
+  box-shadow: 0 0 12px 2px var(--hab-aura-glow, rgba(245, 158, 11, 0.35));
 }
 
 .habitat-settings-card .habitat-more-btn {
@@ -3901,6 +3929,7 @@ textarea.field {
   border-color: var(--hab-aura, #f59e0b);
   color: var(--hab-aura, #f59e0b);
   background: var(--hab-aura-bg, rgba(245, 158, 11, 0.12));
+  box-shadow: 0 0 10px 1px var(--hab-aura-glow, rgba(245, 158, 11, 0.35));
 }
 
 .habitat-settings-card .habitat-aura-more-gem {
@@ -3919,6 +3948,7 @@ textarea.field {
   border-color: var(--hab-aura, #f59e0b);
   border-style: solid;
   color: #ffffff;
+  box-shadow: 0 0 12px 2px var(--hab-aura, #f59e0b);
 }
 
 .habitat-settings-card .habitat-popover-menu {
@@ -5435,19 +5465,37 @@ code.var-ref-name {
 }
 
 .editor .ProseMirror ul[data-type='taskList'] li > label {
-  margin-top: 5px;
+  user-select: none;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(15px * 1.65);
+  margin: 0;
+}
+
+.editor .ProseMirror ul[data-type='taskList'] li > label input[type='checkbox'] {
+  margin: 0;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.editor .ProseMirror ul[data-type='taskList'] li > label span {
+  display: none;
 }
 
 .editor .ProseMirror ul[data-type='taskList'] li > div {
   flex: 1;
 }
 
-.editor .ProseMirror ul[data-type='taskList'] li[data-checked='true'] > div {
+.editor .ProseMirror ul[data-type='taskList'] li[data-checked='true'] > div > p {
   color: var(--text-3);
   text-decoration: line-through;
   text-decoration-color: var(--border-2);
 }
+
 
 .editor .ProseMirror blockquote {
   border-left: 3px solid var(--border-2);
@@ -5497,10 +5545,29 @@ code.var-ref-name {
   justify-content: center;
   width: 22px;
   height: 24px;
+  padding: 0;
+  line-height: 1;
   border-radius: 5px;
   color: var(--text-3);
   cursor: grab;
   opacity: 0.75;
+  touch-action: none;
+  user-select: none;
+  z-index: 10;
+}
+
+/* Expanded invisible hit area extending seamlessly across the margin to the text */
+.block-grip::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  bottom: -8px;
+  left: -8px;
+  right: -12px;
+}
+
+.block-grip svg {
+  pointer-events: none;
 }
 
 @media (hover: hover) {
@@ -5520,7 +5587,28 @@ code.var-ref-name {
   overflow-y: auto;
 }
 
-/* The line ProseMirror draws where a dragged block would land. */
+/* The Notion-style line drawn where a dragged block will land. */
+.block-drop-line {
+  position: absolute;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 50;
+  transition: top 0.05s ease-out, left 0.05s ease-out, width 0.05s ease-out;
+}
+
+.block-drop-line::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .editor .ProseMirror-dropcursor {
   border-top-color: var(--accent);
 }
@@ -12114,139 +12202,6 @@ figcaption {
 }
 
 /* ============================================================
-   Events — its own page, deliberately not the Tasks agenda's markup.
-   Similar shape (a day heading, then rows) because that shape is just what a
-   chronological list looks like, not because it's borrowed.
-   ============================================================ */
-
-/* The shared padding for both List and Month — without it Month, which has
-   no per-row padding of its own the way List's rows do, ran flush to the
-   window edge. Deliberately not its own scroller: `.pane-scroll` already
-   handles that (bottom-nav-aware padding included, on a narrow window), and
-   nesting another one here would be the exact bug already fixed for the
-   Tasks page's own day list happening again. */
-.ev-body {
-  padding: 0 28px 24px;
-}
-
-.ev-day + .ev-day {
-  margin-top: 22px;
-}
-
-.ev-day-head {
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
-  padding: 2px 8px 6px;
-  position: sticky;
-  top: 0;
-  background: var(--bg);
-  z-index: 1;
-}
-
-.ev-day-head h3 {
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-
-.ev-day-date {
-  font-size: 11.5px;
-  color: var(--text-3);
-}
-
-.ev-day-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ev-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 9px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .ev-row:hover {
-    background: var(--bg-3);
-  }
-}
-
-.ev-row-time {
-  flex-shrink: 0;
-  width: 68px;
-  font-size: 12px;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-}
-
-.ev-row-title {
-  flex: 1;
-  min-width: 0;
-  font-size: 13.5px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ev-row-loc {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  max-width: 160px;
-  font-size: 11.5px;
-  color: var(--text-3);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ev-row-repeat {
-  flex-shrink: 0;
-  display: inline-flex;
-  color: var(--text-3);
-}
-
-/* ---------- the "New event" dialog ---------- */
-
-.ev-modal {
-  width: 340px;
-  max-width: calc(100vw - 32px);
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border-radius: 14px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.32);
-}
-
-.ev-modal h3 {
-  font-size: 15px;
-  font-weight: 650;
-  margin-bottom: 2px;
-}
-
-.ev-modal-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.ev-modal-row label {
-  font-size: 12.5px;
-  color: var(--text-2);
-  flex-shrink: 0;
-}
-
-/* ============================================================
    Calendar — the per-hour day/week grid
    ============================================================ */
 
@@ -12320,6 +12275,18 @@ figcaption {
   border-radius: 50%;
   background: var(--accent);
   color: #fff;
+}
+
+.cal-day-head.clickable {
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+@media (hover: hover) {
+  .cal-day-head.clickable:hover {
+    background: var(--bg-3);
+  }
 }
 
 .cal-allday {
@@ -12736,6 +12703,28 @@ figcaption {
   color: var(--text-3);
 }
 
+.date-cell.past {
+  color: var(--text-3);
+  opacity: 0.45;
+}
+
+@media (hover: hover) {
+  .date-cell.past:hover {
+    background: var(--bg-3);
+    opacity: 0.85;
+  }
+}
+
+.date-cell.past.today {
+  opacity: 1;
+}
+
+.date-cell.past.picked {
+  opacity: 1;
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
 /* Today is a hint, the cursor is where the keyboard is, the pick is the answer —
    three different weights so they can all show at once without competing. */
 .date-cell.today {
@@ -12773,6 +12762,24 @@ figcaption {
   font-size: 12px;
   color: var(--text-2);
   text-align: left;
+}
+
+.date-time.past {
+  color: var(--text-3);
+  opacity: 0.45;
+}
+
+@media (hover: hover) {
+  .date-time.past:hover {
+    background: var(--bg-3);
+    opacity: 0.85;
+  }
+}
+
+.date-time.past.on {
+  opacity: 1;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
 @media (hover: hover) {
@@ -15639,4 +15646,81 @@ figcaption {
   .modal .btn.danger:hover {
     background: color-mix(in srgb, #e34948 20%, transparent);
   }
+}
+
+/* Recurring object delete options list & buttons */
+.recurring-delete-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+
+.recurring-delete-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--text);
+  font-family: inherit;
+}
+
+@media (hover: hover) {
+  .recurring-delete-btn:hover {
+    background: var(--bg-3);
+    border-color: var(--border-2);
+  }
+}
+
+.recurring-delete-btn.danger {
+  border-color: color-mix(in srgb, #e66767 30%, var(--border));
+}
+
+@media (hover: hover) {
+  .recurring-delete-btn.danger:hover {
+    background: color-mix(in srgb, #e66767 12%, var(--bg-2));
+    border-color: #e66767;
+  }
+}
+
+.recurring-delete-btn.danger .recurring-delete-icon {
+  color: #e66767;
+  background: color-mix(in srgb, #e66767 15%, transparent);
+}
+
+.recurring-delete-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg-3);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.recurring-delete-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.recurring-delete-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.recurring-delete-desc {
+  font-size: 12px;
+  color: var(--text-2);
 }

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ask } from '../confirm';
 import { fmtClock, fmtWhen, fromValue, parseWhen, toValue, type When } from '../dateParse';
 import { addDays, monthCells, monthStartKey, popPos, todayKey } from '../util';
 import { Icon } from './Icons';
@@ -39,6 +40,7 @@ export function DateField({
   placeholder?: string;
 }) {
   const btnRef = useRef<HTMLButtonElement>(null);
+  const confirmedPastRef = useRef<string | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [text, setText] = useState('');
   const current = fromValue(value);
@@ -59,14 +61,47 @@ export function DateField({
   const open = () => {
     const at = fromValue(value);
     setText('');
+    confirmedPastRef.current = null;
     setCursor(at?.key ?? todayKey());
     setMonth(monthStartKey(at?.key ?? todayKey(), 0));
     setMinutes(at?.minutes ?? null);
     setPos(popPos(btnRef.current!, time ? 340 : 268, time ? 400 : 366));
   };
 
-  const commit = (when: When, close = true) => {
+  const isTargetPast = (targetKey: string, targetMins: number | null) => {
+    const today = todayKey();
+    if (targetKey < today) {
+      if (confirmedPastRef.current === targetKey) return false;
+      return true;
+    }
+    if (time && targetKey === today && targetMins !== null) {
+      const now = new Date();
+      const curNowMin = now.getHours() * 60 + now.getMinutes();
+      if (targetMins < curNowMin) {
+        if (confirmedPastRef.current === `${targetKey}T${targetMins}`) return false;
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const commit = async (when: When, close = true) => {
     const mins = time ? when.minutes ?? minutes ?? DEFAULT_MINUTES : null;
+    if (isTargetPast(when.key, mins)) {
+      const isDatePast = when.key < todayKey();
+      const ok = await ask(
+        isDatePast
+          ? 'This date is in the past. Are you sure you want to select it?'
+          : 'This time is in the past. Are you sure you want to select it?',
+        {
+          title: isDatePast ? 'Date in the past' : 'Time in the past',
+          confirmLabel: 'Select anyway',
+          danger: false,
+        }
+      );
+      if (!ok) return;
+      confirmedPastRef.current = isDatePast ? when.key : `${when.key}T${mins}`;
+    }
     setMinutes(mins);
     setCursor(when.key);
     onChange(toValue(when.key, mins));
@@ -153,6 +188,7 @@ export function DateField({
                       className={
                         'date-cell' +
                         (c.inMonth ? '' : ' out') +
+                        (c.key < todayKey() ? ' past' : '') +
                         (c.key === todayKey() ? ' today' : '') +
                         (c.key === current?.key ? ' picked' : '') +
                         (c.key === cursor ? ' cursor' : '')
@@ -168,6 +204,7 @@ export function DateField({
               {time && (
                 <TimeList
                   minutes={minutes ?? DEFAULT_MINUTES}
+                  dateKey={cursor}
                   onPick={(m) => {
                     setMinutes(m);
                     commit({ key: cursor, minutes: m });
@@ -189,9 +226,27 @@ export function DateField({
 }
 
 /** The hours, as a list you point at rather than four segments you type into. */
-function TimeList({ minutes, onPick }: { minutes: number; onPick: (m: number) => void }) {
+function TimeList({
+  minutes,
+  dateKey,
+  onPick,
+}: {
+  minutes: number;
+  dateKey?: string;
+  onPick: (m: number) => void;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const nearest = Math.round(minutes / STEP) * STEP;
+  const today = todayKey();
+  const now = new Date();
+  const curNowMin = now.getHours() * 60 + now.getMinutes();
+
+  const isPastTime = (m: number) => {
+    if (!dateKey) return false;
+    if (dateKey < today) return true;
+    if (dateKey === today && m < curNowMin) return true;
+    return false;
+  };
 
   // Follow the selection rather than only landing on it once: typing "8:45" has to
   // bring that slot into view, not leave the list parked where it opened. Layout
@@ -204,7 +259,11 @@ function TimeList({ minutes, onPick }: { minutes: number; onPick: (m: number) =>
   return (
     <div className="date-times" ref={ref}>
       {SLOTS.map((m) => (
-        <button key={m} className={'date-time' + (m === nearest ? ' on' : '')} onClick={() => onPick(m)}>
+        <button
+          key={m}
+          className={'date-time' + (m === nearest ? ' on' : '') + (isPastTime(m) ? ' past' : '')}
+          onClick={() => onPick(m)}
+        >
           {fmtClock(m)}
         </button>
       ))}

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
+import { ask } from '../confirm';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useLayout } from '../layout';
 import { useApp } from '../store';
@@ -140,7 +141,8 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
   const [entries, setEntries] = useState<CalEntry[]>([]);
   const gridRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const scrolled = useRef(false);
+  const prevMode = useRef<CalMode | null>(null);
+  const prevAnchor = useRef<string | null>(null);
 
   const [preview, setPreview] = useState<Preview | null>(null);
   const [draft, setDraft] = useState<{ dayKey: string; startMinute: number; minutes: number } | null>(null);
@@ -201,9 +203,10 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
       } else if (g.kind === 'new') {
         const from = Math.min(g.anchorMinute!, minute);
         const to = Math.max(g.anchorMinute!, minute);
+        const startMinute = snapTo(from);
         setDraft({
           dayKey: day,
-          startMinute: snapTo(from),
+          startMinute,
           minutes: Math.max(MIN_MINUTES, snapTo(to - from)),
         });
       } else if (g.kind === 'resize') {
@@ -230,20 +233,16 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
       if (g.kind === 'new') {
         const body = bodyRef.current;
         if (!body) return setDraft(null);
-        if (!g.moved) {
-          const { dayIndex, minute } = gridPoint(e, body, days.length);
-          const dayKey = days[dayIndex];
-          const startMinute = clamp(snapTo(minute), 0, DAY_MINUTES - NEW_MINUTES);
-          if (dayKey < todayKey() || (dayKey === todayKey() && startMinute < nowMinute)) {
-            setDraft(null);
-            return;
-          }
-          setDraft({
-            dayKey,
-            startMinute,
-            minutes: NEW_MINUTES,
-          });
-        }
+        const { dayIndex, minute } = gridPoint(e, body, days.length);
+        const dayKey = days[dayIndex];
+        const from = g.moved ? Math.min(g.anchorMinute!, minute) : minute;
+        const to = g.moved ? Math.max(g.anchorMinute!, minute) : minute + NEW_MINUTES;
+        const startMinute = clamp(snapTo(from), 0, DAY_MINUTES - MIN_MINUTES);
+        setDraft({
+          dayKey,
+          startMinute,
+          minutes: g.moved ? Math.max(MIN_MINUTES, snapTo(to - from)) : NEW_MINUTES,
+        });
         setComposer({
           left: clamp(e.clientX + 8, 12, window.innerWidth - 272),
           top: clamp(e.clientY - 40, 12, window.innerHeight - 190),
@@ -253,18 +252,40 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
 
       setPreview((p) => {
         if (p && g.moved) {
-          // Dragging one occurrence moves only that day; the main process takes
-          // it out of the series and hands back the object it became.
-          api
-            .reschedule({
-              id: p.id,
-              dayKey: p.dayKey,
-              startMinute: p.startMinute,
-              minutes: p.minutes,
-              occurrence: p.repeats ? p.from : null,
-            })
-            .then((made) => objectChanged(made?.id ?? p.id))
-            .catch((err) => alert(err?.message || 'Failed to reschedule'));
+          const curNow = new Date();
+          const curNowMinute = curNow.getHours() * 60 + curNow.getMinutes();
+          const isDatePast = p.dayKey < todayKey();
+          const isTimePast = p.dayKey === todayKey() && (p.startMinute ?? 0) < curNowMinute;
+          const doReschedule = () => {
+            // Dragging one occurrence moves only that day; the main process takes
+            // it out of the series and hands back the object it became.
+            api
+              .reschedule({
+                id: p.id,
+                dayKey: p.dayKey,
+                startMinute: p.startMinute,
+                minutes: p.minutes,
+                occurrence: p.repeats ? p.from : null,
+              })
+              .then((made) => objectChanged(made?.id ?? p.id))
+              .catch((err) => alert(err?.message || 'Failed to reschedule'));
+          };
+          if (isDatePast || isTimePast) {
+            ask(
+              isDatePast
+                ? `"${p.dayKey}" is in the past. Are you sure you want to reschedule it to the past?`
+                : 'This time is in the past. Are you sure you want to reschedule it to the past?',
+              {
+                title: isDatePast ? 'Date in the past' : 'Time in the past',
+                confirmLabel: 'Reschedule anyway',
+                danger: false,
+              }
+            ).then((ok) => {
+              if (ok) doReschedule();
+            });
+            return null;
+          }
+          doReschedule();
         }
         return null;
       });
@@ -312,13 +333,22 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
 
   const create = async (typeId: string, title: string, repeat: string | null) => {
     if (!draft) return;
-    if (draft.dayKey < todayKey()) {
-      alert(`Cannot schedule in the past (${draft.dayKey})`);
-      return;
-    }
-    if (draft.dayKey === todayKey() && draft.startMinute < nowMinute) {
-      alert('Cannot schedule before current time today');
-      return;
+    const curNow = new Date();
+    const curNowMinute = curNow.getHours() * 60 + curNow.getMinutes();
+    const isDatePast = draft.dayKey < todayKey();
+    const isTimePast = draft.dayKey === todayKey() && draft.startMinute < curNowMinute;
+    if (isDatePast || isTimePast) {
+      const ok = await ask(
+        isDatePast
+          ? `"${draft.dayKey}" is in the past. Are you sure you want to schedule it in the past?`
+          : 'This time is in the past. Are you sure you want to schedule it in the past?',
+        {
+          title: isDatePast ? 'Date in the past' : 'Time in the past',
+          confirmLabel: 'Schedule anyway',
+          danger: false,
+        }
+      );
+      if (!ok) return;
     }
     const made = await api.scheduleNew({ typeId, title, repeat, ...draft });
     setComposer(null);
@@ -327,21 +357,65 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
     else reload();
   };
 
-  // Open near the current hour rather than at midnight. Deferred a frame on
-  // purpose: on the first commit the grid still has no height, so setting
-  // scrollTop then does nothing at all. Once only — paging between weeks must
-  // not yank the scroll back.
+  // Auto-scroll to where the red line / current hour is whenever entering day view,
+  // entering week view, or clicking "Today". Paging between weeks preserves current scroll.
   useEffect(() => {
-    if (scrolled.current) return;
-    scrolled.current = true;
-    const id = requestAnimationFrame(() => {
+    if (mode === 'month') {
+      prevMode.current = 'month';
+      prevAnchor.current = anchor;
+      return;
+    }
+
+    const modeChanged = prevMode.current !== mode;
+    const anchorChanged = prevAnchor.current !== anchor;
+    const enteredDay = mode === 'day' && (modeChanged || anchorChanged);
+    const enteredWeek = mode === 'week' && modeChanged;
+    const isToday = anchor === todayKey();
+
+    prevMode.current = mode;
+    prevAnchor.current = anchor;
+
+    const shouldScroll = enteredDay || enteredWeek || (isToday && anchorChanged);
+    if (!shouldScroll) return;
+
+    let raf1 = 0;
+    let raf2 = 0;
+
+    const doScroll = () => {
       const el = gridRef.current;
       if (!el) return;
-      const at = new Date();
-      el.scrollTop = Math.max(0, ((at.getHours() * 60 + at.getMinutes() - 60) / 60) * HOUR_H);
+      const now = new Date();
+      const nowMinute = now.getHours() * 60 + now.getMinutes();
+
+      // If the red line (.cal-now) exists in DOM, use its actual offsetTop;
+      // otherwise calculate where the current hour sits on the grid.
+      const nowEl = el.querySelector('.cal-now') as HTMLElement | null;
+      const targetY = nowEl ? nowEl.offsetTop : (nowMinute / 60) * HOUR_H;
+
+      // Position the red line comfortably in the upper portion of the viewport (approx 20-25% down)
+      const offset = el.clientHeight > 0 ? Math.min(el.clientHeight * 0.25, 2 * HOUR_H) : 1.5 * HOUR_H;
+      const targetScroll = Math.max(0, targetY - offset);
+
+      el.scrollTop = targetScroll;
+    };
+
+    // Double rAF ensures the time grid layout and height are computed after mode/day change
+    raf1 = requestAnimationFrame(() => {
+      raf1 = 0;
+      raf2 = requestAnimationFrame(() => {
+        raf2 = 0;
+        doScroll();
+      });
     });
-    return () => cancelAnimationFrame(id);
-  }, []);
+
+    const timer = setTimeout(doScroll, 60);
+
+    return () => {
+      if (raf1) cancelAnimationFrame(raf1);
+      if (raf2) cancelAnimationFrame(raf2);
+      clearTimeout(timer);
+    };
+  }, [mode, anchor]);
 
   // A drag reads from the same list the server filled, with the moving entry
   // overridden — so the grid shows the new position before the write lands.
@@ -414,19 +488,28 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
               const shownEntries = dayEntries.slice(0, 3);
               const more = dayEntries.length - shownEntries.length;
               return (
-                <button
+                <div
                   key={c.key}
-                  className={'cal-cell' + (c.inMonth ? '' : ' out') + (c.key === todayKey() ? ' today' : '')}
+                  role="button"
+                  tabIndex={0}
+                  className={'cal-cell' + (c.inMonth ? '' : ' out') + (c.key === todayKey() ? ' today' : '') + (c.key < todayKey() ? ' past' : '')}
                   onClick={() => {
                     setAnchor(c.key);
                     setModeSaved('day');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setAnchor(c.key);
+                      setModeSaved('day');
+                    }
                   }}
                   onDragOver={(e) => {
                     if (!e.dataTransfer.types.includes('text/habitat-task')) return;
                     e.preventDefault();
                     e.dataTransfer.dropEffect = 'move';
                   }}
-                  onDrop={(e) => {
+                  onDrop={async (e) => {
                     if (!e.dataTransfer.types.includes('text/habitat-task')) return;
                     e.preventDefault();
                     const id = e.dataTransfer.getData('text/habitat-task');
@@ -436,8 +519,12 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
                       return;
                     }
                     if (c.key < todayKey()) {
-                      alert(`Cannot schedule in the past (${c.key})`);
-                      return;
+                      const ok = await ask(`"${c.key}" is in the past. Are you sure you want to schedule it in the past?`, {
+                        title: 'Date in the past',
+                        confirmLabel: 'Schedule anyway',
+                        danger: false,
+                      });
+                      if (!ok) return;
                     }
                     if (id) {
                       api
@@ -451,18 +538,24 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
                   {dayEntries.length > 0 && (
                     <div className="cal-cell-chips">
                       {shownEntries.map((e) => (
-                        <span
+                        <button
+                          type="button"
                           key={e.id + e.dayKey}
-                          className={'cal-chip' + (e.done ? ' done' : '')}
+                          className={'cal-chip clickable' + (e.done ? ' done' : '')}
                           style={{ ['--c' as any]: colorOf(e.typeId) }}
+                          title={`${e.title || 'Untitled'} · ${e.typeName}` + (e.repeats ? ' · repeats' : '')}
+                          onClick={(ev) => {
+                            ev.stopPropagation();
+                            openFrom(ev, e.id, e.repeats ? e.dayKey : undefined);
+                          }}
                         >
-                          {e.title}
-                        </span>
+                          {e.title || 'Untitled'}
+                        </button>
                       ))}
                       {more > 0 && <span className="cal-more">+{more} more</span>}
                     </div>
                   )}
-                </button>
+                </div>
               );
             })}
           </div>
@@ -475,7 +568,22 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
         {days.map((d) => {
           const date = new Date(d + 'T12:00:00');
           return (
-            <div key={d} className={'cal-day-head' + (d === todayKey() ? ' today' : '')}>
+            <div
+              key={d}
+              className={
+                'cal-day-head' +
+                (d === todayKey() ? ' today' : '') +
+                (d < todayKey() ? ' past' : '') +
+                (mode === 'week' ? ' clickable' : '')
+              }
+              onClick={() => {
+                if (mode === 'week') {
+                  setAnchor(d);
+                  setModeSaved('day');
+                }
+              }}
+              title={mode === 'week' ? `View ${date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}` : undefined}
+            >
               <span className="cal-dow-name">{date.toLocaleDateString(undefined, { weekday: 'short' })}</span>
               <span className="cal-day-num">{date.getDate()}</span>
             </div>
@@ -495,7 +603,7 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
               }}
-              onDrop={(e) => {
+              onDrop={async (e) => {
                 if (!e.dataTransfer.types.includes('text/habitat-task')) return;
                 e.preventDefault();
                 const id = e.dataTransfer.getData('text/habitat-task');
@@ -505,8 +613,12 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
                   return;
                 }
                 if (d < todayKey()) {
-                  alert(`Cannot schedule in the past (${d})`);
-                  return;
+                  const ok = await ask(`"${d}" is in the past. Are you sure you want to schedule it in the past?`, {
+                    title: 'Date in the past',
+                    confirmLabel: 'Schedule anyway',
+                    danger: false,
+                  });
+                  if (!ok) return;
                 }
                 if (id) {
                   api
@@ -553,14 +665,14 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
             return (
               <div
                 key={d}
-                className={'cal-col' + (isToday ? ' today' : '')}
+                className={'cal-col' + (isToday ? ' today' : '') + (d < todayKey() ? ' past' : '')}
                 onPointerDown={startNew}
                 onDragOver={(e) => {
                   if (!e.dataTransfer.types.includes('text/habitat-task')) return;
                   e.preventDefault();
                   e.dataTransfer.dropEffect = 'move';
                 }}
-                onDrop={(e) => {
+                onDrop={async (e) => {
                   if (!e.dataTransfer.types.includes('text/habitat-task')) return;
                   e.preventDefault();
                   const id = e.dataTransfer.getData('text/habitat-task');
@@ -570,17 +682,26 @@ export function CalendarView({ chrome = true, nav }: { chrome?: boolean; nav?: C
                     alert(`Cannot schedule task past its due date (${due})`);
                     return;
                   }
-                  if (d < todayKey()) {
-                    alert(`Cannot schedule in the past (${d})`);
-                    return;
-                  }
                   const body = bodyRef.current;
                   if (!body) return;
                   const { minute } = gridPoint(e, body, days.length);
                   const startMinute = clamp(snapTo(minute), 0, DAY_MINUTES - 60);
-                  if (d === todayKey() && startMinute < nowMinute) {
-                    alert('Cannot schedule before current time today');
-                    return;
+                  const curNow = new Date();
+                  const curNowMinute = curNow.getHours() * 60 + curNow.getMinutes();
+                  const isDatePast = d < todayKey();
+                  const isTimePast = d === todayKey() && startMinute < curNowMinute;
+                  if (isDatePast || isTimePast) {
+                    const ok = await ask(
+                      isDatePast
+                        ? `"${d}" is in the past. Are you sure you want to schedule it in the past?`
+                        : 'This time is in the past. Are you sure you want to schedule it in the past?',
+                      {
+                        title: isDatePast ? 'Date in the past' : 'Time in the past',
+                        confirmLabel: 'Schedule anyway',
+                        danger: false,
+                      }
+                    );
+                    if (!ok) return;
                   }
                   api
                     .reschedule({ id, dayKey: d, startMinute, minutes: 60 })

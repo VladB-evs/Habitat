@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { GuideLink } from '../docs';
 import { useApp } from '../store';
-import type { UserVar, HabitatInfo } from '../types';
+import type { UserVar, HabitatInfo, HabitatSize } from '../types';
 import { clientUid } from '../util';
 import { ApiSettings } from './ApiSettings';
 import { UpdateSettings } from './UpdateSettings';
@@ -11,7 +11,7 @@ import { NavigationSettings } from './NavigationSettings';
 import { SyncSettings } from './SyncSettings';
 import { TelegramSettings } from './TelegramSettings';
 import { Icon } from './Icons';
-import { HabitatIconPicker, HabitatAuraPicker, getAuraColor, getAuraGlow, getAuraBg } from './Habitats';
+import { HabitatIconPicker, HabitatAuraPicker, getAuraColor, getAuraGlow, getAuraBg, applyHabitatAccent } from './Habitats';
 
 const TABS = [
   { id: 'general', label: 'General', icon: 'settings' },
@@ -56,6 +56,26 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const [habitats, setHabitats] = useState<HabitatInfo[]>([]);
   const [activeHabitatId, setActiveHabitatId] = useState<string>('');
+  const [habitatSize, setHabitatSize] = useState<HabitatSize | null>(null);
+  const [loadingSize, setLoadingSize] = useState(false);
+
+  const loadHabitatSize = async () => {
+    setLoadingSize(true);
+    try {
+      const s = await api.habitat.size();
+      setHabitatSize(s);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingSize(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === 'import') {
+      loadHabitatSize();
+    }
+  }, [tab]);
 
   useEffect(() => {
     api.settings.get().then((s) => {
@@ -77,6 +97,13 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
     setHabitats((prev) =>
       prev.map((h) => (h.id === activeHabitatId ? { ...h, ...patch } : h))
     );
+    if (patch.aura) {
+      applyHabitatAccent(patch.aura);
+      try {
+        localStorage.setItem('habitat:aura', patch.aura);
+      } catch {}
+    }
+    window.dispatchEvent(new CustomEvent('habitat:change', { detail: { id: activeHabitatId, ...patch } }));
     await api.habitats.update({ id: activeHabitatId, ...patch });
   };
 
@@ -110,6 +137,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
         }).`;
       }
       setImportResult(msg);
+      loadHabitatSize();
     } finally {
       setImporting(false);
     }
@@ -126,6 +154,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
       if (r.types) bits.push(`${r.types} ${r.types === 1 ? 'type' : 'types'}`);
       if (r.files) bits.push(`${r.files} ${r.files === 1 ? 'attachment' : 'attachments'}`);
       setExportResult(`Exported ${bits.join(' · ')} to ${r.path}`);
+      loadHabitatSize();
     } finally {
       setExporting(false);
     }
@@ -183,7 +212,16 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                 {activeHabitat && (
                   <section className="set-sec">
                     <div className="set-title">Habitat Identity</div>
-                    <div className="habitat-settings-card">
+                    <div
+                      className="habitat-settings-card"
+                      style={
+                        {
+                          '--hab-aura': getAuraColor(activeHabitat.aura),
+                          '--hab-aura-glow': getAuraGlow(activeHabitat.aura),
+                          '--hab-aura-bg': getAuraBg(activeHabitat.aura),
+                        } as React.CSSProperties
+                      }
+                    >
                       <div className="habitat-settings-preview-row">
                         <div
                           className="habitat-settings-emblem"
@@ -406,6 +444,69 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     {exportResult}
                   </div>
                 )}
+
+                <div className="set-title" style={{ marginTop: 18 }}>
+                  Habitat size
+                </div>
+                <div className="set-group">
+                  <div className="set-item">
+                    <div>
+                      <div className="set-name" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            color: activeHabitat?.aura ? getAuraColor(activeHabitat.aura) : undefined,
+                          }}
+                        >
+                          <Icon name={activeHabitat?.icon || 'sprout'} size={15} />
+                        </span>
+                        <span>{activeHabitat?.name || 'Current habitat'}</span>
+                      </div>
+                      <div className="set-note">
+                        {loadingSize ? (
+                          'Calculating size…'
+                        ) : habitatSize ? (
+                          `${size(habitatSize.totalBytes)} total on disk`
+                        ) : (
+                          'Unable to measure size'
+                        )}
+                      </div>
+                    </div>
+                    <div className="set-ctl">
+                      {habitatSize && !loadingSize && (
+                        <span style={{ fontWeight: 600, fontSize: 13, marginRight: 4 }}>
+                          {size(habitatSize.totalBytes)}
+                        </span>
+                      )}
+                      <button className="btn subtle" disabled={loadingSize} onClick={loadHabitatSize}>
+                        {loadingSize ? 'Measuring…' : 'Refresh'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="set-item">
+                    <div>
+                      <div className="set-name">Database</div>
+                      <div className="set-note">
+                        {habitatSize ? `${habitatSize.objectsCount} ${habitatSize.objectsCount === 1 ? 'object' : 'objects'}` : '—'}
+                      </div>
+                    </div>
+                    <span className="set-note" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {habitatSize ? size(habitatSize.dbBytes) : '—'}
+                    </span>
+                  </div>
+                  <div className="set-item">
+                    <div>
+                      <div className="set-name">Attachments</div>
+                      <div className="set-note">
+                        {habitatSize ? `${habitatSize.filesCount} ${habitatSize.filesCount === 1 ? 'file' : 'files'}` : '—'}
+                      </div>
+                    </div>
+                    <span className="set-note" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {habitatSize ? size(habitatSize.filesBytes) : '—'}
+                    </span>
+                  </div>
+                </div>
               </section>
             )}
           </div>

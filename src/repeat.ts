@@ -125,3 +125,80 @@ export function describeRule(rule: Rule | null, anchor?: string | null): string 
 /** The short form for a chip or a calendar entry: "Every 2 weeks" without the tail. */
 export const shortRule = (rule: Rule | null, anchor?: string | null): string =>
   describeRule(rule, anchor).split(',')[0];
+
+/**
+ * Every day the series lands on between `from` and `to`, inclusive.
+ */
+export function occurrences(rule: Rule | null, start: string, from: string, to: string): string[] {
+  if (!rule || !KEY_RE.test(start || '') || !KEY_RE.test(from || '') || !KEY_RE.test(to || '')) return [];
+  if (to < start) return [];
+
+  const last = rule.until && rule.until < to ? rule.until : to;
+  if (last < start) return [];
+
+  const out: string[] = [];
+  let emitted = 0;
+  let steps = 0;
+  const maxSteps = 20000;
+  const maxResults = 750;
+
+  const push = (key: string) => {
+    if (key < start || key > last) return true;
+    if (rule.count && emitted >= rule.count) return false;
+    emitted++;
+    if (key >= from && out.length < maxResults) out.push(key);
+    return true;
+  };
+
+  const addD = (k: string, n: number) => {
+    const d = new Date(k + 'T12:00:00');
+    d.setDate(d.getDate() + n);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  if (rule.freq === 'WEEKLY') {
+    const wanted = rule.byDay && rule.byDay.length ? rule.byDay : [codeFor(start)];
+    const startDay = new Date(start + 'T12:00:00').getDay();
+    const monday = addD(start, -((startDay + 6) % 7));
+    const startIsSpare = !wanted.includes(codeFor(start));
+    if (startIsSpare && !push(start)) return out;
+    for (let week = 0; steps < maxSteps; week += rule.interval) {
+      const weekStart = addD(monday, week * 7);
+      if (weekStart > last && addD(weekStart, 6) > last) break;
+      for (let i = 0; i < 7; i++) {
+        steps++;
+        const key = addD(weekStart, i);
+        if (!wanted.includes(codeFor(key))) continue;
+        if (!push(key)) return out;
+      }
+      if (rule.count && emitted >= rule.count) break;
+    }
+    return out;
+  }
+
+  if (rule.freq === 'MONTHLY' || rule.freq === 'YEARLY') {
+    const s = new Date(start + 'T12:00:00');
+    const day = s.getDate();
+    const stepMonths = (rule.freq === 'YEARLY' ? 12 : 1) * rule.interval;
+    for (let n = 0; steps < maxSteps; n++) {
+      steps++;
+      const d = new Date(s.getFullYear(), s.getMonth() + n * stepMonths, 1, 12);
+      const lastOfMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0, 12).getDate();
+      if (day > lastOfMonth) {
+        const lastDayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(lastOfMonth).padStart(2, '0')}`;
+        if (lastDayKey > last) break;
+        continue;
+      }
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      if (key > last) break;
+      if (!push(key)) return out;
+    }
+    return out;
+  }
+
+  for (let key = start; steps < maxSteps && key <= last; key = addD(key, rule.interval)) {
+    steps++;
+    if (!push(key)) return out;
+  }
+  return out;
+}

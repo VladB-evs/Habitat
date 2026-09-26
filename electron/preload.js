@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 const CHANNELS = new Set([
   'types:list', 'types:create', 'types:update', 'types:delete',
   'objects:list', 'objects:get', 'objects:create', 'objects:update', 'objects:setType', 'objects:delete', 'objects:search',
-  'objects:createFromTemplate', 'objects:bulkDelete', 'objects:bulkSetProp',
+  'objects:createFromTemplate', 'objects:bulkDelete', 'objects:bulkSetProp', 'objects:deleteRecurring',
   'templates:list', 'templates:get', 'templates:create', 'templates:update', 'templates:delete',
   'tasks:forDay', 'tasks:setDone', 'agenda:range', 'calendar:range', 'calendar:reschedule', 'calendar:create', 'calendar:skip',
   'daily:get', 'daily:create', 'daily:list',
@@ -28,7 +28,7 @@ const CHANNELS = new Set([
   'api:config', 'api:save', 'api:apply', 'api:status',
   'app:info',
   'ai:availability', 'ai:actions', 'ai:prewarm', 'ai:run', 'ai:cancel', 'ai:search', 'ai:ask',
-  'habitat:code',
+  'habitat:code', 'habitat:size',
   'update:state', 'update:check', 'update:install',
   'automations:startup',
   'kv:get', 'kv:set',

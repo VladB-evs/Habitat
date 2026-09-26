@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../api';
-import { ask } from '../confirm';
+import { ask, askDeleteRecurring } from '../confirm';
 import { dialogIn, snap, spring } from '../motion';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
@@ -435,10 +435,32 @@ export function TypeTable({
   };
 
   const removeRow = async (o: Obj) => {
-    if (!(await ask(`Delete “${o.title || 'Untitled'}”? This also removes its links.`))) return;
-    await api.objects.remove(o.id);
-    objectChanged(o.id);
-    setObjs((list) => list.filter((x) => x.id !== o.id));
+    try {
+      const isRecurring = Boolean(o.props?.seriesId || o.props?.repeat || o.props?.seriesRule);
+      if (isRecurring) {
+        const targetOccurrence =
+          (o.props?.startsAt ? String(o.props.startsAt).slice(0, 10) : '') ||
+          (o.props?.doing ? String(o.props.doing).slice(0, 10) : '') ||
+          (o.props?.due ? String(o.props.due).slice(0, 10) : '') ||
+          todayKey();
+        const scope = await askDeleteRecurring({
+          title: o.title || 'Untitled',
+          typeId: o.typeId,
+          occurrence: targetOccurrence,
+        });
+        if (!scope) return;
+        await api.objects.deleteRecurring({ id: o.id, scope, occurrence: targetOccurrence });
+        objectChanged(o.id);
+        setObjs(await api.objects.list(typeId));
+        return;
+      }
+      if (!(await ask(`Delete “${o.title || 'Untitled'}”? This also removes its links.`))) return;
+      await api.objects.remove(o.id);
+      objectChanged(o.id);
+      setObjs((list) => list.filter((x) => x.id !== o.id));
+    } catch (err) {
+      console.error('Failed to remove row:', err);
+    }
   };
 
   /** Every object carrying an extra property keeps its own copy of the definition. */

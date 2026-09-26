@@ -10,11 +10,10 @@ import {
   useTransform,
 } from 'motion/react';
 import { api } from './api';
-import { AppProvider, useApp, getViewInfo } from './store';
+import { AppProvider, useApp, getViewInfo, type View } from './store';
 import { getObject } from './objects';
 import { openLink } from './links';
-import type { View } from './store';
-import { Onboarding, NewHabitatModal } from './components/Habitats';
+import { Onboarding, NewHabitatModal, applyHabitatAccent } from './components/Habitats';
 const SettingsModal = lazy(() => import('./components/SettingsModal').then((m) => ({ default: m.SettingsModal })));
 import { Sidebar } from './components/Sidebar';
 import { SidebarDrawer } from './components/SidebarDrawer';
@@ -45,7 +44,7 @@ import { MEDIA_TYPE, PEOPLE_TYPE, viewport } from './util';
 
 const viewKey = (v: View) =>
   v.kind === 'type'
-    ? `type:${v.typeId}`
+    ? (v.typeId === 'event' ? 'tasks:calendar' : `type:${v.typeId}`)
     : v.kind === 'object'
       ? `object:${v.id}`
       : v.kind === 'template'
@@ -56,7 +55,9 @@ const viewKey = (v: View) =>
             ? `deck:${v.id}`
             : v.kind === 'studyNote'
               ? `note:${v.id}`
-              : v.kind;
+              : v.kind === 'tasks'
+                ? `tasks:${v.tab ?? 'default'}`
+                : v.kind;
 
 function PaneView({ view }: { view: View }) {
   const { narrow } = useLayout();
@@ -65,7 +66,7 @@ function PaneView({ view }: { view: View }) {
       <motion.div key={viewKey(view)} className="pane-page" variants={pageIn} initial="hidden" animate="shown" exit="gone">
         {view.kind === 'dashboard' && <Dashboard />}
         {view.kind === 'daily' && <DailyNotes />}
-        {view.kind === 'tasks' && <TasksPage />}
+        {view.kind === 'tasks' && <TasksPage initialTab={view.tab} />}
         {/* Boards are a pointer-and-space interaction — panning a graph, dragging
             connections between cards — and they do not survive the trip down to
             390px. The entry is hidden there, but a link or a restored URL can
@@ -105,6 +106,8 @@ function PaneView({ view }: { view: View }) {
             <People />
           ) : view.typeId === MEDIA_TYPE ? (
             <Media />
+          ) : view.typeId === 'event' ? (
+            <TasksPage initialTab="calendar" />
           ) : (
             <TypeTable key={view.typeId} typeId={view.typeId} />
           ))}
@@ -699,7 +702,16 @@ export default function App() {
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
 
   useEffect(() => {
-    api.settings.get().then((s) => setOnboarded(s.onboarded));
+    api.settings.get().then((s) => {
+      const activeHab = s?.habitats?.find((h) => h.id === s?.activeId);
+      if (activeHab?.aura) {
+        applyHabitatAccent(activeHab.aura);
+        try {
+          localStorage.setItem('habitat:aura', activeHab.aura);
+        } catch {}
+      }
+      setOnboarded(s.onboarded);
+    });
   }, []);
 
   if (onboarded === null) return null;

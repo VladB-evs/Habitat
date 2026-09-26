@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Editor } from '@tiptap/react';
-import { NodeSelection, TextSelection } from '@tiptap/pm/state';
+import { NodeSelection, Selection, TextSelection } from '@tiptap/pm/state';
+import { Fragment, type Node as ProseMirrorNode, type Slice } from '@tiptap/pm/model';
+import { dropPoint, canJoin } from '@tiptap/pm/transform';
+import type { EditorView } from '@tiptap/pm/view';
 import { popPos } from './components/cells';
 import { Icon } from './components/Icons';
 import { useLayout } from './layout';
@@ -14,104 +17,239 @@ import { useLayout } from './layout';
  *
  * Top-level blocks get one, and so does each list item — a bullet, task, or
  * ordered-list row is a block in its own right and drags on its own, however
- * deep it's nested. Anything else nested (a paragraph inside a table cell, say)
- * is found by walking up to the direct child of the editor instead, so dragging
- * that moves the whole enclosing structure rather than tearing a piece out of it.
+ * deep it's nested.
  */
 
 /** Height of the grip, in CSS pixels — it centres itself on a line of text. */
 const GRIP = 24;
 
-/** How far into the left margin still counts as hovering the block. */
-const MARGIN = 56;
+/** How far into the left margin still counts as hovering near the block. */
+const MARGIN = 64;
+
+/** Currently active block being dragged across the document. */
+let activeBlockDrag: { from: number; to: number } | null = null;
+
+export function getActiveBlockDrag() {
+  return activeBlockDrag;
+}
 
 interface Hover {
   /** Where to put the grip, relative to the editor's own box. */
   top: number;
-  /** The block's element. Its document position is read from it when acted on,
-   *  so typing above the block can't leave the grip pointing at stale text. */
+  /** The block's element. */
   el: HTMLElement;
 }
 
+interface DropLine {
+  top: number;
+  left: number;
+  width: number;
+  pos: number;
+}
+
 /**
- * The row at a point: the direct child of the editor that contains it, or the
- * nearest enclosing list item — whichever is nearer — so a bullet a few levels
- * deep still moves by itself instead of dragging its whole list.
- *
- * This goes through ProseMirror's own coordinate mapping rather than
- * `document.elementFromPoint`, because a list's indent is padding on the
- * `<ul>` itself, not on its `<li>`s — so a point in the left margin, which is
- * exactly where this is called from, lands back on the `<ul>` for anything
- * indented, undoing the "each row drags on its own" fix below it.
- * `posAtCoords` instead resolves to a document position from a line's actual
- * rendered box, however far left of it the point sits, so it always names the
- * right row; walking its node ancestry (not the DOM's) then finds the block.
+ * Find the most specific block HTMLElement corresponding to a DOM node inside the editor.
+ * - For a taskItem: returns that taskItem's <li>
+ * - For a nested taskItem: returns THAT nested taskItem's <li>
+ * - For a normal listItem: returns that listItem's <li>
+ * - For a paragraph with soft breaks (Shift+Enter): returns that <p>
+ * - For a heading, blockquote, code block: returns that block
+ */
+function findBlockElement(node: Node | null, editorDom: HTMLElement): HTMLElement | null {
+  let el = node instanceof HTMLElement ? node : node?.parentElement;
+  if (!el || !editorDom.contains(el)) return null;
+
+  while (el && el !== editorDom) {
+    if (el.getAttribute('data-type') === 'taskItem' || el.tagName === 'LI') {
+      return el;
+    }
+    if (el.parentElement === editorDom) {
+      if (el.tagName === 'UL' || el.tagName === 'OL') {
+        return null;
+      }
+      return el;
+    }
+    el = el.parentElement;
+  }
+  return null;
+}
+
+/**
+ * The vertical center of a row's first line of text, in viewport coordinates.
+ * Measuring the line box of the row's primary text container keeps the grip
+ * rock-solid and level with the text line across every block type.
+ */
+function firstLineCenter(el: HTMLElement): number | null {
+  let target: HTMLElement = el;
+  if (el.getAttribute('data-type') === 'taskItem') {
+    target = el.querySelector(':scope > div > p') || el.querySelector('div > p') || el.querySelector('p') || el;
+  } else if (el.tagName === 'LI' || el.tagName === 'BLOCKQUOTE') {
+    target = el.querySelector(':scope > p') || el.querySelector('p') || el;
+  } else if (el.tagName === 'PRE') {
+    target = el.querySelector('code') || el;
+  }
+
+  const box = target.getBoundingClientRect();
+  if (!box.height) return null;
+
+  const style = window.getComputedStyle(target);
+  const paddingTop = parseFloat(style.paddingTop) || 0;
+  const borderTop = parseFloat(style.borderTopWidth) || 0;
+  const fontSize = parseFloat(style.fontSize) || 15;
+  const parsedLineHeight = parseFloat(style.lineHeight);
+  const lineHeight = !isNaN(parsedLineHeight) && parsedLineHeight > 0
+    ? parsedLineHeight
+    : fontSize * 1.65;
+
+  const effectiveHeight = Math.min(lineHeight, box.height);
+  return box.top + paddingTop + borderTop + effectiveHeight / 2;
+}
+
+/**
+ * Find candidate block at vertical coordinate y.
+ * Inspects all top-level blocks and list items (including nested items) in the editor DOM.
+ */
+function findBlockAtY(editor: Editor, y: number): HTMLElement | null {
+  const dom = editor.view.dom as HTMLElement;
+  if (!dom) return null;
+
+  const blocks: HTMLElement[] = [];
+
+  function collectBlocks(container: HTMLElement) {
+    for (let i = 0; i < container.children.length; i++) {
+      const child = container.children[i];
+      if (!(child instanceof HTMLElement)) continue;
+
+      const isList = child.tagName === 'UL' || child.tagName === 'OL';
+      if (isList) {
+        for (let j = 0; j < child.children.length; j++) {
+          const item = child.children[j];
+          if (item instanceof HTMLElement && (item.tagName === 'LI' || item.getAttribute('data-type') === 'taskItem')) {
+            blocks.push(item);
+            const nestedList = item.querySelector(':scope > div > ul, :scope > div > ol, :scope > ul, :scope > ol');
+            if (nestedList instanceof HTMLElement) {
+              collectBlocks(nestedList);
+            }
+          }
+        }
+      } else {
+        blocks.push(child);
+      }
+    }
+  }
+
+  collectBlocks(dom);
+  if (!blocks.length) return null;
+
+  let bestMatch: HTMLElement | null = null;
+  let minDistance = Infinity;
+
+  for (const block of blocks) {
+    const center = firstLineCenter(block);
+    if (center === null) continue;
+
+    const textTarget = block.getAttribute('data-type') === 'taskItem'
+      ? (block.querySelector(':scope > div > p') || block.querySelector('p') || block)
+      : block;
+    const rect = textTarget.getBoundingClientRect();
+
+    if (y >= rect.top - 4 && y <= rect.bottom + 4) {
+      return block;
+    }
+
+    const dist = Math.abs(y - center);
+    if (dist < minDistance) {
+      minDistance = dist;
+      bestMatch = block;
+    }
+  }
+
+  return bestMatch;
+}
+
+/**
+ * Resolves the block element at the given coordinates.
  */
 function rowAt(editor: Editor, x: number, y: number): HTMLElement | null {
-  const found = editor.view.posAtCoords({ left: x, top: y });
-  if (!found) return null;
-  const $pos = editor.state.doc.resolve(found.pos);
-  let depth = $pos.depth;
-  while (depth > 1 && $pos.node(depth).type.name !== 'listItem' && $pos.node(depth).type.name !== 'taskItem') depth--;
-  if (depth < 1) return null;
-  const dom = editor.view.nodeDOM($pos.before(depth));
-  return dom instanceof HTMLElement ? dom : null;
+  const dom = editor.view.dom as HTMLElement;
+  if (!dom) return null;
+
+  const elAtPoint = document.elementFromPoint(x, y);
+  const found = findBlockElement(elAtPoint, dom);
+  if (found) return found;
+
+  return findBlockAtY(editor, y);
 }
 
 /**
- * The bounding box of a row's own first line of text — a native `Range`
- * around its first character, so it reports exactly the line box the browser
- * actually drew rather than one ProseMirror had to map a position back to.
- * A row with no text of its own on that line (an empty paragraph, a bullet
- * holding only an image) falls back to the row's own box.
+ * The document range spanned by one row's own node.
+ * Correctly resolves single taskItems vs taskLists, and multi-line soft break blocks.
  */
-function firstLineRect(el: HTMLElement): DOMRect | null {
-  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-  let node: Node | null;
-  while ((node = walker.nextNode())) {
-    if (!node.textContent) continue;
-    const range = document.createRange();
-    range.setStart(node, 0);
-    range.setEnd(node, 1);
-    const rect = range.getBoundingClientRect();
-    if (rect.height) return rect;
-  }
-  const box = el.getBoundingClientRect();
-  return box.height ? box : null;
-}
-
-/** The document range spanned by one row's own node — not its content, the node itself. */
 function blockRangeOf(editor: Editor, el: HTMLElement): { from: number; to: number } | null {
   try {
-    const $pos = editor.state.doc.resolve(editor.view.posAtDOM(el, 0));
-    if (!$pos.depth) return null;
-    return { from: $pos.before($pos.depth), to: $pos.after($pos.depth) };
+    const { doc } = editor.state;
+    const inner = el.querySelector(':scope > div > p') ||
+      el.querySelector(':scope > p') ||
+      el.querySelector('p, pre, code, blockquote, [contenteditable="true"]') ||
+      el;
+
+    let pos: number;
+    try {
+      pos = editor.view.posAtDOM(inner, 0);
+    } catch {
+      pos = editor.view.posAtDOM(el, 0);
+    }
+    const $pos = doc.resolve(pos);
+
+    // 1. Direct match with editor.view.nodeDOM
+    for (let d = $pos.depth; d >= 1; d--) {
+      const nodeDom = editor.view.nodeDOM($pos.before(d));
+      if (nodeDom === el) {
+        return { from: $pos.before(d), to: $pos.after(d) };
+      }
+    }
+
+    // 2. If el is a taskItem or listItem
+    const isTask = el.getAttribute('data-type') === 'taskItem';
+    const isList = el.tagName === 'LI';
+    if (isTask || isList) {
+      for (let d = $pos.depth; d >= 1; d--) {
+        const typeName = $pos.node(d).type.name;
+        if ((isTask && typeName === 'taskItem') || (isList && (typeName === 'listItem' || typeName === 'taskItem'))) {
+          return { from: $pos.before(d), to: $pos.after(d) };
+        }
+      }
+    }
+
+    // 3. Fallback to depth 1 (top-level block)
+    if ($pos.depth >= 1) {
+      return { from: $pos.before(1), to: $pos.after(1) };
+    }
+    return null;
   } catch {
-    // Nothing there — the document moved under us.
     return null;
   }
 }
 
 /**
- * Select a whole block. Lifted out of the component because both ways in need
- * it — the grip, which knows its block from the hover state, and the long
- * press, which has only just found one under a finger.
+ * Select a whole block.
  */
 function selectBlockIn(editor: Editor, el: HTMLElement) {
   const range = blockRangeOf(editor, el);
   if (!range) return null;
   const { state, view } = editor;
-  const selection = NodeSelection.create(state.doc, range.from);
+  let selection: Selection;
+  try {
+    selection = NodeSelection.create(state.doc, range.from);
+  } catch {
+    selection = TextSelection.create(state.doc, range.from, range.to);
+  }
   view.dispatch(state.tr.setSelection(selection));
   return { from: range.from, to: range.to, selection };
 }
 
 /**
- * Select every row between two, however different their nesting — a run of
- * top-level paragraphs, a stretch of sibling bullets, even a paragraph down
- * to a bullet below it. `blockRange` finds their lowest shared list (or the
- * doc itself) and gives back the full run of its children in between, so a
- * plain `TextSelection` across that span always lands on clean row edges.
+ * Select every row between two elements.
  */
 function selectRowRange(editor: Editor, fromEl: HTMLElement, toEl: HTMLElement) {
   const a = blockRangeOf(editor, fromEl);
@@ -128,13 +266,198 @@ function selectRowRange(editor: Editor, fromEl: HTMLElement, toEl: HTMLElement) 
   return { from, to, selection };
 }
 
-/** Is this row already covered by the current selection? Hovering it again then
- *  keeps dragging or acting on the whole run instead of collapsing it to one row. */
+/**
+ * Is this row already covered by the current selection?
+ */
 function rowInSelection(editor: Editor, el: HTMLElement): boolean {
   const range = blockRangeOf(editor, el);
   if (!range) return false;
   const { from, to } = editor.state.selection;
   return range.from >= from && range.to <= to;
+}
+
+/**
+ * Calculates drop position at block boundary when moving blocks.
+ */
+function findBlockDropTarget(view: EditorView, event: DragEvent, slice: Slice): number | null {
+  const coords = { left: event.clientX, top: event.clientY };
+  const eventPos = view.posAtCoords(coords);
+  if (!eventPos) {
+    const rect = view.dom.getBoundingClientRect();
+    if (event.clientY > rect.bottom) return view.state.doc.content.size;
+    if (event.clientY < rect.top) return 0;
+    return view.state.doc.content.size;
+  }
+
+  if (slice && slice.content.size > 0) {
+    const point = dropPoint(view.state.doc, eventPos.pos, slice);
+    if (point !== null) return point;
+  }
+
+  const $pos = view.state.doc.resolve(eventPos.pos);
+  let depth = $pos.depth;
+  while (depth > 1 && $pos.node(depth).type.name !== 'listItem' && $pos.node(depth).type.name !== 'taskItem') {
+    depth--;
+  }
+  if (depth < 1) return eventPos.pos;
+
+  const dom = view.nodeDOM($pos.before(depth));
+  if (dom instanceof HTMLElement) {
+    const box = dom.getBoundingClientRect();
+    const isTopHalf = event.clientY < box.top + box.height / 2;
+    return isTopHalf ? $pos.before(depth) : $pos.after(depth);
+  }
+  return $pos.after(depth);
+}
+
+/**
+ * Executes moving a block to a new position atomically and safely.
+ */
+export function executeBlockMove(
+  editor: Editor,
+  source: { from: number; to: number },
+  targetPos: number
+): boolean {
+  const { view } = editor;
+  const { doc, schema } = view.state;
+
+  if (source.from < 0 || source.to > doc.content.size || source.from >= source.to) {
+    return false;
+  }
+
+  // Dropped inside itself: no-op
+  if (targetPos >= source.from && targetPos <= source.to) {
+    return true;
+  }
+
+  const $from = doc.resolve(source.from);
+  const sourceSlice = doc.slice(source.from, source.to);
+  if (!sourceSlice.content.size) {
+    return false;
+  }
+
+  // Check if source parent is a list that will become empty
+  const sourceParentDepth = $from.depth;
+  const sourceParent = $from.parent;
+  const isSourceParentList = ['taskList', 'bulletList', 'orderedList'].includes(sourceParent.type.name);
+  const willSourceParentBeEmpty =
+    isSourceParentList &&
+    sourceParent.childCount === 1 &&
+    source.from <= $from.start(sourceParentDepth) &&
+    source.to >= $from.end(sourceParentDepth);
+
+  const deleteFrom = willSourceParentBeEmpty ? $from.before(sourceParentDepth) : source.from;
+  const deleteTo = willSourceParentBeEmpty ? $from.after(sourceParentDepth) : source.to;
+
+  if (targetPos >= deleteFrom && targetPos <= deleteTo) {
+    return true;
+  }
+
+  const $target = doc.resolve(Math.min(targetPos, doc.content.size));
+  const targetParent = $target.parent;
+  const targetParentName = targetParent.type.name;
+
+  const firstChild = sourceSlice.content.firstChild;
+  const isMovingTaskItem = sourceSlice.content.childCount === 1 && firstChild?.type.name === 'taskItem';
+  const isMovingListItem = sourceSlice.content.childCount === 1 && firstChild?.type.name === 'listItem';
+  const isMovingParagraph = sourceSlice.content.childCount === 1 && firstChild?.type.name === 'paragraph';
+  const isMovingHeading = sourceSlice.content.childCount === 1 && firstChild?.type.name === 'heading';
+
+  let contentToInsert: ProseMirrorNode | Fragment;
+
+  if (isMovingTaskItem && firstChild) {
+    if (targetParentName === 'taskList') {
+      contentToInsert = firstChild;
+    } else {
+      contentToInsert = schema.nodes.taskList ? schema.nodes.taskList.create(null, firstChild) : firstChild;
+    }
+  } else if (isMovingListItem && firstChild) {
+    if (targetParentName === 'bulletList' || targetParentName === 'orderedList') {
+      contentToInsert = firstChild;
+    } else {
+      contentToInsert = schema.nodes.bulletList ? schema.nodes.bulletList.create(null, firstChild) : firstChild;
+    }
+  } else if (targetParentName === 'taskList' && (isMovingParagraph || isMovingHeading) && firstChild) {
+    const pNode = firstChild.isTextblock && firstChild.type.name === 'paragraph'
+      ? firstChild
+      : (schema.nodes.paragraph ? schema.nodes.paragraph.create(null, firstChild.content) : firstChild);
+    contentToInsert = schema.nodes.taskItem ? schema.nodes.taskItem.create({ checked: false }, pNode) : pNode;
+  } else if (targetParentName === 'bulletList' && (isMovingParagraph || isMovingHeading) && firstChild) {
+    const pNode = firstChild.isTextblock && firstChild.type.name === 'paragraph'
+      ? firstChild
+      : (schema.nodes.paragraph ? schema.nodes.paragraph.create(null, firstChild.content) : firstChild);
+    contentToInsert = schema.nodes.listItem ? schema.nodes.listItem.create(null, pNode) : pNode;
+  } else {
+    contentToInsert = sourceSlice.content;
+  }
+
+  const tr = view.state.tr;
+
+  // 1. Delete source
+  tr.delete(deleteFrom, deleteTo);
+
+  // 2. Map target position
+  const insertPos = tr.mapping.map(targetPos);
+  const safeInsertPos = Math.min(Math.max(0, insertPos), tr.doc.content.size);
+
+  // 3. Insert content
+  tr.insert(safeInsertPos, contentToInsert);
+
+  // 4. Optionally merge adjacent lists
+  if (isMovingTaskItem && targetParentName !== 'taskList') {
+    try {
+      if (safeInsertPos > 0 && canJoin(tr.doc, safeInsertPos)) {
+        tr.join(safeInsertPos);
+      }
+    } catch {}
+  }
+
+  // 5. Update selection
+  try {
+    const $inserted = tr.doc.resolve(Math.min(safeInsertPos, tr.doc.content.size));
+    tr.setSelection(Selection.near($inserted));
+  } catch {}
+
+  tr.setMeta('uiEvent', 'drop');
+  view.dispatch(tr);
+  view.focus();
+  return true;
+}
+
+/**
+ * Handles drop of a dragged block handle.
+ * Ensures schema validity across checklists, nested lists, and paragraphs.
+ */
+export function handleBlockDrop(view: EditorView, event: DragEvent, slice: Slice, _move: boolean): boolean {
+  const isBlockDrag = !!activeBlockDrag || event.dataTransfer?.types?.includes('application/x-habitat-block');
+  if (!isBlockDrag) return false;
+
+  let source = activeBlockDrag;
+  if (!source) {
+    try {
+      const raw = event.dataTransfer?.getData('application/x-habitat-block');
+      if (raw) source = JSON.parse(raw);
+    } catch {}
+  }
+  if (!source) {
+    const sel = view.state.selection;
+    if (sel && !sel.empty) {
+      source = { from: sel.from, to: sel.to };
+    }
+  }
+  if (!source || typeof source.from !== 'number' || typeof source.to !== 'number') {
+    return false;
+  }
+
+  const targetPos = findBlockDropTarget(view, event, slice);
+  if (targetPos === null) return false;
+
+  event.preventDefault();
+  activeBlockDrag = null;
+
+  // We can construct an Editor-like wrapper for executeBlockMove or use view directly
+  const dummyEditor: any = { view };
+  return executeBlockMove(dummyEditor, source, targetPos);
 }
 
 const TURN_INTO = [
@@ -149,93 +472,170 @@ const TURN_INTO = [
 ];
 
 export function BlockHandle({ editor, container }: { editor: Editor | null; container: HTMLElement | null }) {
-  // The grip is a hover affordance, and a touch device has no hover to give it:
-  // a webview synthesises a mouse move on tap, which would make the grip flash
-  // beside whatever you just touched. It stays off there, and a long-press on
-  // the block opens the same menu instead.
   const { coarse } = useLayout();
   const [hover, setHover] = useState<Hover | null>(null);
   const [menu, setMenu] = useState<{ left: number; top: number; from: number; to: number } | null>(null);
+  const [dropLine, setDropLine] = useState<DropLine | null>(null);
+  const dropLineRef = useRef<DropLine | null>(null);
+  dropLineRef.current = dropLine;
+  const computeDropTargetRef = useRef<((x: number, y: number) => DropLine | null) | null>(null);
+
   const hoverRef = useRef<Hover | null>(null);
   hoverRef.current = hover;
   const leaving = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const menuOpen = menu !== null;
-  // The row a plain click last landed on — where a shift-click range starts from.
   const anchorRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!editor || !container || coarse) return;
     const dom = editor.view.dom as HTMLElement;
 
-    /**
-     * Where the grip goes for a block: level with the middle of its *first
-     * line*, not the middle of its box. A heading's box carries margins and a
-     * long paragraph is several lines tall — either would leave the grip
-     * floating above or below the text it belongs to.
-     *
-     * This used to ask ProseMirror to map a document position back to
-     * screen coordinates (`posAtDOM` + `coordsAtPos`), which sounds right but
-     * isn't: at a plain block boundary that round trip can land on the
-     * *previous* row's line instead of this one's, depending on bias — and
-     * that showed up as the grip floating between two rows rather than on
-     * either. There's a simpler source of truth sitting right there in the
-     * DOM: a `Range` around the row's own first character reports exactly
-     * the line box the browser actually drew, no position mapping involved.
-     */
     const measure = (el: HTMLElement): number | null => {
       const outer = container.getBoundingClientRect();
-      const line = firstLineRect(el);
-      if (!line || !line.height) return null;
-      return (line.top + line.bottom) / 2 - outer.top - GRIP / 2;
+      const center = firstLineCenter(el);
+      if (center === null) return null;
+      return center - outer.top - GRIP / 2;
     };
 
-    /**
-     * The margin beside the text belongs to the page, not to the editor, so
-     * there is no element there to listen on — the pointer is followed on the
-     * document and the work is done by geometry instead.
-     */
+    const computeDropTarget = (clientX: number, clientY: number): DropLine | null => {
+      const editorDom = editor.view.dom as HTMLElement;
+      if (!editorDom || !container) return null;
+
+      const editorBox = editorDom.getBoundingClientRect();
+      const outer = container.getBoundingClientRect();
+
+      // Check if above all content
+      if (clientY < editorBox.top + 6) {
+        return {
+          top: editorBox.top - outer.top,
+          left: editorBox.left - outer.left,
+          width: editorBox.width,
+          pos: 0,
+        };
+      }
+
+      // Check if below all content
+      if (clientY > editorBox.bottom - 6) {
+        return {
+          top: editorBox.bottom - outer.top,
+          left: editorBox.left - outer.left,
+          width: editorBox.width,
+          pos: editor.state.doc.content.size,
+        };
+      }
+
+      let found: HTMLElement | null = null;
+      if (clientX >= editorBox.left) {
+        const elAtPoint = document.elementFromPoint(clientX, clientY);
+        found = findBlockElement(elAtPoint, editorDom);
+      }
+      if (!found) {
+        found = findBlockAtY(editor, clientY);
+      }
+      if (!found) return null;
+
+      const range = blockRangeOf(editor, found);
+      if (!range) return null;
+
+      const isTask = found.getAttribute('data-type') === 'taskItem';
+      const textTarget = isTask
+        ? (found.querySelector(':scope > div > p') || found.querySelector('p') || found)
+        : found;
+      const targetBox = textTarget.getBoundingClientRect();
+      const foundBox = found.getBoundingClientRect();
+
+      const midY = targetBox.top + targetBox.height / 2;
+      const isTop = clientY < midY;
+
+      let lineY = isTop ? foundBox.top : foundBox.bottom;
+      if (isTop && found.previousElementSibling instanceof HTMLElement) {
+        const prevBox = found.previousElementSibling.getBoundingClientRect();
+        lineY = (prevBox.bottom + foundBox.top) / 2;
+      } else if (!isTop && found.nextElementSibling instanceof HTMLElement) {
+        const nextBox = found.nextElementSibling.getBoundingClientRect();
+        lineY = (foundBox.bottom + nextBox.top) / 2;
+      }
+
+      const pos = isTop ? range.from : range.to;
+
+      const lineLeft = foundBox.left - outer.left;
+      const lineWidth = (editorBox.right - outer.left) - lineLeft;
+
+      return {
+        top: lineY - outer.top,
+        left: Math.max(editorBox.left - outer.left, lineLeft),
+        width: Math.min(editorBox.width, lineWidth),
+        pos,
+      };
+    };
+    computeDropTargetRef.current = computeDropTarget;
+
     const check = (x: number, y: number) => {
-      // While the menu is open the grip stays put — otherwise moving the mouse
-      // towards the menu would retarget it.
-      if (menuOpen) return;
+      if (menuOpen || activeBlockDrag) return;
       const box = dom.getBoundingClientRect();
-      // The margin counts as being on the block, so the grip is there before
-      // you arrive rather than appearing only over the text itself.
-      const near = x > box.left - MARGIN && x < box.right + 24 && y > box.top - 4 && y < box.bottom + 4;
+      const near = x > box.left - MARGIN && x < box.right + 24 && y > box.top - 12 && y < box.bottom + 24;
       if (!near) {
         clearTimeout(leaving.current);
         leaving.current = setTimeout(() => setHover(null), 250);
         return;
       }
       clearTimeout(leaving.current);
-      // Whatever the pointer's own x, the row is found at its height —
-      // `rowAt` maps through ProseMirror, not the DOM, so the empty margin
-      // resolves to the same row as the text itself would.
-      const probeX = Math.min(Math.max(x, box.left + 1), box.right - 1);
-      const found = rowAt(editor, probeX, y);
+
+      const current = hoverRef.current;
+
+      // 1. Hover hysteresis / lock-on:
+      // Keep grip locked when moving mouse across margin towards grip or within block's vertical span
+      if (current && dom.contains(current.el)) {
+        const blockRect = current.el.getBoundingClientRect();
+        const center = firstLineCenter(current.el);
+        const gripTop = center !== null ? center - GRIP / 2 : blockRect.top;
+        const gripBottom = gripTop + GRIP;
+
+        const inMarginArea = x <= box.left + 24;
+        const inVerticalReach =
+          (y >= blockRect.top - 6 && y <= blockRect.bottom + 6) ||
+          (y >= gripTop - 8 && y <= gripBottom + 8);
+
+        if (inMarginArea && inVerticalReach) {
+          return;
+        }
+
+        if (x > box.left && y >= blockRect.top && y <= blockRect.bottom) {
+          const elAtPoint = document.elementFromPoint(x, y);
+          const blockAtPoint = findBlockElement(elAtPoint, dom);
+          if (blockAtPoint === current.el || !blockAtPoint) {
+            return;
+          }
+        }
+      }
+
+      // 2. Find the block for the current pointer position:
+      let found: HTMLElement | null = null;
+      if (x >= box.left) {
+        const elAtPoint = document.elementFromPoint(x, y);
+        found = findBlockElement(elAtPoint, dom);
+      }
+      if (!found) {
+        found = findBlockAtY(editor, y);
+      }
       if (!found) return;
-      // Hovering anywhere inside an active multi-row selection shows one grip
-      // for the whole run, pinned to its first row — not one that jumps to
-      // whichever row within it the pointer happens to be over.
+
       let el = found;
       if (rowInSelection(editor, found)) {
         const first = editor.view.nodeDOM(editor.state.selection.from);
         if (first instanceof HTMLElement) el = first;
       }
-      // Same block as last time: nothing to move, and no re-render per pixel.
+
       if (el === hoverRef.current?.el) return;
-      // An attachment brings its own grip and its own toolbar — two grips in
-      // the same margin would just be in each other's way.
       if (el.querySelector('[data-drag-handle]')) return setHover(null);
+
       const top = measure(el);
       if (top !== null) setHover({ top, el });
     };
 
-    // One test per frame: several notes can be on screen at once (the daily
-    // list), and each of them is watching the same pointer.
     let frame = 0;
     const onMove = (e: MouseEvent) => {
-      if (frame) return;
+      if (frame || activeBlockDrag) return;
       const { clientX, clientY } = e;
       frame = requestAnimationFrame(() => {
         frame = 0;
@@ -243,8 +643,6 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
       });
     };
 
-    // Typing above a block moves it; the grip has to follow rather than sit
-    // where the block used to be.
     const onChange = () => {
       const at = hoverRef.current;
       if (!at) return;
@@ -253,22 +651,68 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
       if (top !== null && Math.abs(top - at.top) > 0.5) setHover({ ...at, top });
     };
 
+    const onScroll = () => {
+      const at = hoverRef.current;
+      if (!at) return;
+      if (!dom.contains(at.el)) return setHover(null);
+      const top = measure(at.el);
+      if (top !== null && Math.abs(top - at.top) > 0.5) setHover({ ...at, top });
+    };
+
+    const onDragOver = (e: DragEvent) => {
+      if (!activeBlockDrag) return;
+      e.preventDefault();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'move';
+      }
+      const target = computeDropTarget(e.clientX, e.clientY);
+      if (target) {
+        setDropLine(target);
+      }
+    };
+
+    const onDrop = (e: DragEvent) => {
+      if (!activeBlockDrag) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const target = dropLineRef.current || computeDropTarget(e.clientX, e.clientY);
+      setDropLine(null);
+
+      if (target) {
+        executeBlockMove(editor, activeBlockDrag, target.pos);
+      }
+      activeBlockDrag = null;
+      if (editor.view) editor.view.dragging = null;
+      setHover(null);
+    };
+
+    const onDragEnd = () => {
+      setDropLine(null);
+      activeBlockDrag = null;
+      if (editor.view) editor.view.dragging = null;
+      setHover(null);
+    };
+
+    window.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop, { capture: true });
+    window.addEventListener('dragend', onDragEnd);
     document.addEventListener('mousemove', onMove);
     editor.on('transaction', onChange);
     return () => {
       clearTimeout(leaving.current);
       cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', onScroll, { capture: true });
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop, { capture: true });
+      window.removeEventListener('dragend', onDragEnd);
       document.removeEventListener('mousemove', onMove);
       editor.off('transaction', onChange);
     };
   }, [editor, container, menuOpen, coarse]);
 
-  /**
-   * The touch way in. With no hover there is nothing to reveal the grip, so the
-   * block's own menu is opened by holding the block itself — the same menu, the
-   * same actions, reached by the gesture a phone already uses for "tell me more
-   * about this thing".
-   */
+  // Touch support: long press on the block opens options menu
   useEffect(() => {
     if (!editor || !container || !coarse) return;
     const dom = editor.view.dom as HTMLElement;
@@ -282,7 +726,6 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
     };
 
     const down = (e: PointerEvent) => {
-      // A mouse has the grip already; this is only for fingers and pens.
       if (e.pointerType === 'mouse') return;
       const at = { x: e.clientX, y: e.clientY };
       from = at;
@@ -290,8 +733,7 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
         timer = null;
         const el = rowAt(editor, at.x, at.y);
         if (!el) return;
-        // Holding a row already covered by a selection made elsewhere (e.g. a
-        // shift-click on a paired mouse) opens the menu for the whole thing.
+
         let picked;
         if (rowInSelection(editor, el)) {
           const selection = editor.state.selection;
@@ -305,15 +747,11 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
       }, 480);
     };
 
-    // Scrolling has to win. Any real travel means the finger is panning the
-    // page, not holding a block.
     const move = (e: PointerEvent) => {
       if (!from) return;
       if (Math.abs(e.clientX - from.x) > 8 || Math.abs(e.clientY - from.y) > 8) cancel();
     };
 
-    // Otherwise the press raises the system's own text-selection callout over
-    // our menu.
     const noCallout = (e: Event) => e.preventDefault();
 
     dom.addEventListener('pointerdown', down);
@@ -331,16 +769,8 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
     };
   }, [editor, container, coarse]);
 
-  // The menu outlives the hover: on touch there is no hover to have opened it.
-  if (!editor || (!hover && !menu)) return null;
+  if (!editor || (!hover && !menu && !dropLine)) return null;
 
-  /**
-   * What a grip interaction (drag or click) should act on: the row under the
-   * pointer alone, unless it's already part of the current selection — in
-   * which case every row in that selection comes along, so a run picked with
-   * shift-click stays intact instead of collapsing to whichever one the
-   * pointer happens to be over.
-   */
   const pickTarget = () => {
     if (!hover) return null;
     if (rowInSelection(editor, hover.el)) {
@@ -354,25 +784,41 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
   const onDragStart = (e: React.DragEvent) => {
     const picked = pickTarget();
     if (!picked || !hover) return e.preventDefault();
-    // Hand ProseMirror the slice it is about to move; its own drop handling
-    // does the rest, including where the drop marker goes.
-    editor.view.dragging = { slice: picked.selection.content(), move: true };
+
+    activeBlockDrag = {
+      from: picked.from,
+      to: picked.to,
+    };
+
+    const slice = picked.selection.content();
+    editor.view.dragging = { slice, move: true };
     e.dataTransfer.effectAllowed = 'move';
+    try {
+      e.dataTransfer.setData('application/x-habitat-block', JSON.stringify(activeBlockDrag));
+    } catch {}
     e.dataTransfer.setData('text/html', hover.el.outerHTML);
-    e.dataTransfer.setDragImage(hover.el, 0, 0);
+    e.dataTransfer.setData('text/plain', hover.el.innerText || '');
+    if (e.dataTransfer.setDragImage) {
+      e.dataTransfer.setDragImage(hover.el, 0, 0);
+    }
+
+    // Instantly calculate and show the drop line at the pickup location!
+    const initialTarget = computeDropTargetRef.current?.(e.clientX, e.clientY);
+    if (initialTarget) {
+      setDropLine(initialTarget);
+    }
   };
 
   const onDragEnd = () => {
-    // The drag started outside the editor's DOM, so its own cleanup never runs.
+    setDropLine(null);
     editor.view.dragging = null;
+    activeBlockDrag = null;
     setHover(null);
   };
 
   const onGripClick = (e: React.MouseEvent) => {
     if (!hover) return;
     if (e.shiftKey && anchorRef.current && anchorRef.current !== hover.el) {
-      // Extending a range is a selection gesture on its own — it doesn't also
-      // pop the menu, the same way shift-clicking a file list doesn't.
       selectRowRange(editor, anchorRef.current, hover.el);
       return;
     }
@@ -389,6 +835,17 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
 
   return (
     <>
+      {dropLine && (
+        <div
+          className="block-drop-line"
+          style={{
+            top: dropLine.top,
+            left: dropLine.left,
+            width: dropLine.width,
+          }}
+        />
+      )}
+
       {hover && (
         <button
           className="block-grip"
@@ -429,11 +886,6 @@ export function BlockHandle({ editor, container }: { editor: Editor | null; cont
                 key={t.id}
                 className="menu-item"
                 onClick={() => {
-                  // One row: the existing single-block path. A run of rows: the
-                  // shared list (or the doc itself) found again from the stored
-                  // range, then the same transform applied to each of its direct
-                  // children — right to left, so resizing a later row can't move
-                  // the position an earlier one is still waiting to be turned at.
                   const range = editor.state.doc.resolve(menu.from).blockRange(editor.state.doc.resolve(menu.to));
                   if (!range) return act((c) => t.run(c.setTextSelection(menu.from + 1)).run());
                   const positions: number[] = [];

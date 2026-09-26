@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
-import { ask } from '../confirm';
+import { ask, askDeleteRecurring } from '../confirm';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
 import type { Obj, ObjType, PropDef } from '../types';
-import { ago, canChangeType, MEDIA_TYPE, PEOPLE_TYPE, typeColor } from '../util';
+import { ago, canChangeType, MEDIA_TYPE, PEOPLE_TYPE, todayKey, typeColor } from '../util';
 import { Editor } from './Editor';
 import { Icon, TypeIcon } from './Icons';
 import { MediaBody } from './MediaBody';
@@ -111,23 +111,60 @@ export function ObjectPage({ id, occurrence }: { id: string; occurrence?: string
     });
 
   const del = async () => {
-    if (isTag) {
-      const where = backlinks.length === 1 ? '1 object' : `${backlinks.length} objects`;
-      const warning = backlinks.length
-        ? `\n\nIt will be removed from ${where}. The objects themselves are kept — only the tag goes away.`
-        : '';
-      if (!(await ask(`Delete the tag “${obj.title}”?${warning}`))) return;
-      await api.tags.remove(id);
-    } else {
-      if (!(await ask(`Delete “${obj.title || 'Untitled'}”? This also removes its links.`))) return;
-      await api.objects.remove(id);
+    try {
+      if (isTag) {
+        const where = backlinks.length === 1 ? '1 object' : `${backlinks.length} objects`;
+        const warning = backlinks.length
+          ? `\n\nIt will be removed from ${where}. The objects themselves are kept — only the tag goes away.`
+          : '';
+        if (!(await ask(`Delete the tag “${obj.title}”?${warning}`))) return;
+        await api.tags.remove(id);
+      } else {
+        const isRecurring = Boolean(
+          obj.props?.seriesId ||
+          obj.props?.repeat ||
+          obj.props?.seriesRule ||
+          (occurrence && (obj.typeId === 'event' || obj.typeId === 'task'))
+        );
+
+        if (isRecurring) {
+          const targetOccurrence =
+            occurrence ||
+            (obj.props?.startsAt ? String(obj.props.startsAt).slice(0, 10) : '') ||
+            (obj.props?.doing ? String(obj.props.doing).slice(0, 10) : '') ||
+            (obj.props?.due ? String(obj.props.due).slice(0, 10) : '') ||
+            todayKey();
+
+          const scope = await askDeleteRecurring({
+            title: obj.title || 'Untitled',
+            typeId: obj.typeId,
+            occurrence: targetOccurrence,
+          });
+          if (!scope) return;
+          await api.objects.deleteRecurring({
+            id,
+            scope,
+            occurrence: targetOccurrence,
+          });
+        } else {
+          if (!(await ask(`Delete “${obj.title || 'Untitled'}”? This also removes its links.`))) return;
+          await api.objects.remove(id);
+        }
+      }
+      objectChanged(id);
+      if (canBack) back();
+      else if (obj.typeId === 'event') navigate({ kind: 'tasks', tab: 'calendar' });
+      else if (obj.typeId === 'task') navigate({ kind: 'tasks' });
+      else navigate({ kind: 'dashboard' });
+    } catch (err) {
+      console.error('Failed to delete object:', err);
     }
-    objectChanged(id);
-    if (canBack) back();
-    else navigate({ kind: 'dashboard' });
   };
 
   const goToType = () => {
+    if (obj.typeId === 'event' || type?.id === 'event') {
+      return navigate({ kind: 'tasks', tab: 'calendar' });
+    }
     if (!type) return;
     if (type.id === 'daily') return navigate({ kind: 'daily' });
     if (type.id === PEOPLE_TYPE) return navigate({ kind: 'people' });
@@ -156,8 +193,12 @@ export function ObjectPage({ id, occurrence }: { id: string; occurrence?: string
         </button>
         <span className="crumb-group">
           <button className="crumb" onClick={goToType}>
-            <TypeIcon icon={type?.icon} color={typeColor(type?.color, theme)} size={14} />
-            {type?.name}
+            <TypeIcon
+              icon={type?.icon || (obj.typeId === 'event' ? 'calendar-days' : undefined)}
+              color={typeColor(type?.color || (obj.typeId === 'event' ? '#4a3aa7' : undefined), theme)}
+              size={14}
+            />
+            {type?.name || (obj.typeId === 'event' ? 'Events' : '')}
           </button>
           {movable.length > 0 && (
             <button

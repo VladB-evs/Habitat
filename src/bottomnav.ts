@@ -55,7 +55,7 @@ export function loadNav(): NavKey[] {
     const raw = localStorage.getItem(STORE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
     if (Array.isArray(parsed) && parsed.length && parsed.every((k) => typeof k === 'string')) {
-      return parsed.map((k) => (k === 'events' || k === 'calendar' ? 'tasks' : k)) as NavKey[];
+      return parsed.map((k) => (k === 'events' || k === 'calendar' || k === 'type:event' ? 'tasks' : k)) as NavKey[];
     }
   } catch {
     // Corrupt value from a future version or manual edit — fall through to the default.

@@ -22,7 +22,7 @@ import { Mathematics } from '@tiptap/extension-mathematics';
 import { createLowlight, common } from 'lowlight';
 import 'katex/dist/katex.min.css';
 import { useApp } from '../store';
-import { BlockHandle } from '../blockHandle';
+import { BlockHandle, handleBlockDrop } from '../blockHandle';
 import { Clipboard } from '../clipboard';
 import { EmojiPicker } from '../emoji';
 import { mentionSuggestion } from '../mention';
@@ -262,7 +262,7 @@ export function Editor({
 
   const editor = useEditor({
     extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false }),
+      StarterKit.configure({ heading: { levels: [1, 2, 3] }, codeBlock: false, dropcursor: false }),
       CodeBlock,
       Table.configure({ resizable: true }),
       TableRow,
@@ -335,12 +335,17 @@ export function Editor({
         return false;
       },
       handlePaste: (view, event) => takeFiles(editorRef.current, event.clipboardData?.files),
-      handleDrop: (view, event: any) => {
+      handleDrop: (view, event: any, slice: any, move: any) => {
         // Dragging a media block within the note is ProseMirror's own business;
         // only files coming from outside are ours to store.
-        if (!event.dataTransfer?.files?.length) return false;
-        const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
-        return takeFiles(editorRef.current, event.dataTransfer.files, at);
+        if (event.dataTransfer?.files?.length) {
+          const at = view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos;
+          return takeFiles(editorRef.current, event.dataTransfer.files, at);
+        }
+        if (handleBlockDrop(view, event, slice, move)) {
+          return true;
+        }
+        return false;
       },
     },
     onUpdate: ({ editor }) => {

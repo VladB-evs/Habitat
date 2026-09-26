@@ -31,6 +31,7 @@ import type {
   PropDef,
   Agenda,
   SettingsInfo,
+  HabitatSize,
   Stats,
   TagObj,
   Template,
@@ -38,6 +39,8 @@ import type {
 } from './types';
 import type { Automation, HttpApiConfig, SyncConfig, SyncStatus, TelegramConfig, UpdateState } from './types';
 import type { AiAction, AiAnswer, AiAvailability, AiDelta, AiResult } from './types';
+import { formatRule, occurrences, parseRule } from './repeat';
+import { addDays, todayKey } from './util';
 
 declare global {
   interface Window {
@@ -129,6 +132,153 @@ export const api = {
      */
     setType: (id: string, typeId: string): Promise<Obj | { error: string }> => inv('objects:setType', { id, typeId }),
     remove: (id: string): Promise<boolean> => inv('objects:delete', id),
+    deleteRecurring: async (p: {
+      id: string;
+      scope: 'current' | 'future' | 'past' | 'all';
+      occurrence?: string;
+    }): Promise<{ ok: boolean; count: number }> => {
+      // 1. Try dedicated backend channel if supported
+      try {
+        const res = await inv('objects:deleteRecurring', p);
+        if (res && res.ok !== false) return res;
+      } catch {
+        // Fall back to pre-existing IPC channels
+      }
+
+      // 2. Fetch the object to know its props and recurrence details
+      const obj = await api.objects.get(p.id);
+      if (!obj) {
+        try {
+          await inv('objects:delete', p.id);
+        } catch {}
+        return { ok: false, count: 0 };
+      }
+
+      const scope = p.scope || 'all';
+      const occurrence = p.occurrence || '';
+
+      // Case 1: Event or object with seriesId (materialized occurrences)
+      if (obj.props && obj.props.seriesId) {
+        const seriesId = obj.props.seriesId;
+        if (scope === 'current') {
+          await api.objects.remove(obj.id);
+          return { ok: true, count: 1 };
+        }
+        if (scope === 'future') {
+          try {
+            const res = await inv('events:deleteSeries', { id: p.id, scope: 'future', occurrence });
+            if (res && res.ok !== false) return res;
+          } catch {}
+        }
+        const from = obj.props.startsAt || (occurrence ? occurrence + 'T00:00' : '');
+        const all = await api.objects.list(obj.typeId);
+        let count = 0;
+        for (const ev of all) {
+          if (ev.props?.seriesId !== seriesId) continue;
+          if (scope === 'future') {
+            if (from && ev.props?.startsAt && ev.props.startsAt < from) continue;
+          } else if (scope === 'past') {
+            if (from && ev.props?.startsAt && ev.props.startsAt > from) continue;
+          }
+          await api.objects.remove(ev.id);
+          count++;
+        }
+        return { ok: true, count };
+      }
+
+      // Case 2: RRULE recurring task or event (props.repeat or props.seriesRule)
+      const repeatRuleStr = obj.props?.repeat || obj.props?.seriesRule;
+      if (repeatRuleStr) {
+        const anchor =
+          (obj.props.startsAt ? String(obj.props.startsAt).slice(0, 10) : '') ||
+          (obj.props.doing ? String(obj.props.doing).slice(0, 10) : '') ||
+          (obj.props.due ? String(obj.props.due).slice(0, 10) : '') ||
+          todayKey();
+        const targetDayKey = String(occurrence || anchor || todayKey()).slice(0, 10);
+
+        if (scope === 'all') {
+          await api.objects.remove(obj.id);
+          return { ok: true, count: 1 };
+        }
+
+        if (scope === 'current') {
+          try {
+            const skipped = await inv('calendar:skip', { id: obj.id, dayKey: targetDayKey });
+            if (skipped) return { ok: true, count: 1 };
+          } catch {}
+          const currentSkips: string[] = Array.isArray(obj.props.repeatSkip) ? obj.props.repeatSkip : [];
+          if (!currentSkips.includes(targetDayKey)) {
+            await api.objects.update(obj.id, {
+              props: {
+                ...obj.props,
+                repeatSkip: [...currentSkips, targetDayKey].sort(),
+              },
+            });
+          }
+          return { ok: true, count: 1 };
+        }
+
+        if (scope === 'future') {
+          if (targetDayKey <= anchor) {
+            await api.objects.remove(obj.id);
+            return { ok: true, count: 1 };
+          }
+          const rule = parseRule(repeatRuleStr);
+          if (rule) {
+            const dayBefore = addDays(targetDayKey, -1);
+            rule.until = rule.until && rule.until < dayBefore ? rule.until : dayBefore;
+            delete rule.count;
+            const newRuleStr = formatRule(rule);
+            const currentSkips: string[] = Array.isArray(obj.props.repeatSkip) ? obj.props.repeatSkip : [];
+            const currentDone: string[] = Array.isArray(obj.props.repeatDone) ? obj.props.repeatDone : [];
+            await api.objects.update(obj.id, {
+              props: {
+                ...obj.props,
+                repeat: newRuleStr,
+                repeatSkip: currentSkips.filter((d: string) => d <= dayBefore),
+                repeatDone: currentDone.filter((d: string) => d <= dayBefore),
+              },
+            });
+            return { ok: true, count: 1 };
+          }
+        }
+
+        if (scope === 'past') {
+          const rule = parseRule(repeatRuleStr);
+          if (rule) {
+            const nextDates = occurrences(rule, anchor, addDays(targetDayKey, 1), addDays(targetDayKey, 366));
+            if (!nextDates.length) {
+              await api.objects.remove(obj.id);
+              return { ok: true, count: 1 };
+            }
+            const newAnchor = nextDates[0];
+            const nextProps = { ...obj.props };
+            if (nextProps.startsAt) {
+              nextProps.startsAt = newAnchor + String(nextProps.startsAt).slice(10);
+            } else if (nextProps.doing) {
+              nextProps.doing = newAnchor;
+            } else if (nextProps.due) {
+              nextProps.due = newAnchor;
+            }
+            if (rule.count) {
+              const pastCount = occurrences(rule, anchor, anchor, targetDayKey).length;
+              rule.count = Math.max(1, rule.count - pastCount);
+            }
+            nextProps.repeat = formatRule(rule);
+            const currentSkips: string[] = Array.isArray(obj.props.repeatSkip) ? obj.props.repeatSkip : [];
+            const currentDone: string[] = Array.isArray(obj.props.repeatDone) ? obj.props.repeatDone : [];
+            nextProps.repeatSkip = currentSkips.filter((d: string) => d >= newAnchor);
+            nextProps.repeatDone = currentDone.filter((d: string) => d >= newAnchor);
+            await api.objects.update(obj.id, { props: nextProps });
+            return { ok: true, count: 1 };
+          }
+        }
+      }
+
+      // Default fallback: regular object remove
+      await api.objects.remove(obj.id);
+      return { ok: true, count: 1 };
+    },
     /** `content: true` also searches inside every note's text, daily entries included. */
     search: (q: string, opts?: { content?: boolean }): Promise<Obj[]> =>
       inv('objects:search', { q, content: !!opts?.content }),
@@ -191,7 +341,10 @@ export const api = {
   events: {
     create: (input: NewEvent): Promise<Obj> => inv('events:create', input),
     list: (): Promise<Obj[]> => inv('events:list'),
-    deleteSeries: (id: string): Promise<{ ok: boolean; count: number }> => inv('events:deleteSeries', { id }),
+    deleteSeries: (
+      id: string,
+      opts?: { scope?: 'current' | 'future' | 'past' | 'all'; occurrence?: string }
+    ): Promise<{ ok: boolean; count: number }> => inv('events:deleteSeries', { id, ...opts }),
   },
   backlinks: (id: string): Promise<Obj[]> => inv('backlinks:list', id),
   stats: (): Promise<Stats> => inv('stats:get'),
@@ -347,6 +500,7 @@ export const api = {
   },
   habitat: {
     code: (): Promise<string> => inv('habitat:code'),
+    size: (): Promise<HabitatSize> => inv('habitat:size'),
   },
   app: {
     info: (): Promise<{ appDir: string; version: string }> => inv('app:info'),

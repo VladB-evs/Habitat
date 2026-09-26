@@ -8,7 +8,7 @@ import { Icon, TypeIcon } from './Icons';
 /** Same exclusion the sidebar's own Types section and the bar's "Types…" sheet
  *  use — these already have a dedicated builtin slot, so pinning the raw type
  *  behind it would just be the same destination twice. */
-const UPSTAIRS = new Set(['daily', 'tag', 'task', PEOPLE_TYPE, MEDIA_TYPE]);
+const UPSTAIRS = new Set(['daily', 'tag', 'task', 'event', PEOPLE_TYPE, MEDIA_TYPE]);
 
 /** Settings' Navigation tab — editing the bottom bar shown once the window is
  *  too narrow for the sidebar. The bar itself (BottomNav.tsx) only ever reads

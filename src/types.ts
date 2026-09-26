@@ -156,6 +156,15 @@ export interface SettingsInfo {
   onboarded: boolean;
 }
 
+export interface HabitatSize {
+  dbPath: string;
+  totalBytes: number;
+  dbBytes: number;
+  filesBytes: number;
+  filesCount: number;
+  objectsCount: number;
+}
+
 export interface Obj {
   id: string;
   typeId: string;

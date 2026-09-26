@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'motion/react';
 import { api } from '../api';
+import { ask } from '../confirm';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useLayout } from '../layout';
 import { dialogIn, snap } from '../motion';
 import { useApp } from '../store';
 import type { Agenda, AgendaTask } from '../types';
-import { fmtMonthYear, todayKey } from '../util';
+import { addDays, fmtMonthYear, popPos, todayKey } from '../util';
 import { Backlog, EventBlock, TaskLine, dayHeading } from './Agenda';
 import { CalendarView, useCalendarNav } from './CalendarView';
 import { DateField } from './DateField';
@@ -102,10 +103,6 @@ function DayCard({
           if (!id) return;
           if (due && day.dayKey > due) {
             alert(`Cannot schedule task past its due date (${due})`);
-            return;
-          }
-          if (day.dayKey < todayKey()) {
-            alert(`Cannot schedule in the past (${day.dayKey})`);
             return;
           }
           onDropTask(id, day.dayKey, raw ? Number(raw) : null);
@@ -267,10 +264,6 @@ function DayCard({
           alert(`Cannot schedule task past its due date (${due})`);
           return;
         }
-        if (day.dayKey < todayKey()) {
-          alert(`Cannot schedule in the past (${day.dayKey})`);
-          return;
-        }
         if (id) onDropTask(id, day.dayKey, raw ? Number(raw) : null);
       }}
     >
@@ -309,18 +302,34 @@ function DayCard({
   );
 }
 
-export function TasksPage() {
+export function TasksPage({ initialTab }: { initialTab?: 'schedule' | 'calendar' | 'board' } = {}) {
   const { navigate } = useApp();
   const { narrow } = useLayout();
 
   const [mode, setMode] = useState<Mode>(() => {
+    if (initialTab && isMode(initialTab)) return initialTab;
     const saved = localStorage.getItem('habitat:tasks-mode');
     if (saved === 'focus' || saved === 'upcoming') return 'schedule';
     return isMode(saved) ? saved : 'schedule';
   });
 
-  const [mobileTab, setMobileTab] = useState<'schedule' | 'backlog' | 'calendar'>('schedule');
+  const [mobileTab, setMobileTab] = useState<'schedule' | 'backlog' | 'calendar'>(() => {
+    if (initialTab === 'calendar') return 'calendar';
+    return 'schedule';
+  });
   const calNav = useCalendarNav();
+
+  useEffect(() => {
+    if (initialTab && isMode(initialTab)) {
+      setMode(initialTab);
+      if (initialTab === 'calendar') {
+        setMobileTab('calendar');
+        calNav.setMode('month');
+      } else if (initialTab === 'schedule') {
+        setMobileTab('schedule');
+      }
+    }
+  }, [initialTab]);
   const [agenda, setAgenda] = useState<Agenda>(nothing);
   const [scheduling, setScheduling] = useState<{ id: string; value: string; due?: string | null } | null>(null);
   const [expandedDays, setExpandedDays] = useState<Set<string>>(() => new Set([todayKey()]));
@@ -330,6 +339,24 @@ export function TasksPage() {
   const [dragOverDay, setDragOverDay] = useState<string | null>(null);
   const [overdueExpanded, setOverdueExpanded] = useState(true);
   const [completedOpen, setCompletedOpen] = useState<Set<string>>(() => new Set());
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [newMenu, setNewMenu] = useState(false);
+
+  useEffect(() => {
+    if (!newMenu) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setNewMenu(false);
+    };
+    const onResize = () => {
+      if (narrow) setNewMenu(false);
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [newMenu, narrow]);
 
   const pick = (m: Mode) => {
     setMode(m);
@@ -350,18 +377,25 @@ export function TasksPage() {
     api.tasks.setDone({ id: t.id, dayKey: t.when, done: !t.done }).then(() => objectChanged(t.id));
   };
 
-  const drop = (id: string, dayKey: string, minute: number | null) => {
+  const drop = async (id: string, dayKey: string, minute: number | null, skipPastConfirm = false) => {
     const today = todayKey();
-    if (dayKey < today) {
-      alert(`Cannot schedule in the past (${dayKey})`);
-      return;
-    }
-    if (dayKey === today && minute !== null) {
-      const now = new Date();
-      const nowMinute = now.getHours() * 60 + now.getMinutes();
-      if (minute < nowMinute) {
-        alert('Cannot schedule before current time today');
-        return;
+    if (!skipPastConfirm) {
+      const isDatePast = dayKey < today;
+      const curNow = new Date();
+      const curNowMinute = curNow.getHours() * 60 + curNow.getMinutes();
+      const isTimePast = dayKey === today && minute !== null && minute < curNowMinute;
+      if (isDatePast || isTimePast) {
+        const ok = await ask(
+          isDatePast
+            ? `"${dayKey}" is in the past. Are you sure you want to schedule it in the past?`
+            : 'This time is in the past. Are you sure you want to schedule it in the past?',
+          {
+            title: isDatePast ? 'Date in the past' : 'Time in the past',
+            confirmLabel: 'Schedule anyway',
+            danger: false,
+          }
+        );
+        if (!ok) return;
       }
     }
     const allTasks = [...agenda.backlog, ...agenda.overdue, ...agenda.days.flatMap((d) => d.tasks)];
@@ -395,12 +429,55 @@ export function TasksPage() {
     objectChanged(made.id);
   };
 
+  const getInitialScheduleSlot = (anchor?: string) => {
+    const now = new Date();
+    const today = todayKey();
+    const day = anchor && anchor >= today ? anchor : today;
+    const isToday = day === today;
+
+    if (!isToday) {
+      return {
+        startsAt: `${day}T10:00`,
+        endsAt: `${day}T11:00`,
+      };
+    }
+
+    const curHour = now.getHours();
+    const curMin = now.getMinutes();
+    let startHour = curMin > 0 ? curHour + 1 : curHour;
+    startHour = Math.max(9, startHour);
+
+    let targetDay = day;
+    if (startHour >= 24) {
+      targetDay = addDays(today, 1);
+      startHour = 9;
+    }
+
+    const endHour = startHour + 1 <= 23 ? startHour + 1 : 23;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const startsAt = `${targetDay}T${pad(startHour)}:00`;
+    const endsAt = `${targetDay}T${pad(endHour)}:00`;
+
+    return { startsAt, endsAt };
+  };
+
   const newTimedTask = async () => {
-    const day = todayKey();
+    const slot = getInitialScheduleSlot(calNav.anchor);
     const made = await api.objects.create({
       typeId: 'task',
       title: 'New task',
-      props: { status: 'Todo', startsAt: `${day}T09:00`, endsAt: `${day}T10:00` },
+      props: { status: 'Todo', startsAt: slot.startsAt, endsAt: slot.endsAt },
+    });
+    objectChanged(made.id);
+    navigate({ kind: 'object', id: made.id });
+  };
+
+  const newEvent = async () => {
+    const slot = getInitialScheduleSlot(calNav.anchor);
+    const made = await api.events.create({
+      title: 'New event',
+      startsAt: slot.startsAt,
+      endsAt: slot.endsAt,
     });
     objectChanged(made.id);
     navigate({ kind: 'object', id: made.id });
@@ -643,9 +720,60 @@ export function TasksPage() {
               </div>
             )}
 
-            <button className="btn primary" onClick={newTimedTask}>
-              <Icon name="plus" size={14} /> Task
-            </button>
+            <div className="new-dropdown-wrap" style={{ position: 'relative', display: 'inline-flex' }}>
+              <button
+                ref={btnRef}
+                className="btn primary"
+                aria-label="Create task or event"
+                onClick={() => setNewMenu((v) => !v)}
+              >
+                <Icon name="plus" size={14} /> New <Icon name="chevron-down" size={12} />
+              </button>
+              {newMenu && (
+                <>
+                  <div className="backdrop" onClick={() => setNewMenu(false)} />
+                  <div
+                    className="popover"
+                    style={
+                      narrow
+                        ? {
+                            ...(btnRef.current ? popPos(btnRef.current, 180, 90) : {}),
+                            minWidth: 160,
+                          }
+                        : {
+                            position: 'absolute',
+                            top: 'calc(100% + 6px)',
+                            right: 0,
+                            left: 'auto',
+                            minWidth: 160,
+                            zIndex: 60,
+                          }
+                    }
+                  >
+                    <button
+                      className="menu-item"
+                      onClick={() => {
+                        setNewMenu(false);
+                        newTimedTask();
+                      }}
+                    >
+                      <Icon name="circle-check" size={14} />
+                      <span>Task</span>
+                    </button>
+                    <button
+                      className="menu-item"
+                      onClick={() => {
+                        setNewMenu(false);
+                        newEvent();
+                      }}
+                    >
+                      <Icon name="calendar-days" size={14} />
+                      <span>Event</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
             <SplitControls />
           </div>
         </PageActions>
@@ -727,8 +855,8 @@ export function TasksPage() {
               onChange={(v) => setScheduling({ ...scheduling, value: v ?? '' })}
             />
             {scheduling.value && scheduling.value < today && (
-              <p style={{ fontSize: '11px', color: 'var(--danger, #d9584a)', margin: '6px 0 0' }}>
-                Cannot schedule in the past.
+              <p style={{ fontSize: '11px', color: 'var(--text-3)', margin: '6px 0 0' }}>
+                Note: This date is in the past.
               </p>
             )}
             {scheduling.due && scheduling.value && scheduling.value > scheduling.due && (
@@ -744,11 +872,10 @@ export function TasksPage() {
                 className="btn primary"
                 disabled={
                   !scheduling.value ||
-                  scheduling.value < today ||
                   Boolean(scheduling.due && scheduling.value > scheduling.due)
                 }
                 onClick={() => {
-                  drop(scheduling.id, scheduling.value, null);
+                  drop(scheduling.id, scheduling.value, null, true);
                   setScheduling(null);
                 }}
               >

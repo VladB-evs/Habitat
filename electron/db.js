@@ -1815,6 +1815,9 @@ const api = {
   // A cover or attachment a deleted object was the last reference to
   // shouldn't just sit there unlinked — see gcFiles().
   'objects:delete': (id) => {
+    if (typeof id === 'object' && id !== null && id.id) {
+      return api['objects:deleteRecurring'](id);
+    }
     const ok = deleteObject(id);
     gcFiles();
     return ok;
@@ -1824,6 +1827,134 @@ const api = {
     for (const id of ids || []) deleteObject(id);
     gcFiles();
     return { deleted: (ids || []).length };
+  },
+
+  'objects:deleteRecurring': ({ id, scope = 'all', occurrence = '' } = {}) => {
+    const row = db.prepare('SELECT * FROM objects WHERE id = ?').get(id);
+    if (!row) return { ok: false, count: 0 };
+    const obj = parseObj(row);
+
+    // Case 1: Event or object with seriesId (materialized occurrences)
+    if (obj.props && obj.props.seriesId) {
+      const seriesId = obj.props.seriesId;
+      if (scope === 'current') {
+        const ok = deleteObject(obj.id);
+        gcFiles();
+        return { ok, count: ok ? 1 : 0 };
+      }
+      const from = obj.props.startsAt || (occurrence ? occurrence + 'T00:00' : '');
+      const rows = db.prepare('SELECT id, props FROM objects WHERE type_id = ?').all(obj.typeId);
+      let count = 0;
+      for (const r of rows) {
+        const props = JSON.parse(r.props || '{}');
+        if (props.seriesId !== seriesId) continue;
+        if (scope === 'future') {
+          if (from && props.startsAt && props.startsAt < from) continue;
+        } else if (scope === 'past') {
+          if (from && props.startsAt && props.startsAt > from) continue;
+        }
+        deleteObject(r.id);
+        count++;
+      }
+      gcFiles();
+      return { ok: true, count };
+    }
+
+    // Case 2: Object with ruleOf(obj) (virtual occurrences via RRULE)
+    if (ruleOf(obj)) {
+      const rule = ruleOf(obj);
+      const type = getType(obj.typeId);
+      const defs = [...(type ? type.properties : []), ...(obj.extraProps || [])];
+      const timeDef = scheduleDef(defs, obj.props, 'datetime');
+      const dayDef = scheduleDef(defs, obj.props, 'date');
+      const anchor = (timeDef && obj.props[timeDef.id] ? String(obj.props[timeDef.id]).slice(0, 10) : '') ||
+                     (dayDef && obj.props[dayDef.id] ? String(obj.props[dayDef.id]).slice(0, 10) : '') ||
+                     (obj.props.due ? String(obj.props.due).slice(0, 10) : '') ||
+                     localToday();
+      const targetDayKey = String(occurrence || anchor || localToday()).slice(0, 10);
+
+      if (scope === 'all') {
+        const ok = deleteObject(obj.id);
+        gcFiles();
+        return { ok, count: ok ? 1 : 0 };
+      }
+
+      if (scope === 'current') {
+        const detached = detachOccurrence(obj, defs, targetDayKey);
+        if (detached) {
+          deleteObject(detached.id);
+        } else {
+          const skip = daySet(obj, REPEAT_SKIP_PROP);
+          skip.add(targetDayKey);
+          updateObject({ id: obj.id, patch: { props: { ...obj.props, [REPEAT_SKIP_PROP]: [...skip].sort() } } });
+        }
+        gcFiles();
+        return { ok: true, count: 1 };
+      }
+
+      if (scope === 'future') {
+        if (targetDayKey <= anchor) {
+          const ok = deleteObject(obj.id);
+          gcFiles();
+          return { ok, count: ok ? 1 : 0 };
+        }
+        const dayBefore = shiftDay(targetDayKey, -1);
+        rule.until = rule.until && rule.until < dayBefore ? rule.until : dayBefore;
+        delete rule.count;
+        const newRuleStr = recur.formatRule(rule);
+        const skip = daySet(obj, REPEAT_SKIP_PROP);
+        const done = daySet(obj, REPEAT_DONE_PROP);
+        updateObject({
+          id: obj.id,
+          patch: {
+            props: {
+              ...obj.props,
+              [REPEAT_PROP]: newRuleStr,
+              [REPEAT_SKIP_PROP]: [...skip].filter((d) => d <= dayBefore),
+              [REPEAT_DONE_PROP]: [...done].filter((d) => d <= dayBefore),
+            },
+          },
+        });
+        gcFiles();
+        return { ok: true, count: 1 };
+      }
+
+      if (scope === 'past') {
+        const nextDates = recur.occurrences(rule, anchor, shiftDay(targetDayKey, 1), shiftDay(targetDayKey, 366));
+        if (!nextDates.length) {
+          const ok = deleteObject(obj.id);
+          gcFiles();
+          return { ok, count: ok ? 1 : 0 };
+        }
+        const newAnchor = nextDates[0];
+        const nextProps = { ...obj.props };
+        if (timeDef && nextProps[timeDef.id]) {
+          nextProps[timeDef.id] = newAnchor + String(nextProps[timeDef.id]).slice(10);
+        } else if (dayDef && nextProps[dayDef.id]) {
+          nextProps[dayDef.id] = newAnchor;
+        } else if (nextProps.due) {
+          nextProps.due = newAnchor;
+        }
+        if (rule.count) {
+          const pastCount = recur.occurrences(rule, anchor, anchor, targetDayKey).length;
+          rule.count = Math.max(1, rule.count - pastCount);
+        }
+        const newRuleStr = recur.formatRule(rule);
+        nextProps[REPEAT_PROP] = newRuleStr;
+        const skip = daySet(obj, REPEAT_SKIP_PROP);
+        const done = daySet(obj, REPEAT_DONE_PROP);
+        nextProps[REPEAT_SKIP_PROP] = [...skip].filter((d) => d >= newAnchor);
+        nextProps[REPEAT_DONE_PROP] = [...done].filter((d) => d >= newAnchor);
+        updateObject({ id: obj.id, patch: { props: nextProps } });
+        gcFiles();
+        return { ok: true, count: 1 };
+      }
+    }
+
+    // Fallback: ordinary single object delete
+    const ok = deleteObject(obj.id);
+    gcFiles();
+    return { ok, count: ok ? 1 : 0 };
   },
 
   // Applies one property value across many objects, going through updateObject
@@ -2161,25 +2292,8 @@ const api = {
    * Without a series (a one-off event, or the `seriesId` already stripped)
    * it's just the one row.
    */
-  'events:deleteSeries': ({ id }) => {
-    const obj = getObj(id);
-    if (!obj || obj.typeId !== EVENT_TYPE) return { ok: false, count: 0 };
-    const seriesId = obj.props.seriesId;
-    if (!seriesId) {
-      deleteObject(id);
-      return { ok: true, count: 1 };
-    }
-    const from = obj.props.startsAt || '';
-    const rows = db.prepare('SELECT id, props FROM objects WHERE type_id = ?').all(EVENT_TYPE);
-    let count = 0;
-    for (const r of rows) {
-      const props = JSON.parse(r.props || '{}');
-      if (props.seriesId !== seriesId) continue;
-      if (from && props.startsAt && props.startsAt < from) continue;
-      deleteObject(r.id);
-      count++;
-    }
-    return { ok: true, count };
+  'events:deleteSeries': ({ id, scope = 'future', occurrence = '' } = {}) => {
+    return api['objects:deleteRecurring']({ id, scope, occurrence });
   },
 
   'backlinks:list': (id) =>
@@ -2664,6 +2778,30 @@ const api = {
       'habitatCode', code
     );
     return code;
+  },
+
+  /** Size on disk of the current habitat, combining database and attachments. */
+  'habitat:size': () => {
+    let dbBytes = 0;
+    if (currentFile) {
+      for (const suffix of ['', '-wal', '-shm', '-journal']) {
+        try {
+          const p = currentFile + suffix;
+          if (fs.existsSync(p)) dbBytes += fs.statSync(p).size;
+        } catch {}
+      }
+    }
+    const stored = files.listStored();
+    const filesBytes = stored.reduce((a, f) => a + (f.size || 0), 0);
+    const objectsCount = db ? (db.prepare('SELECT COUNT(*) AS c FROM objects').get()?.c ?? 0) : 0;
+    return {
+      dbPath: currentFile || '',
+      totalBytes: dbBytes + filesBytes,
+      dbBytes,
+      filesBytes,
+      filesCount: stored.length,
+      objectsCount,
+    };
   },
 
   /** The token the local HTTP API expects, minted on first use. */  /** The token the local HTTP API expects, minted on first use. */

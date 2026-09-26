@@ -8,7 +8,7 @@ import { softSpring, spring } from '../motion';
 import { useApp } from '../store';
 import type { SettingsInfo } from '../types';
 import { MEDIA_TYPE, PEOPLE_TYPE, typeColor, TYPE_PALETTE } from '../util';
-import { getAuraColor } from './Habitats';
+import { getAuraColor, applyHabitatAccent } from './Habitats';
 import { Icon, TypeIcon } from './Icons';
 import { ColorPicker, IconPicker } from './TypeEditor';
 import { VersionBadge } from './VersionBadge';
@@ -128,7 +128,19 @@ export function Sidebar({
   const visibleTypes = types.filter((t) => !upstairs.has(t.id));
 
   useEffect(() => {
-    api.settings.get().then(setInfo);
+    api.settings.get().then((s) => {
+      setInfo(s);
+      const act = s?.habitats?.find((h) => h.id === s?.activeId);
+      if (act?.aura) {
+        applyHabitatAccent(act.aura);
+      }
+    });
+
+    const onHabChange = () => {
+      api.settings.get().then(setInfo);
+    };
+    window.addEventListener('habitat:change', onHabChange);
+    return () => window.removeEventListener('habitat:change', onHabChange);
   }, []);
 
   const active = info?.habitats.find((h) => h.id === info.activeId);
@@ -136,6 +148,13 @@ export function Sidebar({
   const switchHabitat = async (id: string) => {
     setHabMenu(false);
     if (id === info?.activeId) return;
+    const target = info?.habitats.find((h) => h.id === id);
+    if (target?.aura) {
+      applyHabitatAccent(target.aura);
+      try {
+        localStorage.setItem('habitat:aura', target.aura);
+      } catch {}
+    }
     const res = await api.habitats.switchTo(id);
     if (res) window.location.reload();
   };
