@@ -1,5 +1,4 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, net, Notification, protocol, shell } = require('electron');
-const telegram = require('./telegram');
 const updater = require('./updater');
 const server = require('./server');
 const devBridge = require('./devbridge');
@@ -11,9 +10,8 @@ const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
 const syncEngine = require('./sync');
-const supabase = require('./supabase');
 const {
-  initDb, api, sync: vaultSync, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePeopleType, ensureTagType,
+  initDb, api, sync: vaultSync, setNotifier, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePeopleType, ensureTagType,
 } = require('./db');
 
 // Set before anything reads it: the menu bar, the About panel and ~/Library all
@@ -429,58 +427,6 @@ function boot() {
     }
   });
 
-  // …and message the user on Telegram, which also works when the Mac is asleep-adjacent
-  // or the app is in the background.
-  setTelegramSender((text) => {
-    const cfg = api['telegram:get']();
-    if (!cfg?.enabled || !cfg.token || !cfg.chatId) return;
-    telegram.sendMessage(cfg, text).catch((err) => console.error('telegram send failed', err.message));
-  });
-
-  /** Pulls anything sent to the bot into the vault, and answers with a receipt. */
-  async function pollTelegram() {
-    const cfg = api['telegram:get']();
-    if (!cfg?.enabled || !cfg.token) return;
-    let updates = [];
-    try {
-      updates = await telegram.fetchUpdates(cfg, cfg.offset);
-    } catch (err) {
-      console.error('telegram poll failed', err.message);
-      return;
-    }
-    if (!updates.length) return;
-    let offset = cfg.offset || 0;
-    let link = { chatId: cfg.chatId, userId: cfg.userId, userName: cfg.userName, pairCode: cfg.pairCode, pairExpires: cfg.pairExpires };
-    const reply = (id, text) =>
-      telegram.sendMessage({ ...cfg, chatId: id }, text).catch((err) => console.error('telegram reply failed', err.message));
-
-    for (const u of updates) {
-      // Offset always advances, so ignored messages aren't re-examined next tick.
-      offset = Math.max(offset, u.update_id);
-      if (!u.message) continue;
-
-      const verdict = telegram.gate({ ...cfg, ...link }, u.message);
-      if (verdict.action === 'ignore') continue;
-
-      if (verdict.action === 'pair') {
-        link = { chatId: verdict.chatId, userId: verdict.userId, userName: verdict.userName, pairCode: '', pairExpires: 0 };
-        reply(verdict.chatId, 'Paired with Habitat ✓ — anything you send me now lands in your vault.');
-        continue;
-      }
-
-      link.userId = verdict.userId;
-      const made = api['telegram:ingest']({ text: verdict.text, typeId: cfg.typeId });
-      if (made) {
-        const receipt =
-          made.kind === 'daily'
-            ? `Added to today’s note: “${made.title}”`
-            : `Saved “${made.title}” as ${made.typeName}`;
-        reply(link.chatId, receipt);
-      }
-    }
-    api['telegram:save']({ offset, ...link });
-  }
-
   /** The local HTTP API follows the vault: restarted whenever its settings change. */
   async function applyServer() {
     const cfg = api['api:config']();
@@ -583,63 +529,22 @@ function boot() {
   // so the app is exactly as fast offline as on, and losing the network is not
   // an error state, just a sync that will happen later.
 
-  const DEFAULT_SYNC = {
-    url: 'https://qfqwyiwghbqtqlzqgnfq.supabase.co',
-    key: 'sb_publishable_ZhqyVkvLiHO1np8Gh13CjQ_XQPzVBOM',
-  };
-
-  const syncConfig = () => ({ ...DEFAULT_SYNC, ...(loadConfig().sync || {}) });
-
-  const hub = supabase.createHub({
-    config: syncConfig,
-    // The session belongs to this installation, not to the vault — a vault is a
-    // folder the user is invited to copy between machines, and an access token
-    // is not something to copy with it.
-    session: {
-      load: () => loadConfig().syncSession || null,
-      save: (s) => saveConfig({ syncSession: s }),
-    },
+  const syncConfig = () => ({ url: '', key: '' });
+  const syncStatus = () => ({
+    status: 'idle',
+    pending: vaultSync.pendingCount(),
+    error: null,
+    at: null,
+    account: null,
+    configured: false,
   });
-
-  const syncStatus = () => ({ ...engine.state(), account: hub.account(), configured: hub.configured() });
-
-  const engine = syncEngine.createSync({
-    store: vaultSync,
-    transport: hub,
-    onState: () => win?.webContents.send('sync:state', syncStatus()),
-  });
-
-  /** Only worth attempting when there is an account to sync with. */
-  const autoSync = () => {
-    if (hub.account() && hub.configured()) engine.run();
-  };
 
   handle('sync:status', () => syncStatus());
-  ipcMain.handle('sync:now', async () => {
-    await engine.run();
-    return syncStatus();
-  });
-  ipcMain.handle('sync:signIn', async (_e, { email, password } = {}) => {
-    try {
-      await hub.signIn(email, password);
-      await engine.run();
-      return syncStatus();
-    } catch (err) {
-      return { ...syncStatus(), error: String(err?.message || err) };
-    }
-  });
-  ipcMain.handle('sync:signOut', () => {
-    hub.signOut();
-    return syncStatus();
-  });
+  ipcMain.handle('sync:now', async () => syncStatus());
+  ipcMain.handle('sync:signIn', async () => syncStatus());
+  ipcMain.handle('sync:signOut', () => syncStatus());
   handle('sync:config', () => syncConfig());
-  ipcMain.handle('sync:saveConfig', (_e, patch) => {
-    saveConfig({ sync: { ...syncConfig(), ...patch } });
-    return syncConfig();
-  });
-
-  setTimeout(autoSync, 4000);
-  setInterval(autoSync, 2 * 60 * 1000);
+  ipcMain.handle('sync:saveConfig', () => syncConfig());
 
   handle('app:info', () => ({ appDir: path.resolve(__dirname, '..'), version: app.getVersion() }));
   ipcMain.handle('api:apply', () => applyServer());
@@ -749,22 +654,6 @@ function boot() {
 
 
 
-  ipcMain.handle('telegram:test', async () => {
-    const cfg = api['telegram:get']();
-    if (!cfg?.token) return { ok: false, error: 'Add your bot token first.' };
-    try {
-      const me = await telegram.whoAmI(cfg.token);
-      api['telegram:save']({ botName: me.username });
-      if (!cfg.chatId) return { ok: false, error: `Connected to @${me.username}. Now send it a message so it learns your chat.` };
-      await telegram.sendMessage(cfg, 'Habitat is connected ✅');
-      return { ok: true, bot: me.username };
-    } catch (err) {
-      return { ok: false, error: err.message };
-    }
-  });
-
-  ipcMain.handle('telegram:poll', () => pollTelegram());
-
   ipcMain.handle('automations:startup', () => {
     try {
       return api['automations:appStart']();
@@ -774,18 +663,14 @@ function boot() {
     }
   });
 
-  // Timed automations only need minute resolution; the same tick collects
-  // anything captured on the phone.
+  // Timed automations only need minute resolution.
   setInterval(() => {
     try {
       api['automations:tick']();
     } catch (err) {
       console.error('automation tick failed', err);
     }
-    pollTelegram();
   }, 60_000);
-
-  pollTelegram();
 
   handle('window:trafficLights', (visible) => {
     if (win && process.platform === 'darwin') win.setWindowButtonVisibility(!!visible);

@@ -4084,9 +4084,12 @@ textarea.field {
 }
 
 .habitat-launch-btn:disabled {
-  opacity: 0.5;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.35);
+  box-shadow: none;
   cursor: not-allowed;
-  filter: grayscale(0.4);
+  filter: none;
+  opacity: 1;
 }
 
 .habitat-launch-btn.launching {
@@ -4146,6 +4149,127 @@ textarea.field {
 .habitat-open-error {
   margin-top: 6px;
   text-align: center;
+}
+
+/* Onboarding Sync vs Create Segmented Switcher */
+.habitat-onboard-tabs {
+  display: flex;
+  background: rgba(255, 255, 255, 0.08);
+  padding: 4px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  margin: 0 auto 20px;
+  max-width: 320px;
+  width: 100%;
+  box-sizing: border-box;
+  gap: 4px;
+}
+
+.habitat-onboard-tab {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  height: 38px;
+  border-radius: 9px;
+  border: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.65);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.habitat-onboard-tab.active {
+  background: var(--hab-aura, #f59e0b);
+  color: #121008;
+  font-weight: 700;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.habitat-onboard-tab.active svg {
+  color: #121008;
+}
+
+/* Sync Form on Mobile */
+.habitat-sync-form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  margin-bottom: 20px;
+  text-align: left;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.habitat-sync-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.habitat-sync-label {
+  display: block;
+  font-size: 11.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.6);
+  padding-left: 2px;
+}
+
+.habitat-sync-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  height: 48px;
+  padding: 0 16px;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1.5px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  font-size: 16px; /* Prevents iOS auto-zoom */
+  color: #ffffff;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.habitat-sync-input:focus {
+  border-color: var(--hab-aura, #f59e0b);
+  box-shadow: 0 0 0 3px var(--hab-aura-bg, rgba(245, 158, 11, 0.25));
+}
+
+.habitat-sync-input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.habitat-sync-hint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.45);
+  padding: 2px 2px 0;
+}
+
+.habitat-sync-hint strong {
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.habitat-mobile-storage-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 12.5px;
+  margin: 0 auto 18px;
 }
 
 /* Responsive adaptations for narrow screens and mobile */
@@ -4610,6 +4734,8 @@ textarea.field {
   .set-guide:hover {
     color: var(--accent);
   }
+}
+
 /* Preferences / Settings Modal - Responsive adaptations */
 .prefs-mobile-bar {
   display: none;

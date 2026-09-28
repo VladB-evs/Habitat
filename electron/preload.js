@@ -24,7 +24,6 @@ const CHANNELS = new Set([
   'habitats:create', 'habitats:open', 'habitats:switch', 'habitats:onboard', 'habitats:delete', 'habitats:pickFolder', 'habitats:update',
   'vars:list', 'vars:save',
   'automations:list', 'automations:save', 'automations:tick', 'automations:run', 'automations:appStart', 'automations:preview',
-  'telegram:get', 'telegram:save', 'telegram:test', 'telegram:poll', 'telegram:pair', 'telegram:unpair',
   'api:config', 'api:save', 'api:apply', 'api:status',
   'app:info',
   'ai:availability', 'ai:actions', 'ai:prewarm', 'ai:run', 'ai:cancel', 'ai:search', 'ai:ask',

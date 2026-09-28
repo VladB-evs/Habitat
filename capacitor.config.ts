@@ -9,7 +9,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
  * bridge in electron/devbridge.js. See docs/mobile-plan.md.
  */
 const config: CapacitorConfig = {
-  appId: 'com.habitat.app',
+  appId: 'com.vladb.habitat',
   appName: 'Habitat',
   webDir: 'dist',
 

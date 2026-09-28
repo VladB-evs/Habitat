@@ -35,3 +35,14 @@ export function onObjectChanged(l: Listener): () => void {
     listeners.delete(l);
   };
 }
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('habitat:sync-pulled', () => {
+    cache.clear();
+    for (const l of listeners) {
+      try {
+        l('*');
+      } catch {}
+    }
+  });
+}

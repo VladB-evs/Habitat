@@ -38,7 +38,6 @@ const ACTIONS: { kind: AutoActionKind; label: string }[] = [
   { kind: 'link', label: 'Link to an object' },
   { kind: 'pin', label: 'Pin / unpin' },
   { kind: 'notify', label: 'Send a notification' },
-  { kind: 'telegram', label: 'Message me on Telegram' },
 ];
 
 const OP_LABELS: Record<AutoOp, string> = {
@@ -157,8 +156,8 @@ const RECIPES: Recipe[] = [
   },
   {
     id: 'overdue',
-    name: 'Message me what’s overdue',
-    blurb: 'An evening Telegram with anything past its date and still open.',
+    name: 'Notify me what’s overdue',
+    blurb: 'An evening notification with anything past its date and still open.',
     build: (types) => {
       const t = taskish(types);
       const done = taskProp(t);
@@ -172,7 +171,7 @@ const RECIPES: Recipe[] = [
           { propId: due.id, op: 'before', value: '{{today}}' },
           { propId: done.id, op: 'ne', value: 'Done' },
         ],
-        actions: [act({ kind: 'telegram', text: '{{count}} overdue', value: '{{list}}' })],
+        actions: [act({ kind: 'notify', text: '{{count}} overdue', value: '{{list}}' })],
       };
     },
   },
@@ -901,17 +900,17 @@ function ActionFields({
       </select>
     );
 
-  if (action.kind === 'notify' || action.kind === 'telegram')
+  if (action.kind === 'notify')
     return (
       <>
         <TokenField
-          placeholder={action.kind === 'telegram' ? 'Message — e.g. {{title}} is due' : 'Title'}
+          placeholder="Title"
           value={action.text ?? ''}
           tokens={tokens}
           onChange={(v) => set({ text: v })}
         />
         <TokenField
-          placeholder={action.kind === 'telegram' ? 'Second line (optional)' : 'Body (optional)'}
+          placeholder="Body (optional)"
           value={action.value ?? ''}
           tokens={tokens}
           onChange={(v) => set({ value: v })}

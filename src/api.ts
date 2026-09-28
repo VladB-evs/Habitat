@@ -37,7 +37,7 @@ import type {
   Template,
   UserVar,
 } from './types';
-import type { Automation, HttpApiConfig, SyncConfig, SyncStatus, TelegramConfig, UpdateState } from './types';
+import type { Automation, HttpApiConfig, SyncConfig, SyncStatus, UpdateState } from './types';
 import type { AiAction, AiAnswer, AiAvailability, AiDelta, AiResult } from './types';
 import { formatRule, occurrences, parseRule } from './repeat';
 import { addDays, todayKey } from './util';
@@ -80,6 +80,8 @@ const env = (import.meta as any).env ?? {};
  *
  * Both are printed by `npm run bridge`.
  */
+import { isStandalone, invokeWorker, onWorkerSyncState } from './vault/client';
+
 const DEV_BRIDGE: string = env.VITE_HABITAT_BRIDGE || 'http://127.0.0.1:37380';
 const BRIDGE_TOKEN: string = env.VITE_HABITAT_TOKEN || '';
 
@@ -97,8 +99,11 @@ const viaBridge = async (channel: string, payload?: any) => {
   return body?.value ?? null;
 };
 
-const inv = (channel: string, payload?: any) =>
-  window.habitat ? window.habitat.invoke(channel, payload) : viaBridge(channel, payload);
+const inv = (channel: string, payload?: any) => {
+  if (window.habitat) return window.habitat.invoke(channel, payload);
+  if (isStandalone()) return invokeWorker(channel, payload);
+  return viaBridge(channel, payload);
+};
 
 export const api = {
   types: {
@@ -336,6 +341,7 @@ export const api = {
   daily: {
     get: (dateKey: string): Promise<Obj | null> => inv('daily:get', { dateKey }),
     create: (dateKey: string, content: any): Promise<Obj> => inv('daily:create', { dateKey, content }),
+    append: (text: string, dateKey?: string): Promise<Obj | null> => inv('daily:append', { text, dateKey }),
     list: (): Promise<DailyMeta[]> => inv('daily:list'),
   },
   events: {
@@ -532,17 +538,16 @@ export const api = {
     signOut: (): Promise<SyncStatus> => inv('sync:signOut'),
     config: (): Promise<SyncConfig> => inv('sync:config'),
     saveConfig: (patch: Partial<SyncConfig>): Promise<SyncConfig> => inv('sync:saveConfig', patch),
-    onState: (fn: (s: SyncStatus) => void): (() => void) => window.habitat?.onSyncState?.(fn) ?? (() => {}),
-  },
-  telegram: {
-    get: (): Promise<TelegramConfig> => inv('telegram:get'),
-    save: (cfg: Partial<TelegramConfig>): Promise<TelegramConfig> => inv('telegram:save', cfg),
-    /** Verifies the token and sends a hello; also learns the bot's username. */
-    test: (): Promise<{ ok: boolean; bot?: string; error?: string }> => inv('telegram:test'),
-    poll: (): Promise<void> => inv('telegram:poll'),
-    /** Mints a pairing code and clears the current link until that code is sent to the bot. */
-    pair: (): Promise<TelegramConfig> => inv('telegram:pair'),
-    unpair: (): Promise<TelegramConfig> => inv('telegram:unpair'),
+    cloneFromMac: (p: { baseUrl: string; token?: string }): Promise<{ cloned: boolean; snapshotSeq: number }> =>
+      inv('sync:cloneFromMac', p),
+    getLanConfig: (): Promise<{ baseUrl: string; token: string }> => inv('sync:getLanConfig'),
+    saveLanConfig: (p: { baseUrl: string; token?: string; autoSync?: boolean }): Promise<{ configured: boolean }> =>
+      inv('sync:lanConfig', p),
+    onState: (fn: (s: SyncStatus) => void): (() => void) => {
+      if (window.habitat?.onSyncState) return window.habitat.onSyncState(fn);
+      if (isStandalone()) return onWorkerSyncState(fn);
+      return () => {};
+    },
   },
   vars: {
     list: (): Promise<UserVar[]> => inv('vars:list'),
@@ -591,7 +596,7 @@ export const api = {
   } | null> => inv('import:obsidianVault', { mode }),
   /**
    * Writes the vault out. `markdown` is a readable folder that imports back;
-   * `json` is one exact file. Neither includes the API or Telegram tokens.
+   * `json` is one exact file. Neither includes the API tokens.
    */
   exportVault: (
     format: 'markdown' | 'json'

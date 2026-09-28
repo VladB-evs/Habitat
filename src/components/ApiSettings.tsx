@@ -28,7 +28,7 @@ const ROUTES: [string, string][] = [
   ['GET /tags · /stats', 'tags with counts · vault stats'],
   ['GET /automations', 'your rules'],
   ['POST /automations/:id/run', 'run one now'],
-  ['POST /capture', '{ text } — same routing as Telegram'],
+  ['POST /capture', '{ text } — quick capture into today or a type'],
 ];
 
 /** The JSON an MCP client needs to reach this vault. */

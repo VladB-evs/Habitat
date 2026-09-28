@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../api';
 import { Icon, ICON_CHOICES, TypeIcon } from './Icons';
+import { isStandalone } from '../vault/client';
 
 /** Legacy preset metadata kept for backwards compatibility. */
 export const FLAVORS = [
@@ -486,6 +487,16 @@ export function HabitatAuraPicker({
 }
 
 export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabitatScreenProps) {
+  const standalone = isStandalone();
+  const [flowMode, setFlowMode] = useState<'sync' | 'create'>(standalone && isFirstRun ? 'sync' : 'create');
+
+  // Mobile LAN Sync State
+  const [macUrl, setMacUrl] = useState('');
+  const [macToken, setMacToken] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState('');
+
+  // Habitat Creation State
   const [name, setName] = useState('');
   const [touched, setTouched] = useState(false);
   const [dir, setDir] = useState<string | null>(null);
@@ -509,22 +520,28 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
 
   useEffect(() => {
     inputRef.current?.focus();
-  }, []);
+    if (standalone) {
+      api.sync.getLanConfig().then((cfg) => {
+        if (cfg?.baseUrl) setMacUrl(cfg.baseUrl);
+        if (cfg?.token) setMacToken(cfg.token);
+      }).catch(() => {});
+    }
+  }, [standalone]);
 
   // Keyboard navigation: Escape key closes modal
   useEffect(() => {
     if (!onClose) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy && !isWarping) {
+      if (e.key === 'Escape' && !busy && !syncing && !isWarping) {
         onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, busy, isWarping]);
+  }, [onClose, busy, syncing, isWarping]);
 
   const handleCardMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!cardRef.current || busy || isWarping) return;
+    if (!cardRef.current || busy || syncing || isWarping) return;
     if (typeof window !== 'undefined' && (window.innerWidth <= 640 || window.matchMedia('(pointer: coarse)').matches)) return;
     const rect = cardRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left - rect.width / 2;
@@ -550,6 +567,56 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
     }
   };
 
+  const handleSyncClone = async () => {
+    if (syncing || busy || isWarping) return;
+    const rawUrl = macUrl.trim();
+    if (!rawUrl) {
+      setSyncError('Please enter your Mac LAN address (e.g. http://192.168.1.50:37373)');
+      return;
+    }
+
+    let url = rawUrl;
+    if (!/^https?:\/\//i.test(url)) {
+      url = 'http://' + url;
+    }
+    url = url.replace(/\/+$/, '');
+
+    setSyncing(true);
+    setSyncError('');
+
+    try {
+      const res = await api.sync.cloneFromMac({ baseUrl: url, token: macToken.trim() });
+      if (res?.cloned) {
+        setIsWarping(true);
+        setSuccess(true);
+        try {
+          localStorage.setItem('habitat:onboarded', 'true');
+        } catch {}
+        setTimeout(() => {
+          if (standalone) {
+            if (isFirstRun) {
+              window.dispatchEvent(new CustomEvent('habitat:onboarded'));
+            } else {
+              onClose?.();
+            }
+          } else {
+            window.location.reload();
+          }
+        }, 750);
+      } else {
+        setSyncError('Failed to clone vault. Check address and token.');
+        setSyncing(false);
+      }
+    } catch (err: any) {
+      console.error('[sync clone error]', err);
+      setSyncError(
+        err?.message ||
+          'Could not connect to Mac. Make sure Habitat is running on your Mac, Local API / Sync is enabled in Settings, and both devices are on the same Wi-Fi.'
+      );
+      setSyncing(false);
+    }
+  };
+
   const handleCreate = async () => {
     if (busy || isWarping) return;
     if (!trimmed) {
@@ -559,7 +626,7 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
     }
 
     let targetDir = dir;
-    if (!targetDir) {
+    if (!standalone && !targetDir) {
       targetDir = await api.habitats.pickFolder();
       if (!targetDir) return;
       setDir(targetDir);
@@ -574,7 +641,7 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
           name: trimmed,
           flavor: 'personal',
           userName: userName.trim(),
-          dir: targetDir,
+          ...(targetDir ? { dir: targetDir } : {}),
           icon: selectedIcon,
           aura: auraValue,
         });
@@ -582,7 +649,7 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
         const res = await api.habitats.create({
           name: trimmed,
           flavor: 'personal',
-          dir: targetDir,
+          ...(targetDir ? { dir: targetDir } : {}),
           icon: selectedIcon,
           aura: auraValue,
         });
@@ -596,13 +663,22 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
       applyHabitatAccent(auraValue);
       try {
         localStorage.setItem('habitat:aura', auraValue);
+        localStorage.setItem('habitat:onboarded', 'true');
       } catch {}
 
       // Trigger exhilarating launch sequence!
       setIsWarping(true);
       setSuccess(true);
       setTimeout(() => {
-        window.location.reload();
+        if (standalone) {
+          if (isFirstRun) {
+            window.dispatchEvent(new CustomEvent('habitat:onboarded'));
+          } else {
+            onClose?.();
+          }
+        } else {
+          window.location.reload();
+        }
       }, 750);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Something went wrong creating the habitat.');
@@ -627,8 +703,19 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
       }
       setIsWarping(true);
       setSuccess(true);
+      try {
+        localStorage.setItem('habitat:onboarded', 'true');
+      } catch {}
       setTimeout(() => {
-        window.location.reload();
+        if (standalone) {
+          if (isFirstRun) {
+            window.dispatchEvent(new CustomEvent('habitat:onboarded'));
+          } else {
+            onClose?.();
+          }
+        } else {
+          window.location.reload();
+        }
       }, 450);
     } catch (err: any) {
       setOpenError(err?.message || 'Could not open habitat.');
@@ -725,13 +812,24 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
           >
             <AnimatePresence mode="wait">
               <motion.div
-                key={selectedIcon}
+                key={flowMode === 'sync' ? 'sync-icon' : selectedIcon}
                 initial={{ scale: 0.4, opacity: 0, rotate: -20 }}
                 animate={{ scale: 1, opacity: 1, rotate: 0 }}
                 exit={{ scale: 0.4, opacity: 0, rotate: 20 }}
                 transition={{ type: 'spring', stiffness: 450, damping: 26 }}
               >
-                <Icon name={success ? 'check' : selectedIcon} size={36} />
+                <Icon
+                  name={
+                    success
+                      ? 'check'
+                      : flowMode === 'sync'
+                        ? syncing
+                          ? 'refresh-cw'
+                          : 'laptop'
+                        : selectedIcon
+                  }
+                  size={36}
+                />
               </motion.div>
             </AnimatePresence>
           </motion.div>
@@ -739,192 +837,335 @@ export function CreateHabitatScreen({ onClose, isFirstRun = false }: CreateHabit
 
         {/* Dynamic Title / Live Preview */}
         <h1 className="habitat-stage-title">
-          {trimmed ? trimmed : isFirstRun ? 'Welcome to Habitat' : 'A New Space for Your Mind'}
+          {flowMode === 'sync'
+            ? 'Sync with Your Mac'
+            : trimmed
+              ? trimmed
+              : isFirstRun
+                ? 'Welcome to Habitat'
+                : 'A New Space for Your Mind'}
         </h1>
         <p className="habitat-stage-sub">
-          {isFirstRun
-            ? 'Your private, interconnected sanctuary for thoughts, notes, and projects.'
-            : 'An independent universe of objects, ideas, and knowledge.'}
+          {flowMode === 'sync'
+            ? 'Connect over your local Wi-Fi to copy your vault and stay in sync. 100% offline & local.'
+            : isFirstRun
+              ? 'Your private, interconnected sanctuary for thoughts, notes, and projects.'
+              : 'An independent universe of objects, ideas, and knowledge.'}
         </p>
 
-        {/* Centerpiece Name Input */}
-        <div className="habitat-stage-input-wrap">
-          <div className={'habitat-stage-input-box' + (touched && !trimmed ? ' invalid' : '')}>
-            <span className="habitat-stage-input-glow" />
-            <input
-              ref={inputRef}
-              className="habitat-stage-name-input"
-              placeholder="Name your habitat…"
-              value={name}
-              autoFocus
-              disabled={busy || isWarping}
-              onChange={(e) => {
-                setName(e.target.value);
-                if (touched) setTouched(false);
-              }}
-              onBlur={() => {
-                if (!trimmed) setTouched(true);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') handleCreate();
-              }}
-            />
-            {name && !busy && !isWarping && (
-              <button
-                type="button"
-                className="habitat-stage-clear-btn"
-                onClick={() => {
-                  setName('');
-                  inputRef.current?.focus();
-                }}
-                aria-label="Clear name"
-              >
-                <Icon name="x" size={13} />
-              </button>
-            )}
-          </div>
-
-          {touched && !trimmed && (
-            <motion.div
-              className="field-error habitat-stage-error-text"
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-            >
-              Please enter a name for your habitat
-            </motion.div>
-          )}
-
-          {/* Inspiring Name Suggestions */}
-          <div className="habitat-suggestions">
-            <span className="habitat-suggestions-label">Try:</span>
-            {SUGGESTIONS.map((s) => (
-              <button
-                key={s}
-                type="button"
-                className={'habitat-suggestion-chip' + (name === s ? ' active' : '')}
-                onClick={() => {
-                  setName(s);
-                  setTouched(false);
-                }}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Customization Deck: Suggested Totems & Auras with "More" buttons */}
-        <div className="habitat-customization-deck">
-          <HabitatIconPicker value={selectedIcon} onPick={setSelectedIcon} align="left" />
-          <HabitatAuraPicker value={auraValue} onPick={setAuraValue} align="right" />
-        </div>
-
-        {/* Location / Storage Destination Ribbon */}
-        <div className="habitat-storage-ribbon" onClick={handlePickFolder}>
-          <div className="habitat-storage-icon">
-            <Icon name="folder" size={17} />
-          </div>
-          <div className="habitat-storage-text">
-            <div className="habitat-storage-title">
-              {dir ? (
-                <span className="habitat-storage-path">{dir}</span>
-              ) : (
-                <span>Save to custom folder (Optional)</span>
-              )}
-            </div>
-            <div className="habitat-storage-caption">
-              {dir ? 'Habitat database will be placed here' : '100% private, local on disk & fully offline'}
-            </div>
-          </div>
-          <button
-            type="button"
-            className="habitat-storage-browse-btn"
-            disabled={busy || isWarping}
-            onClick={(e) => {
-              e.stopPropagation();
-              handlePickFolder();
-            }}
-          >
-            {dir ? 'Change' : 'Browse'}
-          </button>
-        </div>
-
-        {/* First-Run Personalization Option */}
-        {isFirstRun && (
-          <div className="habitat-personalize-section">
+        {/* Segmented Mode Switcher (on mobile/standalone first run) */}
+        {standalone && isFirstRun && (
+          <div className="habitat-onboard-tabs">
             <button
               type="button"
-              className="habitat-personalize-toggle"
-              onClick={() => setShowPersonalize((v) => !v)}
+              className={`habitat-onboard-tab ${flowMode === 'sync' ? 'active' : ''}`}
+              onClick={() => setFlowMode('sync')}
             >
-              <Icon name={showPersonalize ? 'chevron-down' : 'chevron-right'} size={14} />
-              <span>Personalize profile (optional)</span>
+              <Icon name="refresh-cw" size={14} />
+              <span>Sync with Mac</span>
             </button>
-            <AnimatePresence>
-              {showPersonalize && (
-                <motion.div
-                  className="habitat-personalize-content"
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <div className="habitat-input-container">
-                    <span className="habitat-input-icon">
-                      <Icon name="user" size={15} />
-                    </span>
-                    <input
-                      className="habitat-create-input"
-                      placeholder="Your name (creates your personal @mention card)"
-                      value={userName}
-                      onChange={(e) => setUserName(e.target.value)}
-                      disabled={busy || isWarping}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleCreate();
-                      }}
-                    />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+            <button
+              type="button"
+              className={`habitat-onboard-tab ${flowMode === 'create' ? 'active' : ''}`}
+              onClick={() => setFlowMode('create')}
+            >
+              <Icon name="sparkles" size={14} />
+              <span>Start Fresh</span>
+            </button>
           </div>
         )}
 
-        {errorMsg && <div className="field-error habitat-create-error">{errorMsg}</div>}
+        {flowMode === 'sync' ? (
+          /* SYNC FROM MAC FLOW */
+          <>
+            <div className="habitat-sync-form">
+              <div className="habitat-sync-input-group">
+                <label className="habitat-sync-label">Mac Network Address</label>
+                <input
+                  type="text"
+                  className="habitat-sync-input"
+                  placeholder="http://192.168.1.X:37373"
+                  value={macUrl}
+                  disabled={syncing || isWarping}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck="false"
+                  onChange={(e) => {
+                    setMacUrl(e.target.value);
+                    if (syncError) setSyncError('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSyncClone();
+                  }}
+                />
+                <div className="habitat-sync-hint">
+                  In Habitat on your Mac, go to <strong>Settings → Sync</strong> to find your Mac's address.
+                </div>
+              </div>
 
-        {/* Primary Action Button */}
-        <motion.button
-          type="button"
-          className={'habitat-launch-btn' + (isWarping ? ' launching' : '')}
-          disabled={!trimmed || busy || isWarping}
-          whileHover={!busy && !isWarping && trimmed ? { scale: 1.02 } : undefined}
-          whileTap={!busy && !isWarping && trimmed ? { scale: 0.98 } : undefined}
-          onClick={handleCreate}
-        >
-          {isWarping ? (
-            <>
-              <span className="habitat-spinner" />
-              <span>Initializing Habitat…</span>
-            </>
-          ) : (
-            <span>Bring Habitat to Life</span>
-          )}
-        </motion.button>
+              <div className="habitat-sync-input-group" style={{ marginTop: 8 }}>
+                <label className="habitat-sync-label">Sync Token (optional)</label>
+                <input
+                  type="password"
+                  className="habitat-sync-input"
+                  placeholder="Token from Mac settings (if set)"
+                  value={macToken}
+                  disabled={syncing || isWarping}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck="false"
+                  onChange={(e) => {
+                    setMacToken(e.target.value);
+                    if (syncError) setSyncError('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSyncClone();
+                  }}
+                />
+              </div>
+            </div>
 
-        {/* First run: Open existing habitat button */}
-        {isFirstRun && (
-          <div className="habitat-open-existing-wrap">
-            <button
+            {syncError && <div className="field-error habitat-create-error" style={{ marginBottom: 14 }}>{syncError}</div>}
+
+            <motion.button
               type="button"
-              className="habitat-open-existing-link"
-              disabled={busy || isWarping}
-              onClick={handleOpenExisting}
+              className={'habitat-launch-btn' + (syncing || isWarping ? ' launching' : '')}
+              disabled={!macUrl.trim() || syncing || isWarping}
+              whileHover={!syncing && !isWarping && macUrl.trim() ? { scale: 1.02 } : undefined}
+              whileTap={!syncing && !isWarping && macUrl.trim() ? { scale: 0.98 } : undefined}
+              onClick={handleSyncClone}
             >
-              <Icon name="folder" size={13} />
-              <span>I already have a habitat — open its folder</span>
-            </button>
-            {openError && <div className="field-error habitat-open-error">{openError}</div>}
-          </div>
+              {isWarping || success ? (
+                <>
+                  <span className="habitat-spinner" />
+                  <span>Opening Cloned Vault…</span>
+                </>
+              ) : syncing ? (
+                <>
+                  <span className="habitat-spinner" />
+                  <span>Connecting & Cloning Vault…</span>
+                </>
+              ) : (
+                <span>Connect & Clone Vault</span>
+              )}
+            </motion.button>
+
+            <div className="habitat-open-existing-wrap">
+              <button
+                type="button"
+                className="habitat-open-existing-link"
+                disabled={syncing || isWarping}
+                onClick={() => setFlowMode('create')}
+              >
+                <Icon name="sparkles" size={13} />
+                <span>Don't have a Mac vault? Create new habitat</span>
+              </button>
+            </div>
+          </>
+        ) : (
+          /* CREATE NEW HABITAT FLOW */
+          <>
+            {/* Centerpiece Name Input */}
+            <div className="habitat-stage-input-wrap">
+              <div className={'habitat-stage-input-box' + (touched && !trimmed ? ' invalid' : '')}>
+                <span className="habitat-stage-input-glow" />
+                <input
+                  ref={inputRef}
+                  className="habitat-stage-name-input"
+                  placeholder="Name your habitat…"
+                  value={name}
+                  autoFocus
+                  disabled={busy || isWarping}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    if (touched) setTouched(false);
+                  }}
+                  onBlur={() => {
+                    if (!trimmed) setTouched(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleCreate();
+                  }}
+                />
+                {name && !busy && !isWarping && (
+                  <button
+                    type="button"
+                    className="habitat-stage-clear-btn"
+                    onClick={() => {
+                      setName('');
+                      inputRef.current?.focus();
+                    }}
+                    aria-label="Clear name"
+                  >
+                    <Icon name="x" size={13} />
+                  </button>
+                )}
+              </div>
+
+              {touched && !trimmed && (
+                <motion.div
+                  className="field-error habitat-stage-error-text"
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                >
+                  Please enter a name for your habitat
+                </motion.div>
+              )}
+
+              {/* Inspiring Name Suggestions */}
+              <div className="habitat-suggestions">
+                <span className="habitat-suggestions-label">Try:</span>
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    className={'habitat-suggestion-chip' + (name === s ? ' active' : '')}
+                    onClick={() => {
+                      setName(s);
+                      setTouched(false);
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Customization Deck: Suggested Totems & Auras with "More" buttons */}
+            <div className="habitat-customization-deck">
+              <HabitatIconPicker value={selectedIcon} onPick={setSelectedIcon} align="left" />
+              <HabitatAuraPicker value={auraValue} onPick={setAuraValue} align="right" />
+            </div>
+
+            {/* Location / Storage Destination: On desktop show folder picker; on standalone mobile show device storage badge */}
+            {!standalone ? (
+              <div className="habitat-storage-ribbon" onClick={handlePickFolder}>
+                <div className="habitat-storage-icon">
+                  <Icon name="folder" size={17} />
+                </div>
+                <div className="habitat-storage-text">
+                  <div className="habitat-storage-title">
+                    {dir ? (
+                      <span className="habitat-storage-path">{dir}</span>
+                    ) : (
+                      <span>Save to custom folder (Optional)</span>
+                    )}
+                  </div>
+                  <div className="habitat-storage-caption">
+                    {dir ? 'Habitat database will be placed here' : '100% private, local on disk & fully offline'}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="habitat-storage-browse-btn"
+                  disabled={busy || isWarping}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePickFolder();
+                  }}
+                >
+                  {dir ? 'Change' : 'Browse'}
+                </button>
+              </div>
+            ) : (
+              <div className="habitat-mobile-storage-badge">
+                <Icon name="shield" size={13} />
+                <span>Stored securely on device (offline SQLite)</span>
+              </div>
+            )}
+
+            {/* First-Run Personalization Option */}
+            {isFirstRun && (
+              <div className="habitat-personalize-section">
+                <button
+                  type="button"
+                  className="habitat-personalize-toggle"
+                  onClick={() => setShowPersonalize((v) => !v)}
+                >
+                  <Icon name={showPersonalize ? 'chevron-down' : 'chevron-right'} size={14} />
+                  <span>Personalize profile (optional)</span>
+                </button>
+                <AnimatePresence>
+                  {showPersonalize && (
+                    <motion.div
+                      className="habitat-personalize-content"
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <div className="habitat-input-container">
+                        <span className="habitat-input-icon">
+                          <Icon name="user" size={15} />
+                        </span>
+                        <input
+                          className="habitat-create-input"
+                          placeholder="Your name (creates your personal @mention card)"
+                          value={userName}
+                          onChange={(e) => setUserName(e.target.value)}
+                          disabled={busy || isWarping}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleCreate();
+                          }}
+                        />
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            )}
+
+            {errorMsg && <div className="field-error habitat-create-error">{errorMsg}</div>}
+
+            {/* Primary Action Button */}
+            <motion.button
+              type="button"
+              className={'habitat-launch-btn' + (isWarping ? ' launching' : '')}
+              disabled={!trimmed || busy || isWarping}
+              whileHover={!busy && !isWarping && trimmed ? { scale: 1.02 } : undefined}
+              whileTap={!busy && !isWarping && trimmed ? { scale: 0.98 } : undefined}
+              onClick={handleCreate}
+            >
+              {isWarping ? (
+                <>
+                  <span className="habitat-spinner" />
+                  <span>Initializing Habitat…</span>
+                </>
+              ) : (
+                <span>Bring Habitat to Life</span>
+              )}
+            </motion.button>
+
+            {/* First run: Open existing habitat button on desktop; or switch to Sync on mobile */}
+            {isFirstRun && (
+              <div className="habitat-open-existing-wrap">
+                {standalone ? (
+                  <button
+                    type="button"
+                    className="habitat-open-existing-link"
+                    disabled={busy || isWarping}
+                    onClick={() => setFlowMode('sync')}
+                  >
+                    <Icon name="refresh-cw" size={13} />
+                    <span>Have a habitat on your Mac? Tap here to sync</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      className="habitat-open-existing-link"
+                      disabled={busy || isWarping}
+                      onClick={handleOpenExisting}
+                    >
+                      <Icon name="folder" size={13} />
+                      <span>I already have a habitat — open its folder</span>
+                    </button>
+                    {openError && <div className="field-error habitat-open-error">{openError}</div>}
+                  </>
+                )}
+              </div>
+            )}
+          </>
         )}
       </motion.div>
     </div>

@@ -52,11 +52,11 @@ const TABLES = [
 
 /**
  * Settings that are about this machine rather than about the vault, and must not
- * leave it. `httpApi` and `telegram` hold bearer tokens; `migration:*` records
+ * leave it. `httpApi` holds a bearer token; `migration:*` records
  * which one-time fixups this database file has had, which is meaningless
  * elsewhere and actively wrong to copy onto a vault that hasn't had them.
  */
-const KV_PRIVATE = ['httpApi', 'telegram'];
+const KV_PRIVATE = ['httpApi'];
 
 /** The same rule as SQL, for use inside a trigger's WHEN clause. */
 const kvAllowed = (ref) =>

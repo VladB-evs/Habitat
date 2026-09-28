@@ -91,12 +91,10 @@ test('an id that comes back stops being a tombstone', () => {
 
 test('this machine’s tokens are never queued', () => {
   clear();
-  call('telegram:save', { token: 'secret-bot-token', chatId: '123' });
   call('api:save', { token: 'secret-api-token', port: 8787 });
   call('vars:save', [{ id: 'v1', name: 'Home', value: 'Bucharest' }]);
 
   const keys = queue().filter((c) => c.tbl === 'kv').map((c) => c.row_id);
-  assert.ok(!keys.includes('telegram'), 'the bot token stays on this machine');
   assert.ok(!keys.includes('httpApi'), 'the API token stays on this machine');
   assert.ok(keys.includes('variables'), 'ordinary settings still sync');
   assert.ok(

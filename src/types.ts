@@ -509,8 +509,7 @@ export type AutoActionKind =
   | 'addTag'
   | 'link'
   | 'pin'
-  | 'notify'
-  | 'telegram';
+  | 'notify';
 
 export interface UpdateState {
   status: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'staged' | 'installing' | 'error' | 'dev';
@@ -548,22 +547,6 @@ export interface HttpApiConfig {
   mcpEdit: boolean;
 }
 
-export interface TelegramConfig {
-  enabled: boolean;
-  token: string;
-  /** The one private chat this vault talks to. Empty until a pairing code is used. */
-  chatId: string;
-  /** The one Telegram account allowed to write here — checked on every message. */
-  userId?: string;
-  userName?: string;
-  /** Type that captured messages become. */
-  typeId: string;
-  botName?: string;
-  offset?: number;
-  /** Live only while pairing: the code to send, and when it stops being accepted. */
-  pairCode?: string;
-  pairExpires?: number;
-}
 export type AutoOp =
   | 'eq'
   | 'ne'

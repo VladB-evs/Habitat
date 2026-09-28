@@ -26,8 +26,24 @@ const BLOBS_PER_CYCLE = 8;
  * @param store  the vault's sync surface — db.js's `sync` export
  * @param transport  { push(rows), pull(cursor, limit) }
  */
-function createSync({ store, transport, onState = () => {} }) {
-  let state = { status: 'idle', pending: store.pendingCount(), error: null, at: null };
+function createSync(optsOrStore, maybeTransport, maybeOnState) {
+  let store, transport, onState;
+  if (optsOrStore && optsOrStore.store) {
+    store = optsOrStore.store;
+    transport = optsOrStore.transport;
+    onState = optsOrStore.onState || (() => {});
+  } else {
+    store = optsOrStore;
+    transport = maybeTransport;
+    onState = maybeOnState || (() => {});
+  }
+
+  let state = {
+    status: 'idle',
+    pending: store?.pendingCount ? store.pendingCount() : 0,
+    error: null,
+    at: null,
+  };
   let running = null;
 
   const set = (patch) => {
@@ -155,7 +171,91 @@ function createSync({ store, transport, onState = () => {} }) {
     return running;
   }
 
-  return { run, state: () => state, pending: () => store.pendingCount() };
+  return {
+    run,
+    cycle: run,
+    state: () => state,
+    status: () => state,
+    pending: () => (store?.pendingCount ? store.pendingCount() : 0),
+  };
 }
 
-module.exports = { createSync, BATCH };
+/**
+ * A transport connecting a client (e.g. mobile app) to a Habitat instance over HTTP.
+ * Implements the transport contract required by createSync:
+ *   - push(batch)
+ *   - pull(cursor, limit)
+ *   - uploadBlob(file, bytes)
+ *   - downloadBlob(file)
+ * And provides snapshot() for initial device cloning.
+ */
+function createLanTransport({ baseUrl, token }) {
+  const base = () => String(baseUrl || '').replace(/\/+$/, '');
+  const authHeaders = () => ({
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    'content-type': 'application/json',
+  });
+
+  return {
+    configured: () => !!base(),
+
+    async info() {
+      const res = await fetch(`${base()}/sync/info`, { method: 'GET', headers: authHeaders() });
+      if (!res.ok) throw new Error(`LAN info failed (${res.status})`);
+      return res.json();
+    },
+
+    async snapshot() {
+      const res = await fetch(`${base()}/sync/snapshot`, { method: 'GET', headers: authHeaders() });
+      if (!res.ok) throw new Error(`LAN snapshot failed (${res.status})`);
+      return res.json();
+    },
+
+    async push(batch) {
+      const res = await fetch(`${base()}/sync/push`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ batch }),
+      });
+      if (!res.ok) throw new Error(`LAN push failed (${res.status})`);
+      return res.json();
+    },
+
+    async pull(cursor, limit = 500) {
+      const res = await fetch(`${base()}/sync/pull?cursor=${encodeURIComponent(cursor)}&limit=${limit}`, {
+        method: 'GET',
+        headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error(`LAN pull failed (${res.status})`);
+      const data = await res.json();
+      return data.rows || [];
+    },
+
+    async uploadBlob({ hash, ext, name, mime }, bytes) {
+      const res = await fetch(`${base()}/sync/files/${hash}${ext || ''}`, {
+        method: 'POST',
+        headers: {
+          ...(token ? { authorization: `Bearer ${token}` } : {}),
+          'content-type': mime || 'application/octet-stream',
+          'x-file-name': encodeURIComponent(name || 'file'),
+          'x-file-mime': mime || 'application/octet-stream',
+        },
+        body: bytes,
+      });
+      if (!res.ok) throw new Error(`LAN uploadBlob failed (${res.status})`);
+      return res.json();
+    },
+
+    async downloadBlob({ hash, ext }) {
+      const res = await fetch(`${base()}/sync/files/${hash}${ext || ''}`, {
+        method: 'GET',
+        headers: token ? { authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) return null;
+      const arrayBuf = await res.arrayBuffer();
+      return Buffer.from(arrayBuf);
+    },
+  };
+}
+
+module.exports = { createSync, createLanTransport, BATCH, BLOBS_PER_CYCLE };

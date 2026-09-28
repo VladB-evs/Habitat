@@ -26,7 +26,15 @@ const isBuiltinActive = (key: string, viewKind: string) =>
  * and Settings still need a home now that the drawer isn't the default way
  * there, so they ride along at the bottom of the same sheet.
  */
-export function BottomNav({ onSearch, onAsk }: { onSearch: () => void; onAsk?: () => void }) {
+export function BottomNav({
+  onSearch,
+  onAsk,
+  onCapture,
+}: {
+  onSearch: () => void;
+  onAsk?: () => void;
+  onCapture?: () => void;
+}) {
   const { types, view, navigate, theme, bottomNav, openSettings, openNewHabitat } = useApp();
   const [typesOpen, setTypesOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
@@ -44,6 +52,14 @@ export function BottomNav({ onSearch, onAsk }: { onSearch: () => void; onAsk?: (
     <>
       <nav className="bottom-nav">
         {bottomNav.map((key) => {
+          if (key === 'capture') {
+            return (
+              <button key="capture" className="bn-item bn-capture" onClick={onCapture}>
+                <Icon name="plus" size={19} />
+                <span>Capture</span>
+              </button>
+            );
+          }
           if (key === 'more') {
             return (
               <button key="more" className={'bn-item' + (moreOpen ? ' on' : '')} onClick={() => setMoreOpen(true)}>
@@ -121,6 +137,18 @@ export function BottomNav({ onSearch, onAsk }: { onSearch: () => void; onAsk?: (
           );
         })}
         {moreDestinations.length > 0 && <div className="menu-sep" />}
+        {onCapture && (
+          <button
+            className="menu-item"
+            onClick={() => {
+              setMoreOpen(false);
+              onCapture();
+            }}
+          >
+            <Icon name="plus" size={15} />
+            Quick Capture
+          </button>
+        )}
         <button
           className="menu-item"
           onClick={() => {

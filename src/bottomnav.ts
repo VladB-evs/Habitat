@@ -18,6 +18,7 @@ export type NavKey =
   | 'media'
   | 'tags'
   | 'study'
+  | 'capture'
   | 'types'
   | 'more'
   | `type:${string}`;
@@ -32,6 +33,7 @@ export const NAV_BUILTINS: NavBuiltin[] = [
   { key: 'dashboard', label: 'Dashboard', icon: 'grid' },
   { key: 'daily', label: 'Daily Notes', icon: 'calendar' },
   { key: 'tasks', label: 'Tasks', icon: 'circle-check' },
+  { key: 'capture', label: 'Capture', icon: 'plus' },
   { key: 'people', label: 'People', icon: 'people' },
   { key: 'media', label: 'Media', icon: 'film' },
   { key: 'tags', label: 'Tags', icon: 'hash' },

@@ -19,4 +19,5 @@ swift/.build/
 ios/App/build/
 ios/App/Pods/
 ios/App/output/
+ios/App/CapApp-SPM/.build/
 .env.local

@@ -38,6 +38,7 @@ import { People } from './components/People';
 import { Media } from './components/Media';
 import { SearchPalette } from './components/SearchPalette';
 import { AskPanel } from './components/AskPanel';
+import { QuickCapture } from './components/QuickCapture';
 import { Icon, TypeIcon } from './components/Icons';
 import { pageIn, snap, softSpring, spring } from './motion';
 import { MEDIA_TYPE, PEOPLE_TYPE, viewport } from './util';
@@ -201,6 +202,7 @@ function Shell() {
   const { narrow, keyboard } = useLayout();
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
+  const [captureOpen, setCaptureOpen] = useState(false);
   /** No Apple Intelligence, no Ask — the button and the shortcut both stay away. */
   const [askReady, setAskReady] = useState(false);
   /**
@@ -460,6 +462,10 @@ function Shell() {
         e.preventDefault();
         setAskOpen((o) => !o);
       }
+      if ((e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === 'n' || (e.shiftKey && e.key.toLowerCase() === 'c'))) {
+        e.preventDefault();
+        setCaptureOpen((o) => !o);
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
         e.preventDefault();
         setSidebarHidden((v) => {
@@ -506,7 +512,20 @@ function Shell() {
           />
           {!drawerOpen && <EdgeSwipe side="right" onTrigger={() => setDrawerOpen(true)} />}
           {!drawerOpen && canBack && <EdgeSwipe side="left" onTrigger={back} />}
-          <BottomNav onSearch={() => setPaletteOpen(true)} onAsk={askReady ? () => setAskOpen(true) : undefined} />
+          <BottomNav
+            onSearch={() => setPaletteOpen(true)}
+            onAsk={askReady ? () => setAskOpen(true) : undefined}
+            onCapture={() => setCaptureOpen(true)}
+          />
+          {!drawerOpen && (
+            <button
+              className="mobile-capture-fab"
+              aria-label="Quick capture"
+              onClick={() => setCaptureOpen(true)}
+            >
+              <Icon name="plus" size={24} />
+            </button>
+          )}
         </>
       ) : (
         <>
@@ -686,6 +705,7 @@ function Shell() {
 
       {paletteOpen && <SearchPalette onClose={() => setPaletteOpen(false)} />}
       {askOpen && <AskPanel onClose={() => setAskOpen(false)} />}
+      <QuickCapture open={captureOpen} onClose={() => setCaptureOpen(false)} />
       {settingsOpen && (
         <Suspense fallback={null}>
           <SettingsModal onClose={closeSettings} />
@@ -699,9 +719,19 @@ function Shell() {
 }
 
 export default function App() {
-  const [onboarded, setOnboarded] = useState<boolean | null>(null);
+  const [onboarded, setOnboarded] = useState<boolean | null>(() => {
+    try {
+      if (localStorage.getItem('habitat:onboarded') === 'true') return true;
+    } catch {}
+    return null;
+  });
 
   useEffect(() => {
+    const handleOnboarded = () => {
+      setOnboarded(true);
+    };
+    window.addEventListener('habitat:onboarded', handleOnboarded);
+
     api.settings.get().then((s) => {
       const activeHab = s?.habitats?.find((h) => h.id === s?.activeId);
       if (activeHab?.aura) {
@@ -710,8 +740,43 @@ export default function App() {
           localStorage.setItem('habitat:aura', activeHab.aura);
         } catch {}
       }
-      setOnboarded(s.onboarded);
+      if (s?.onboarded) {
+        try {
+          localStorage.setItem('habitat:onboarded', 'true');
+        } catch {}
+        setOnboarded(true);
+      } else if (localStorage.getItem('habitat:onboarded') !== 'true') {
+        setOnboarded(false);
+      }
+    }).catch((err) => {
+      console.warn('[app] settings:get error:', err);
+      if (localStorage.getItem('habitat:onboarded') !== 'true') {
+        setOnboarded(false);
+      }
     });
+
+    // Auto-sync when phone app becomes active (unlocking or switching to Habitat)
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        api.sync.now().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('focus', handleVisibility);
+
+    // Live refresh when new changes are pulled from Mac
+    const unSync = api.sync.onState((s: any) => {
+      if (s?.pulled > 0) {
+        window.dispatchEvent(new CustomEvent('habitat:sync-pulled'));
+      }
+    });
+
+    return () => {
+      window.removeEventListener('habitat:onboarded', handleOnboarded);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('focus', handleVisibility);
+      unSync();
+    };
   }, []);
 
   if (onboarded === null) return null;

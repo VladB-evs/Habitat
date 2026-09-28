@@ -118,15 +118,13 @@ test('filenames stay readable but never break the filesystem', () => {
 });
 
 test('export:data carries the vault but never a token', () => {
-  api['api:config'](); // mints and stores the HTTP token
-  api['telegram:save']({ token: '123456:SECRET-TOKEN' });
+  const cfg = api['api:config'](); // mints and stores the HTTP token
 
   const data = api['export:data']();
   assert.ok(data.types.length > 0);
   const keys = data.settings.map((s) => s.key);
   assert.ok(!keys.includes('httpApi'), 'API token must not be exported');
-  assert.ok(!keys.includes('telegram'), 'Telegram token must not be exported');
-  assert.ok(!JSON.stringify(data).includes('SECRET-TOKEN'));
+  assert.ok(!JSON.stringify(data).includes(cfg.token));
 });
 
 test('writeMarkdown lays out a folder per type, with front matter', () => {

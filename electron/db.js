@@ -862,16 +862,10 @@ function makePairCode() {
 
 let automationDepth = 0;
 let notifier = null;
-let telegramSender = null;
 
 /** main.js hands us a way to raise a system notification. */
 function setNotifier(fn) {
   notifier = fn;
-}
-
-/** …and a way to message the user's Telegram chat. */
-function setTelegramSender(fn) {
-  telegramSender = fn;
 }
 
 function loadAutomations() {
@@ -1161,12 +1155,6 @@ function runAction(action, obj, ctx) {
   if (action.kind === 'notify' && notifier) {
     notifier(fillTemplate(action.text || '{{title}}', obj, ctx), fillTemplate(action.value || '', obj, ctx));
     return;
-  }
-
-  if (action.kind === 'telegram' && telegramSender) {
-    telegramSender([fillTemplate(action.text || '{{title}}', obj, ctx), fillTemplate(action.value || '', obj, ctx)]
-      .filter(Boolean)
-      .join('\n'));
   }
 }
 
@@ -1578,12 +1566,12 @@ const api = {
   /**
    * Everything in the vault, for export.
    *
-   * `httpApi`, `telegram` and `tmdb_api_key` are held back on purpose: they hold
+   * `httpApi` and `tmdb_api_key` are held back on purpose: they hold
    * private keys/tokens, and an export is a file people copy to a drive or hand
    * to someone else. Nothing else in kv is a secret.
    */
   'export:data': () => {
-    const secret = new Set(['httpApi', 'telegram', 'tmdb_api_key']);
+    const secret = new Set(['httpApi', 'tmdb_api_key']);
     return {
       app: 'habitat',
       exportedAt: now(),
@@ -2839,51 +2827,26 @@ const api = {
     return next;
   },
 
-  'telegram:get': () => {
-    const blank = { enabled: false, token: '', chatId: '', userId: '', userName: '', typeId: 'note' };
-    const r = db.prepare("SELECT value FROM kv WHERE key = 'telegram'").get();
-    if (!r) return blank;
-    try {
-      return { ...blank, ...JSON.parse(r.value) };
-    } catch {
-      return blank;
-    }
+  'sync:snapshot': () => sync.getSnapshot(),
+  'sync:applySnapshot': (snapshot) => sync.applySnapshot(snapshot),
+  'sync:pull': ({ cursor, limit } = {}) => sync.pullChanges(cursor, limit),
+  'sync:push': ({ batch } = {}) => {
+    const rows = (batch || []).map((r) => ({
+      table: r.tbl || r.table,
+      id: r.row_id || r.id,
+      row: r.data !== undefined ? r.data : r.row,
+      deleted: !!r.deleted,
+    }));
+    return sync.applyRemote(rows);
   },
-
-  /**
-   * Start pairing: mint a short code and forget any current link. A bot is
-   * reachable by anyone who finds it, so the code — not "whoever writes first" —
-   * is what decides whose chat this vault belongs to. It expires quickly.
-   */
-  'telegram:pair': () => {
-    const code = makePairCode();
-    return api['telegram:save']({
-      pairCode: code,
-      pairExpires: now() + 15 * 60 * 1000,
-      chatId: '',
-      userId: '',
-      userName: '',
-    });
-  },
-
-  /** Drop the link without opening the door: nothing is accepted until a new code is used. */
-  'telegram:unpair': () =>
-    api['telegram:save']({ chatId: '', userId: '', userName: '', pairCode: '', pairExpires: 0 }),
-
-  'telegram:save': (cfg) => {
-    const cur = api['telegram:get']();
-    db.prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(
-      'telegram', JSON.stringify({ ...cur, ...(cfg || {}) })
-    );
-    return api['telegram:get']();
-  },
+  'sync:deviceId': () => synclog.deviceId(db),
 
   /**
    * Turns one captured message into something in the vault. The first word says
    * where it goes: "daily …" appends to today's note, "task …" makes a Task, and
    * anything unrecognised falls back to the configured type with the text intact.
    */
-  'telegram:ingest': ({ text, typeId }) => {
+  'capture:ingest': ({ text, typeId }) => {
     const body = String(text || '').trim();
     if (!body) return null;
 
@@ -3945,6 +3908,91 @@ function saveBlob(hash, name, buffer) {
   return stored;
 }
 
+/**
+ * Full snapshot of the vault for initial device onboarding.
+ */
+function getSnapshot() {
+  const maxSeq = db.prepare('SELECT MAX(seq) AS s FROM sync_changes').get()?.s || 0;
+  const tables = {};
+  for (const spec of synclog.TABLES) {
+    if (spec.name === 'kv') {
+      tables.kv = db.prepare("SELECT key, value FROM kv WHERE key NOT LIKE 'migration:%' AND key != 'httpApi'").all();
+    } else {
+      tables[spec.name] = db.prepare(`SELECT * FROM ${spec.name}`).all();
+    }
+  }
+  return {
+    snapshotSeq: Number(maxSeq),
+    tables,
+    deviceId: synclog.deviceId(db),
+  };
+}
+
+/**
+ * Apply a complete snapshot from another device, replacing local state.
+ */
+function applySnapshot(snapshot) {
+  if (!snapshot || !snapshot.tables) throw new Error('invalid snapshot: missing tables');
+  db.exec('BEGIN');
+  try {
+    for (const spec of synclog.TABLES) {
+      const rows = snapshot.tables[spec.name] || [];
+      if (spec.name === 'kv') {
+        db.prepare("DELETE FROM kv WHERE key NOT LIKE 'migration:%' AND key != 'httpApi'").run();
+      } else {
+        db.prepare(`DELETE FROM ${spec.name}`).run();
+      }
+      for (const r of rows) {
+        writeRemoteRow(spec.name, spec.pk, r[spec.pk], r);
+      }
+    }
+    const allObjects = db.prepare('SELECT id FROM objects').all();
+    for (const { id } of allObjects) {
+      relink(id);
+    }
+    db.exec('DELETE FROM sync_changes');
+    synclog.setState(db, 'cursor', String(snapshot.snapshotSeq || 0));
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  return true;
+}
+
+/**
+ * Pull delta changes occurring after a given sequence cursor.
+ */
+function pullChanges(cursor = 0, limit = 500) {
+  const seq = Number(cursor) || 0;
+  const lim = Math.max(1, Math.min(Number(limit) || 500, 1000));
+  const changes = db.prepare('SELECT * FROM sync_changes WHERE seq > ? ORDER BY seq LIMIT ?').all(seq, lim);
+  const rows = [];
+  for (const c of changes) {
+    const spec = synclog.TABLES.find((t) => t.name === c.tbl);
+    if (!spec) continue;
+    let data = null;
+    let isDeleted = !!c.deleted;
+    if (!isDeleted) {
+      data = db.prepare(`SELECT * FROM ${spec.name} WHERE ${spec.pk} = ?`).get(c.row_id) || null;
+      if (!data) isDeleted = true;
+    }
+    rows.push({
+      tbl: c.tbl,
+      row_id: c.row_id,
+      data,
+      deleted: isDeleted,
+      seq: c.seq,
+    });
+  }
+  const nextSeq = rows.length ? rows[rows.length - 1].seq : seq;
+  return {
+    rows,
+    cursor: nextSeq,
+    hasMore: rows.length >= lim,
+  };
+}
+
 /** Everything sync.js is allowed to do to the vault. */
 const sync = {
   blobsToUpload,
@@ -3959,6 +4007,9 @@ const sync = {
   cursor: () => synclog.getState(db, 'cursor'),
   setCursor: (v) => synclog.setState(db, 'cursor', v),
   applyRemote,
+  getSnapshot,
+  applySnapshot,
+  pullChanges,
 };
 
-module.exports = { initDb, api, sync, setNotifier, setTelegramSender, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePeopleType, ensureTagType };
+module.exports = { initDb, api, sync, setNotifier, switchVault, openVault, closeDb, seedFlavor, resetToBlank, seedPeople, ensurePeopleType, ensureTagType };

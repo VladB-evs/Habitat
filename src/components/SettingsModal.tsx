@@ -9,7 +9,6 @@ import { UpdateSettings } from './UpdateSettings';
 import { Automations } from './Automations';
 import { NavigationSettings } from './NavigationSettings';
 import { SyncSettings } from './SyncSettings';
-import { TelegramSettings } from './TelegramSettings';
 import { Icon } from './Icons';
 import { HabitatIconPicker, HabitatAuraPicker, getAuraColor, getAuraGlow, getAuraBg, applyHabitatAccent } from './Habitats';
 
@@ -18,7 +17,6 @@ const TABS = [
   { id: 'navigation', label: 'Navigation', icon: 'grid' },
   { id: 'sync', label: 'Sync', icon: 'waypoints' },
   { id: 'automations', label: 'Automations', icon: 'zap' },
-  { id: 'capture', label: 'Capture', icon: 'message-circle' },
   { id: 'api', label: 'API', icon: 'globe' },
   { id: 'scripts', label: 'Scripts', icon: 'code' },
   { id: 'import', label: 'Import & Export', icon: 'doc' },
@@ -314,7 +312,6 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
               </section>
             )}
             {tab === 'automations' && <Automations />}
-            {tab === 'capture' && <TelegramSettings />}
             {tab === 'api' && <ApiSettings />}
 
             {tab === 'scripts' && (
@@ -436,7 +433,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                     </button>
                   </div>
                   <div className="set-item">
-                    <div className="set-note">Your API and Telegram tokens are never included.</div>
+                    <div className="set-note">Your API tokens are never included.</div>
                   </div>
                 </div>
                 {exportResult && (

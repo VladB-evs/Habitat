@@ -164,6 +164,8 @@ import {
   LuLaugh,
   LuCalendarClock,
   LuEyeOff,
+  LuRefreshCw,
+  LuWifi,
 } from 'react-icons/lu';
 
 const UI: Record<string, IconType> = {
@@ -267,6 +269,8 @@ const UI: Record<string, IconType> = {
   'eye-off': LuEyeOff,
   sunrise: LuSunrise,
   notebook: LuNotebook,
+  'refresh-cw': LuRefreshCw,
+  wifi: LuWifi,
 };
 
 export function Icon({ name, size = 16, className }: { name: string; size?: number; className?: string }) {
