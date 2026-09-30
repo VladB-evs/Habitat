@@ -322,9 +322,16 @@ export function Sidebar({
           <NavItem
             icon="study"
             label="Study"
-            active={view.kind === 'study' || view.kind === 'deck'}
+            active={view.kind === 'study' || view.kind === 'deck' || view.kind === 'studyNote'}
             onClick={() => navigate({ kind: 'study' })}
             onSplit={() => openPageBeside({ kind: 'study' })}
+          />
+          <NavItem
+            icon="map"
+            label="Map"
+            active={view.kind === 'map'}
+            onClick={() => navigate({ kind: 'map' })}
+            onSplit={() => openPageBeside({ kind: 'map' })}
           />
         </nav>
 

@@ -13,7 +13,7 @@ const UPSTAIRS = new Set(['daily', 'tag', 'task', 'event', PEOPLE_TYPE, MEDIA_TY
 
 /** Everything "More" can offer a destination for. Canvas is left out, same as
  *  the sidebar's own nav — boards are desktop-only. */
-const MORE_DESTINATIONS = ['dashboard', 'daily', 'tasks', 'people', 'media', 'tags', 'study'] as const;
+const MORE_DESTINATIONS = ['dashboard', 'daily', 'tasks', 'people', 'media', 'tags', 'study', 'map'] as const;
 
 const isBuiltinActive = (key: string, viewKind: string) =>
   key === 'study' ? viewKind === 'study' || viewKind === 'deck' || viewKind === 'studyNote' : viewKind === key;

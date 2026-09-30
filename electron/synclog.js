@@ -48,6 +48,8 @@ const TABLES = [
   { name: 'study_notes', pk: 'id', stamp: 'updated_at' },
   { name: 'cards', pk: 'id', stamp: 'created_at' },
   { name: 'reviews', pk: 'id', stamp: 'at' },
+  { name: 'study_places', pk: 'id', stamp: 'updated_at' },
+  { name: 'study_categories', pk: 'id', stamp: 'created_at' },
 ];
 
 /**

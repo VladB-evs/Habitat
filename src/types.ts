@@ -426,6 +426,36 @@ export interface ParsedCard {
   extra?: Record<string, unknown>;
 }
 
+export interface StudyPlace {
+  id: string;
+  name: string;
+  category: string;
+  color?: string;
+  lat: number;
+  lng: number;
+  zoom?: number | null;
+  notes?: string;
+  address?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StudyCategory {
+  id: string;
+  name: string;
+  color?: string;
+  icon?: string;
+  createdAt: number;
+}
+
+export interface CurrentLocation {
+  lat: number;
+  lng: number;
+  city?: string;
+  region?: string;
+  country?: string;
+}
+
 export interface Stats {
   counts: Record<string, number>;
   recent: Obj[];

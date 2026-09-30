@@ -33,6 +33,7 @@ const CanvasView = lazy(() => import('./components/canvas/CanvasView').then((m) 
 const StudyView = lazy(() => import('./components/study/StudyView').then((m) => ({ default: m.StudyView })));
 const DeckPage = lazy(() => import('./components/study/DeckPage').then((m) => ({ default: m.DeckPage })));
 const StudyNotePage = lazy(() => import('./components/study/StudyNotePage').then((m) => ({ default: m.StudyNotePage })));
+const StudyMap = lazy(() => import('./components/study/StudyMap').then((m) => ({ default: m.StudyMap })));
 import { TagsView } from './components/TagsView';
 import { People } from './components/People';
 import { Media } from './components/Media';
@@ -86,6 +87,11 @@ function PaneView({ view }: { view: View }) {
         {view.kind === 'study' && (
           <Suspense fallback={null}>
             <StudyView />
+          </Suspense>
+        )}
+        {view.kind === 'map' && (
+          <Suspense fallback={null}>
+            <StudyMap initialPlaceId={view.placeId} />
           </Suspense>
         )}
         {view.kind === 'deck' && (

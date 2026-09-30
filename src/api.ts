@@ -24,6 +24,9 @@ import type {
   StudyNote,
   StudyOverview,
   StudyQueue,
+  StudyPlace,
+  StudyCategory,
+  CurrentLocation,
   Obj,
   ObjType,
   Person,
@@ -456,6 +459,15 @@ export const api = {
       dry?: boolean;
     }): Promise<{ cards: ParsedCard[] | Card[]; deck: Deck | null }> => inv('study:noteToCards', p),
     history: (days?: number): Promise<{ day: string; n: number; again: number }[]> => inv('study:history', { days }),
+    places: (p?: { category?: string }): Promise<StudyPlace[]> => inv('study:places', p ?? {}),
+    placeCreate: (p: Partial<StudyPlace> & { lat: number; lng: number }): Promise<StudyPlace> => inv('study:placeCreate', p),
+    placePatch: (id: string, patch: Partial<StudyPlace>): Promise<StudyPlace | null> => inv('study:placePatch', { id, patch }),
+    placeDelete: (id: string): Promise<boolean> => inv('study:placeDelete', id),
+    categories: (): Promise<StudyCategory[]> => inv('study:categories'),
+    categoryCreate: (p: { name: string; color?: string; icon?: string }): Promise<StudyCategory> => inv('study:categoryCreate', p),
+    categoryPatch: (id: string, patch: { name?: string; color?: string; icon?: string }): Promise<StudyCategory> => inv('study:categoryPatch', { id, patch }),
+    categoryDelete: (idOrName: string): Promise<boolean> => inv('study:categoryDelete', idOrName),
+    currentLocation: (): Promise<CurrentLocation | null> => inv('study:currentLocation'),
   },
   dashboard: {
     /** `null` when the user has never customised it — callers install the default layout. */

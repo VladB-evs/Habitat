@@ -3067,6 +3067,10 @@ function migrate() {
     );
   });
 
+  runOnce('study-remove-premade-categories', () => {
+    db.prepare("DELETE FROM study_categories WHERE name IN ('Dorm', 'Favorites', 'Lab', 'Lecture Hall', 'Library', 'Study Spot')").run();
+  });
+
   /**
    * The old Person type is replaced by People — a standalone directory with its
    * own properties and view. Person entries are dropped rather than carried

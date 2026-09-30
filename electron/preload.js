@@ -16,6 +16,8 @@ const CHANNELS = new Set([
   'study:queue', 'study:answer', 'study:undo', 'study:cards', 'study:cardCreate', 'study:cardPatch',
   'study:cardDelete', 'study:cardsFromText', 'study:history', 'study:vocabAdd', 'study:languages',
   'study:notes', 'study:noteGet', 'study:noteCreate', 'study:notePatch', 'study:noteDelete', 'study:noteToCards',
+  'study:places', 'study:placeCreate', 'study:placePatch', 'study:placeDelete',
+  'study:categories', 'study:categoryCreate', 'study:categoryDelete', 'study:currentLocation',
   'dashboard:get', 'dashboard:save', 'dashboard:reset',
   'settings:get', 'settings:chooseVault', 'settings:reveal',
   'spellcheck:get', 'spellcheck:set',
