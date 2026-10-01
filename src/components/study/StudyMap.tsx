@@ -206,6 +206,30 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
 
     mapRef.current = map;
 
+    // Dynamic zoom-based pin scaling and tier classification
+    const updateZoomMetrics = () => {
+      const z = map.getZoom();
+      const el = mapContainerRef.current;
+      if (!el) return;
+
+      const tier = z >= 14 ? 'close' : z >= 11.5 ? 'mid' : 'far';
+      if (el.dataset.zoomTier !== tier) {
+        el.dataset.zoomTier = tier;
+      }
+
+      // Smooth scale calculation:
+      // z >= 15: 1.0
+      // z = 13: 0.84
+      // z = 11: 0.69
+      // z <= 8: 0.45
+      const clampedZ = Math.max(8, Math.min(15, z));
+      const scale = 0.45 + ((clampedZ - 8) / (15 - 8)) * (1.0 - 0.45);
+      el.style.setProperty('--map-pin-scale', scale.toFixed(2));
+    };
+
+    map.on('zoom', updateZoomMetrics);
+    updateZoomMetrics();
+
     // Auto-locate user on initial launch if no viewport saved
     if (!hasStoredViewport && !initialPlaceId) {
       handleLocateMeRef.current?.(true);
@@ -219,6 +243,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       const c = map.getCenter();
       const z = map.getZoom();
       localStorage.setItem('habitat:study-map:viewport', JSON.stringify({ center: [c.lng, c.lat], zoom: z }));
+      updateZoomMetrics();
     };
     map.on('moveend', saveViewport);
 

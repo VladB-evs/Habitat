@@ -16772,17 +16772,19 @@ figcaption {
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transform-origin: bottom center;
+  transform: scale(var(--map-pin-scale, 1));
+  transition: transform 0.12s ease-out;
 }
 
 .hab-pin-wrapper:hover .hab-pin-body {
-  transform: translateY(-3px) scale(1.08);
-  z-index: 50;
+  transform: scale(calc(var(--map-pin-scale, 1) * 1.22)) translateY(-2px);
+  z-index: 60;
 }
 
 .hab-pin-wrapper.selected .hab-pin-body {
-  transform: translateY(-4px) scale(1.15);
-  z-index: 60;
+  transform: scale(calc(var(--map-pin-scale, 1) * 1.3)) translateY(-3px);
+  z-index: 70;
 }
 
 .hab-pin-svg {
@@ -16799,13 +16801,14 @@ figcaption {
   position: absolute;
   bottom: -2px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) scale(var(--map-pin-scale, 1));
   width: 14px;
   height: 5px;
   background: rgba(0, 0, 0, 0.45);
   border-radius: 50%;
   filter: blur(1px);
   pointer-events: none;
+  transition: transform 0.12s ease-out;
 }
 
 .hab-pin-ground-ripple {
@@ -16906,6 +16909,26 @@ figcaption {
   color: var(--text);
   font-weight: 600;
   z-index: 60;
+}
+
+/* At lower zoom levels (city / regional overview), hide labels by default to prevent overlap clutter */
+.hab-map-container[data-zoom-tier='mid'] .hab-map-pin-label,
+.hab-map-container[data-zoom-tier='far'] .hab-map-pin-label {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-50%) scale(0.85);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+/* Reveal labels on hover or when selected even when zoomed out */
+.hab-map-container[data-zoom-tier='mid'] .hab-pin-wrapper:hover .hab-map-pin-label,
+.hab-map-container[data-zoom-tier='far'] .hab-pin-wrapper:hover .hab-map-pin-label,
+.hab-map-container[data-zoom-tier='mid'] .hab-pin-wrapper.selected .hab-map-pin-label,
+.hab-map-container[data-zoom-tier='far'] .hab-pin-wrapper.selected .hab-map-pin-label {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) scale(1);
+  z-index: 80;
 }
 
 /* User location marker */
