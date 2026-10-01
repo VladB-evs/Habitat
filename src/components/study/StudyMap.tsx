@@ -298,11 +298,34 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       const { lng, lat } = e.lngLat;
       if (selectedPlaceIdRef.current) {
         setSelectedPlaceId(null);
-      } else if (modalPlaceRef.current && modalPlaceRef.current.mode === 'create') {
-        moveDraftPinRef.current?.(lat, lng);
-      } else {
-        handleDropPinRef.current?.(lat, lng);
+        return;
       }
+      if (modalPlaceRef.current && modalPlaceRef.current.mode === 'create') {
+        moveDraftPinRef.current?.(lat, lng);
+        return;
+      }
+
+      // Check if user clicked directly on a rendered vector map feature (e.g. building, POI, landmark, street)
+      let featureName = '';
+      try {
+        const features = map.queryRenderedFeatures(e.point);
+        for (const feat of features) {
+          const props = feat.properties || {};
+          const candidate =
+            props.name ||
+            props.name_en ||
+            props['name:en'] ||
+            props.title ||
+            props.housename ||
+            props.brand;
+          if (candidate && typeof candidate === 'string' && candidate.trim()) {
+            featureName = candidate.trim();
+            break;
+          }
+        }
+      } catch {}
+
+      handleDropPinRef.current?.(lat, lng, featureName);
     });
 
     // Right-click to drop pin
@@ -311,8 +334,12 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       handleDropPinRef.current?.(e.lngLat.lat, e.lngLat.lng);
     });
 
+    let resizeRaf: number | null = null;
     const ro = new ResizeObserver(() => {
-      map.resize();
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(() => {
+        map.resize();
+      });
     });
     if (mapContainerRef.current) {
       ro.observe(mapContainerRef.current);
@@ -337,29 +364,63 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     map.setStyle(resolvedStyleUrl);
   }, [resolvedStyleUrl]);
 
-  // Reverse geocode helper
+  // High precision reverse geocode helper: uses Photon (Komoot OSM) first for fast POI/building names, with fallback to Nominatim
   const reverseGeocode = async (lat: number, lng: number) => {
+    // 1. Try Photon (fast, unthrottled, specialized for POIs, venues, and addresses)
+    try {
+      const res = await fetch(`https://photon.komoot.io/reverse?lat=${lat}&lon=${lng}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const feat = data?.features?.[0];
+        if (feat && feat.properties) {
+          const p = feat.properties;
+          const name = p.name || p.housenumber || '';
+          const addressParts = [
+            p.housenumber,
+            p.street,
+            p.locality || p.district,
+            p.city || p.county,
+            p.country,
+          ].filter(Boolean);
+          const address = addressParts.join(', ');
+          if (name || address) {
+            return {
+              name: name || addressParts[0] || '',
+              address: address || name,
+            };
+          }
+        }
+      }
+    } catch {}
+
+    // 2. Fallback to OpenStreetMap Nominatim
     try {
       const res = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`, {
         headers: { Accept: 'application/json' },
       });
-      if (!res.ok) return null;
-      const data = await res.json();
-      const name =
-        data.name ||
-        data.address?.building ||
-        data.address?.amenity ||
-        data.address?.college ||
-        data.address?.university ||
-        data.address?.road ||
-        '';
-      return {
-        name,
-        address: data.display_name || '',
-      };
-    } catch {
-      return null;
-    }
+      if (res.ok) {
+        const data = await res.json();
+        const name =
+          data.name ||
+          data.address?.building ||
+          data.address?.amenity ||
+          data.address?.shop ||
+          data.address?.office ||
+          data.address?.tourism ||
+          data.address?.college ||
+          data.address?.university ||
+          data.address?.road ||
+          '';
+        return {
+          name,
+          address: data.display_name || '',
+        };
+      }
+    } catch {}
+
+    return null;
   };
 
   // Teardrop pin marker creation DOM elements
@@ -493,14 +554,14 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       );
     });
 
-    if (!prefilledName && !prefilledAddress) {
+    if (!prefilledAddress || !prefilledName) {
       const geo = await reverseGeocode(lat, lng);
       setModalPlace((prev) =>
         prev
           ? {
               ...prev,
               name: prev.name || geo?.name || '',
-              address: geo?.address || prev.address,
+              address: prev.address || geo?.address || '',
             }
           : null
       );
@@ -1279,11 +1340,10 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
           {isSidebarOpen && (
             <motion.div
               className="hab-map-sidebar"
-              initial={{ width: 0, opacity: 0 }}
-              animate={{ width: 320, opacity: 1 }}
-              exit={{ width: 0, opacity: 0 }}
+              initial={{ x: -320, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -320, opacity: 0 }}
               transition={spring}
-              onAnimationComplete={() => mapRef.current?.resize()}
             >
               <div className="hab-sidebar-inner">
                 {modalPlace ? (
