@@ -13,9 +13,48 @@ import type { StudyCategory, StudyPlace } from '../../types';
 import { Icon, TypeIcon } from '../Icons';
 import { SplitControls } from '../SplitControls';
 
-type MapStyleKey = 'auto' | 'dark' | 'light' | 'voyager';
+type MapStyleKey = 'auto' | 'dark' | 'light' | 'voyager' | 'satellite';
 
-const MAP_STYLES: Record<Exclude<MapStyleKey, 'auto'>, string> = {
+const SATELLITE_STYLE: maplibregl.StyleSpecification = {
+  version: 8,
+  sources: {
+    'esri-satellite': {
+      type: 'raster',
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+      attribution: '© Esri, Maxar, Earthstar Geographics',
+    },
+    'esri-labels': {
+      type: 'raster',
+      tiles: [
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+      ],
+      tileSize: 256,
+      maxzoom: 19,
+    },
+  },
+  layers: [
+    {
+      id: 'esri-satellite-layer',
+      type: 'raster',
+      source: 'esri-satellite',
+      minzoom: 0,
+      maxzoom: 22,
+    },
+    {
+      id: 'esri-labels-layer',
+      type: 'raster',
+      source: 'esri-labels',
+      minzoom: 0,
+      maxzoom: 22,
+    },
+  ],
+};
+
+const MAP_STYLES: Record<Exclude<MapStyleKey, 'auto' | 'satellite'>, string> = {
   dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
   light: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
   voyager: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
@@ -88,8 +127,24 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     return () => clearTimeout(timer);
   }, [isSidebarOpen]);
 
-  const [mapStyleKey, setMapStyleKey] = useState<MapStyleKey>('auto');
+  const [mapStyleKey, setMapStyleKey] = useState<MapStyleKey>(() => {
+    try {
+      const saved = localStorage.getItem('habitat:map:style') as MapStyleKey;
+      if (saved && (saved === 'auto' || saved === 'dark' || saved === 'light' || saved === 'voyager' || saved === 'satellite')) {
+        return saved;
+      }
+    } catch {}
+    return 'auto';
+  });
   const [showStyleMenu, setShowStyleMenu] = useState(false);
+
+  const handleSelectStyle = (key: MapStyleKey) => {
+    setMapStyleKey(key);
+    setShowStyleMenu(false);
+    try {
+      localStorage.setItem('habitat:map:style', key);
+    } catch {}
+  };
 
   // Dialogs
   const [modalPlace, setModalPlace] = useState<{
@@ -161,8 +216,11 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     loadData();
   }, [loadData]);
 
-  // Active style URL
-  const resolvedStyleUrl = useMemo(() => {
+  // Active style URL / StyleSpecification
+  const resolvedStyleUrl: string | maplibregl.StyleSpecification = useMemo(() => {
+    if (mapStyleKey === 'satellite') {
+      return SATELLITE_STYLE;
+    }
     if (mapStyleKey === 'auto') {
       return theme === 'light' ? MAP_STYLES.light : MAP_STYLES.dark;
     }
@@ -1035,43 +1093,38 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                   <div className="menu-header">Map Theme &amp; Style</div>
                   <button
                     className={`menu-item ${mapStyleKey === 'auto' ? 'on' : ''}`}
-                    onClick={() => {
-                      setMapStyleKey('auto');
-                      setShowStyleMenu(false);
-                    }}
+                    onClick={() => handleSelectStyle('auto')}
                   >
                     <Icon name="sparkles" size={14} />
                     Auto (Matches {theme} theme)
                   </button>
                   <button
                     className={`menu-item ${mapStyleKey === 'dark' ? 'on' : ''}`}
-                    onClick={() => {
-                      setMapStyleKey('dark');
-                      setShowStyleMenu(false);
-                    }}
+                    onClick={() => handleSelectStyle('dark')}
                   >
                     <Icon name="eye-off" size={14} />
                     Dark Matter
                   </button>
                   <button
                     className={`menu-item ${mapStyleKey === 'light' ? 'on' : ''}`}
-                    onClick={() => {
-                      setMapStyleKey('light');
-                      setShowStyleMenu(false);
-                    }}
+                    onClick={() => handleSelectStyle('light')}
                   >
                     <Icon name="sunrise" size={14} />
                     Positron (Light)
                   </button>
                   <button
                     className={`menu-item ${mapStyleKey === 'voyager' ? 'on' : ''}`}
-                    onClick={() => {
-                      setMapStyleKey('voyager');
-                      setShowStyleMenu(false);
-                    }}
+                    onClick={() => handleSelectStyle('voyager')}
                   >
                     <Icon name="map" size={14} />
                     Voyager (Detailed)
+                  </button>
+                  <button
+                    className={`menu-item ${mapStyleKey === 'satellite' ? 'on' : ''}`}
+                    onClick={() => handleSelectStyle('satellite')}
+                  >
+                    <Icon name="globe" size={14} />
+                    Satellite (Aerial)
                   </button>
                   <div className="menu-divider" />
                   <button
