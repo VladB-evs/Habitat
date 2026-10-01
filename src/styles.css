@@ -16140,12 +16140,6 @@ figcaption {
   display: inline-block;
 }
 
-.hab-cat-inherit-note {
-  font-size: 11px;
-  color: var(--text-3);
-  font-weight: 400;
-  margin-left: 4px;
-}
 
 .hab-map-main-row {
   position: relative;

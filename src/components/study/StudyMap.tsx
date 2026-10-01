@@ -1389,9 +1389,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                     <div className="hab-form-group">
                       <div className="hab-form-label-row">
                         <label className="hab-form-label">Category</label>
-                        <span className="hab-cat-inherit-note">
-                          (Pin inherits category color)
-                        </span>
                         <button
                           type="button"
                           className="hab-link-btn"
