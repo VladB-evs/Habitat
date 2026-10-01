@@ -18,36 +18,24 @@ type MapStyleKey = 'auto' | 'dark' | 'light' | 'voyager' | 'satellite';
 const SATELLITE_STYLE: maplibregl.StyleSpecification = {
   version: 8,
   sources: {
-    'esri-satellite': {
+    'google-hybrid': {
       type: 'raster',
       tiles: [
-        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        'https://mt0.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+        'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+        'https://mt2.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
+        'https://mt3.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
       ],
       tileSize: 256,
-      maxzoom: 19,
-      attribution: '© Esri, Maxar, Earthstar Geographics',
-    },
-    'esri-labels': {
-      type: 'raster',
-      tiles: [
-        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-      ],
-      tileSize: 256,
-      maxzoom: 19,
+      maxzoom: 22,
+      attribution: '© Google',
     },
   },
   layers: [
     {
-      id: 'esri-satellite-layer',
+      id: 'google-hybrid-layer',
       type: 'raster',
-      source: 'esri-satellite',
-      minzoom: 0,
-      maxzoom: 22,
-    },
-    {
-      id: 'esri-labels-layer',
-      type: 'raster',
-      source: 'esri-labels',
+      source: 'google-hybrid',
       minzoom: 0,
       maxzoom: 22,
     },
@@ -1080,62 +1068,130 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
 
           <div style={{ position: 'relative' }}>
             <button
-              className="btn subtle icon-only"
+              className={`btn ${showStyleMenu ? 'active' : 'subtle'} icon-only`}
               onClick={() => setShowStyleMenu((v) => !v)}
-              title="Map Style Options"
+              title="Map Views & Layers"
+              aria-label="Map Views & Layers"
             >
-              <Icon name="settings" size={15} />
+              <Icon name="layers" size={15} />
             </button>
             {showStyleMenu && (
               <>
                 <div className="backdrop transparent" onClick={() => setShowStyleMenu(false)} />
                 <div className="popover hab-map-style-menu">
-                  <div className="menu-header">Map Theme &amp; Style</div>
+                  <div className="hab-style-menu-header">
+                    <span>Map View &amp; Layers</span>
+                  </div>
+
+                  <div className="hab-style-menu-list">
+                    <button
+                      type="button"
+                      className={`hab-style-card ${mapStyleKey === 'auto' ? 'active' : ''}`}
+                      onClick={() => handleSelectStyle('auto')}
+                    >
+                      <div className="hab-style-icon-box">
+                        <Icon name="sparkles" size={15} />
+                      </div>
+                      <div className="hab-style-info">
+                        <div className="hab-style-name">Auto Theme</div>
+                        <div className="hab-style-desc">Matches {theme} appearance</div>
+                      </div>
+                      {mapStyleKey === 'auto' && (
+                        <div className="hab-style-check">
+                          <Icon name="check" size={12} />
+                        </div>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`hab-style-card ${mapStyleKey === 'satellite' ? 'active' : ''}`}
+                      onClick={() => handleSelectStyle('satellite')}
+                    >
+                      <div className="hab-style-icon-box">
+                        <Icon name="globe" size={15} />
+                      </div>
+                      <div className="hab-style-info">
+                        <div className="hab-style-name">Satellite</div>
+                        <div className="hab-style-desc">Aerial imagery with places &amp; streets</div>
+                      </div>
+                      {mapStyleKey === 'satellite' && (
+                        <div className="hab-style-check">
+                          <Icon name="check" size={12} />
+                        </div>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`hab-style-card ${mapStyleKey === 'dark' ? 'active' : ''}`}
+                      onClick={() => handleSelectStyle('dark')}
+                    >
+                      <div className="hab-style-icon-box">
+                        <Icon name="moon" size={15} />
+                      </div>
+                      <div className="hab-style-info">
+                        <div className="hab-style-name">Dark Matter</div>
+                        <div className="hab-style-desc">High-contrast night vector view</div>
+                      </div>
+                      {mapStyleKey === 'dark' && (
+                        <div className="hab-style-check">
+                          <Icon name="check" size={12} />
+                        </div>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`hab-style-card ${mapStyleKey === 'light' ? 'active' : ''}`}
+                      onClick={() => handleSelectStyle('light')}
+                    >
+                      <div className="hab-style-icon-box">
+                        <Icon name="sun" size={15} />
+                      </div>
+                      <div className="hab-style-info">
+                        <div className="hab-style-name">Positron (Light)</div>
+                        <div className="hab-style-desc">Clean daylight minimalist map</div>
+                      </div>
+                      {mapStyleKey === 'light' && (
+                        <div className="hab-style-check">
+                          <Icon name="check" size={12} />
+                        </div>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      className={`hab-style-card ${mapStyleKey === 'voyager' ? 'active' : ''}`}
+                      onClick={() => handleSelectStyle('voyager')}
+                    >
+                      <div className="hab-style-icon-box">
+                        <Icon name="compass" size={15} />
+                      </div>
+                      <div className="hab-style-info">
+                        <div className="hab-style-name">Voyager</div>
+                        <div className="hab-style-desc">Detailed streets &amp; buildings</div>
+                      </div>
+                      {mapStyleKey === 'voyager' && (
+                        <div className="hab-style-check">
+                          <Icon name="check" size={12} />
+                        </div>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="hab-style-menu-divider" />
+
                   <button
-                    className={`menu-item ${mapStyleKey === 'auto' ? 'on' : ''}`}
-                    onClick={() => handleSelectStyle('auto')}
-                  >
-                    <Icon name="sparkles" size={14} />
-                    Auto (Matches {theme} theme)
-                  </button>
-                  <button
-                    className={`menu-item ${mapStyleKey === 'dark' ? 'on' : ''}`}
-                    onClick={() => handleSelectStyle('dark')}
-                  >
-                    <Icon name="eye-off" size={14} />
-                    Dark Matter
-                  </button>
-                  <button
-                    className={`menu-item ${mapStyleKey === 'light' ? 'on' : ''}`}
-                    onClick={() => handleSelectStyle('light')}
-                  >
-                    <Icon name="sunrise" size={14} />
-                    Positron (Light)
-                  </button>
-                  <button
-                    className={`menu-item ${mapStyleKey === 'voyager' ? 'on' : ''}`}
-                    onClick={() => handleSelectStyle('voyager')}
-                  >
-                    <Icon name="map" size={14} />
-                    Voyager (Detailed)
-                  </button>
-                  <button
-                    className={`menu-item ${mapStyleKey === 'satellite' ? 'on' : ''}`}
-                    onClick={() => handleSelectStyle('satellite')}
-                  >
-                    <Icon name="globe" size={14} />
-                    Satellite (Aerial)
-                  </button>
-                  <div className="menu-divider" />
-                  <button
-                    className="menu-item"
+                    type="button"
+                    className="hab-style-action-btn"
                     onClick={() => {
                       handleExport();
                       setShowStyleMenu(false);
                     }}
                   >
                     <Icon name="copy" size={14} />
-                    Export Places (JSON)
+                    <span>Export Saved Places (JSON)</span>
                   </button>
                 </div>
               </>

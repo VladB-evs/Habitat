@@ -213,6 +213,7 @@ const UI: Record<string, IconType> = {
   sprout: LuSprout,
   doc: LuFileText,
   settings: LuSettings,
+  layers: LuLayers,
   clock: LuClock,
   zap: LuZap,
   hash: LuHash,
