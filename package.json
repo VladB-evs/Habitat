@@ -115,10 +115,18 @@
           "to": "native"
         }
       ],
+      "extendInfo": {
+        "NSLocationUsageDescription": "Habitat uses your location to show campus buildings and study spots near you.",
+        "NSLocationWhenInUseUsageDescription": "Habitat uses your location to show campus buildings and study spots near you.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Habitat uses your location to show campus buildings and study spots near you."
+      },
       "identity": null,
       "gatekeeperAssess": false,
       "icon": "build/icon.icns"
     },
+    "asarUnpack": [
+      "electron/bin/**/*"
+    ],
     "afterPack": "scripts/adhoc-sign.cjs"
   }
 }

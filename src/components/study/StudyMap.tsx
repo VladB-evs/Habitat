@@ -605,32 +605,39 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     handleDropPin(lat, lng, shortName, item.display_name);
   };
 
-  // Helper to obtain location coordinates from browser GPS, backend IPC, or fast IP fallback
+  // Helper to obtain location coordinates from hardware CoreLocation, browser GPS, or fast IP fallback
   const fetchCurrentLocation = useCallback(async (): Promise<{ lat: number; lng: number; label?: string } | null> => {
-    // 1. In Habitat Electron app, backend geolocation is instant (~80ms) and avoids Chromium GPS timeout
+    let ipFallbackLoc: { lat: number; lng: number; label?: string } | null = null;
+
+    // 1. In Habitat Electron app, backend native CoreLocation helper gives exact GPS/Wi-Fi fix
     if (typeof window !== 'undefined' && window.habitat && api.study?.currentLocation) {
       try {
         const loc = await api.study.currentLocation();
         if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
           const locStr = [loc.city, loc.country].filter(Boolean).join(', ');
-          return {
+          const locObj = {
             lat: loc.lat,
             lng: loc.lng,
             label: locStr ? `Your Location (${locStr})` : 'Your Location',
           };
+          if (loc.isHardware) {
+            return locObj;
+          }
+          // Store IP-based result as fallback in case native hardware wasn't available
+          ipFallbackLoc = locObj;
         }
       } catch (e) {
         console.warn('IPC geolocation error:', e);
       }
     }
 
-    // 2. Try browser / mobile geolocation (useful if outside Electron or on mobile)
+    // 2. Try browser / Chromium geolocation with high accuracy (Wi-Fi / CoreLocation via Webkit/Blink)
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       try {
         const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
           navigator.geolocation.getCurrentPosition(resolve, reject, {
             enableHighAccuracy: true,
-            timeout: 2500,
+            timeout: 4000,
             maximumAge: 60000,
           });
         });
@@ -642,8 +649,12 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
           };
         }
       } catch {
-        // Fallback to fetch
+        // Fallback below
       }
+    }
+
+    if (ipFallbackLoc) {
+      return ipFallbackLoc;
     }
 
     // 3. Direct fetch fallback for web browser or dev mode

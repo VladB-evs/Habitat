@@ -908,23 +908,73 @@ function forgetObject(db, objectId) {
 
 function getMacCoreLocation() {
   if (process.platform !== 'darwin') return Promise.resolve(null);
-  const binDir = path.join(__dirname, 'bin', 'LocationHelper.app', 'Contents', 'MacOS');
-  const binPath = path.join(binDir, 'LocationHelper');
-  const srcPath = path.join(__dirname, 'bin', 'location_helper.swift');
 
-  if (!fs.existsSync(binPath) && fs.existsSync(srcPath)) {
+  const candidates = [
+    // 1. Packaged app: in extraResources (native/LocationHelper.app)
+    path.join(process.resourcesPath || '', 'native', 'LocationHelper.app', 'Contents', 'MacOS', 'LocationHelper'),
+    // 2. Packaged app: in asar.unpacked
+    path.join((__dirname || '').replace('app.asar', 'app.asar.unpacked'), 'bin', 'LocationHelper.app', 'Contents', 'MacOS', 'LocationHelper'),
+    // 3. Dev mode: in electron/bin
+    path.join(__dirname, 'bin', 'LocationHelper.app', 'Contents', 'MacOS', 'LocationHelper'),
+    // 4. Dev mode: in root native
+    path.join(__dirname, '..', 'native', 'LocationHelper.app', 'Contents', 'MacOS', 'LocationHelper'),
+    // 5. User data bin
+    path.join(require('electron').app?.getPath('userData') || '', 'bin', 'LocationHelper.app', 'Contents', 'MacOS', 'LocationHelper'),
+  ];
+
+  const isInsideAsar = (p) => p.includes('app.asar') && !p.includes('app.asar.unpacked');
+  let binPath = candidates.find((p) => p && !isInsideAsar(p) && fs.existsSync(p));
+
+  // If running inside app.asar and not unpacked, extract to userData/bin
+  if (!binPath) {
     try {
-      fs.mkdirSync(binDir, { recursive: true });
-      execSync(`swiftc "${srcPath}" -o "${binPath}"`, { timeout: 10000 });
-      execSync(`codesign -s - -f "${path.join(__dirname, 'bin', 'LocationHelper.app')}"`, { timeout: 5000 });
-    } catch {}
+      const electronApp = require('electron').app;
+      const userDataDir = electronApp ? electronApp.getPath('userData') : path.join(require('os').homedir(), '.habitat');
+      const userBinApp = path.join(userDataDir, 'bin', 'LocationHelper.app');
+      const userBinMacOs = path.join(userBinApp, 'Contents', 'MacOS');
+      const userBinPath = path.join(userBinMacOs, 'LocationHelper');
+      const userBinPlist = path.join(userBinApp, 'Contents', 'Info.plist');
+
+      const srcDir = path.join(__dirname, 'bin', 'LocationHelper.app', 'Contents');
+      const srcBin = path.join(srcDir, 'MacOS', 'LocationHelper');
+      const srcPlist = path.join(srcDir, 'Info.plist');
+
+      if (!fs.existsSync(userBinPath)) {
+        fs.mkdirSync(userBinMacOs, { recursive: true });
+        if (fs.existsSync(srcPlist)) {
+          fs.copyFileSync(srcPlist, userBinPlist);
+        }
+        if (fs.existsSync(srcBin)) {
+          fs.copyFileSync(srcBin, userBinPath);
+          fs.chmodSync(userBinPath, 0o755);
+        }
+        try {
+          execSync(`codesign -s - -f "${userBinApp}"`, { timeout: 5000 });
+        } catch {}
+      }
+      if (fs.existsSync(userBinPath)) {
+        binPath = userBinPath;
+      }
+    } catch (e) {
+      console.warn('[LocationHelper] extraction fallback error:', e);
+    }
   }
 
-  if (!fs.existsSync(binPath)) return Promise.resolve(null);
+  if (!binPath) {
+    console.warn('[LocationHelper] no valid LocationHelper executable found');
+    return Promise.resolve(null);
+  }
+
+  try {
+    fs.chmodSync(binPath, 0o755);
+  } catch {}
 
   return new Promise((resolve) => {
-    execFile(binPath, { timeout: 4000 }, async (error, stdout) => {
-      if (error || !stdout) return resolve(null);
+    execFile(binPath, { timeout: 10000 }, async (error, stdout, stderr) => {
+      if (error || !stdout) {
+        console.warn('[LocationHelper] execution failed:', error?.message || error, stderr);
+        return resolve(null);
+      }
       try {
         const parsed = JSON.parse(stdout.trim());
         if (typeof parsed.lat === 'number' && typeof parsed.lng === 'number') {
@@ -934,7 +984,7 @@ function getMacCoreLocation() {
           try {
             const revRes = await fetch(
               `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${parsed.lat}&longitude=${parsed.lng}`,
-              { signal: AbortSignal.timeout(2000) }
+              { signal: AbortSignal.timeout(2500) }
             );
             if (revRes.ok) {
               const d = await revRes.json();
@@ -947,12 +997,15 @@ function getMacCoreLocation() {
             lat: parsed.lat,
             lng: parsed.lng,
             accuracy: parsed.acc,
+            isHardware: true,
             city,
             region,
             country,
           });
         }
-      } catch {}
+      } catch (parseErr) {
+        console.warn('[LocationHelper] JSON parse error:', parseErr);
+      }
       resolve(null);
     });
   });

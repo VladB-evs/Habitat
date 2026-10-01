@@ -454,6 +454,8 @@ export interface CurrentLocation {
   city?: string;
   region?: string;
   country?: string;
+  acc?: number;
+  isHardware?: boolean;
 }
 
 export interface Stats {
