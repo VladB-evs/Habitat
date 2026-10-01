@@ -16198,6 +16198,12 @@ figcaption {
   color: var(--text);
 }
 
+.hab-sidebar-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .hab-sidebar-collapse-btn {
   width: 26px;
   height: 26px;
@@ -16850,26 +16856,56 @@ figcaption {
 }
 
 .hab-map-pin-label {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 11px;
-  font-weight: 600;
+  font-weight: 500;
+  line-height: 1.2;
   color: var(--text);
-  background: var(--bg-2);
-  padding: 2px 7px;
-  border-radius: 5px;
-  border: 1px solid var(--border-2);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
-  margin-top: 3px;
+  background: var(--bg-surface, var(--bg-2, #18181b));
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2, rgba(255, 255, 255, 0.14));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.42), 0 1px 2px rgba(0, 0, 0, 0.2);
   white-space: nowrap;
   pointer-events: none;
-  max-width: 140px;
+  max-width: 170px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  transition: all 0.15s ease-out;
+  z-index: 10;
+}
+
+.hab-pin-label-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hab-pin-label-text {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hab-pin-wrapper:hover .hab-map-pin-label {
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  z-index: 50;
 }
 
 .hab-pin-wrapper.selected .hab-map-pin-label {
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 700;
+  border-color: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 0 1.5px var(--accent);
+  color: var(--text);
+  font-weight: 600;
+  z-index: 60;
 }
 
 /* User location marker */

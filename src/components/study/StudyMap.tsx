@@ -69,7 +69,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   // UI modes
-  const [dropPinMode, setDropPinMode] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     try {
       const saved = localStorage.getItem('habitat:study-map:sidebar-open');
@@ -89,7 +88,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     return () => clearTimeout(timer);
   }, [isSidebarOpen]);
 
-  const [is3dPitch, setIs3dPitch] = useState(false);
   const [mapStyleKey, setMapStyleKey] = useState<MapStyleKey>('auto');
   const [showStyleMenu, setShowStyleMenu] = useState(false);
 
@@ -129,8 +127,8 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
   }, [theme]);
 
   // Refs for MapLibre event listeners to prevent stale closures
-  const dropPinModeRef = useRef(dropPinMode);
-  dropPinModeRef.current = dropPinMode;
+  const selectedPlaceIdRef = useRef(selectedPlaceId);
+  selectedPlaceIdRef.current = selectedPlaceId;
 
   const modalPlaceRef = useRef(modalPlace);
   modalPlaceRef.current = modalPlace;
@@ -227,12 +225,12 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     // Click handler on map
     map.on('click', (e: maplibregl.MapMouseEvent) => {
       const { lng, lat } = e.lngLat;
-      if (dropPinModeRef.current) {
-        handleDropPinRef.current?.(lat, lng);
+      if (selectedPlaceIdRef.current) {
+        setSelectedPlaceId(null);
       } else if (modalPlaceRef.current && modalPlaceRef.current.mode === 'create') {
         moveDraftPinRef.current?.(lat, lng);
       } else {
-        setSelectedPlaceId(null);
+        handleDropPinRef.current?.(lat, lng);
       }
     });
 
@@ -267,13 +265,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     if (!map) return;
     map.setStyle(resolvedStyleUrl);
   }, [resolvedStyleUrl]);
-
-  // 3D Pitch toggle
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-    map.easeTo({ pitch: is3dPitch ? 48 : 0, duration: 800 });
-  }, [is3dPitch]);
 
   // Reverse geocode helper
   const reverseGeocode = async (lat: number, lng: number) => {
@@ -344,7 +335,10 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
           />
           <circle cx="16" cy="16" r="5" fill="#ffffff" />
         </svg>
-        <div class="hab-map-pin-label">${escapeHtml(place.name)}</div>
+      </div>
+      <div class="hab-map-pin-label">
+        <span class="hab-pin-label-dot" style="background:${color}"></span>
+        <span class="hab-pin-label-text">${escapeHtml(place.name)}</span>
       </div>
     `;
 
@@ -370,7 +364,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
 
   // Drop pin handler
   const handleDropPin = useCallback(async (lat: number, lng: number, prefilledName?: string, prefilledAddress?: string) => {
-    setDropPinMode(false);
     setSelectedPlaceId(null);
     setIsSidebarOpen(true);
 
@@ -484,8 +477,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       if (e.key === 'Escape') {
         if (newCategoryModal) {
           setNewCategoryModal(false);
-        } else if (dropPinMode) {
-          setDropPinMode(false);
         } else if (modalPlace) {
           if (draftMarkerRef.current) {
             draftMarkerRef.current.remove();
@@ -499,7 +490,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [newCategoryModal, dropPinMode, modalPlace, selectedPlaceId]);
+  }, [newCategoryModal, modalPlace, selectedPlaceId]);
 
   // Sync markers with places and category filter
   useEffect(() => {
@@ -532,8 +523,10 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
         marker.setLngLat([p.lng, p.lat]);
         const el = marker.getElement();
         el.className = `hab-pin-wrapper saved ${isSelected ? 'selected' : ''}`;
-        const label = el.querySelector('.hab-map-pin-label');
+        const label = el.querySelector('.hab-pin-label-text') || el.querySelector('.hab-map-pin-label');
         if (label) label.textContent = p.name;
+        const dot = el.querySelector('.hab-pin-label-dot') as HTMLElement | null;
+        if (dot) dot.style.background = color;
         const path = el.querySelector('path');
         if (path) path.setAttribute('fill', color);
       } else {
@@ -813,7 +806,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
 
   // Delete place
   const handleDeletePlace = async (id: string, name: string) => {
-    if (!(await ask(`Delete “${name}” from study map?`))) return;
+    if (!(await ask(`Delete “${name}”?`))) return;
     try {
       await api.study.placeDelete(id);
       if (selectedPlaceId === id) setSelectedPlaceId(null);
@@ -822,6 +815,14 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       console.error('Failed to delete place:', e);
     }
   };
+
+  // Add pin directly at the center of the current map view
+  const handleAddPinAtCenter = useCallback(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const c = map.getCenter();
+    handleDropPin(c.lat, c.lng);
+  }, [handleDropPin]);
 
   // Category management handlers
   const openCreateCategory = () => {
@@ -916,7 +917,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `study-places-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `places-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -938,17 +939,17 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
           </button>
           <span className="hab-map-title">
             <Icon name="map" size={16} />
-            <span>Study Map</span>
+            <span>Map</span>
           </span>
           <span className="hab-map-place-count">{places.length} places</span>
         </div>
 
-        {/* Center: Search campus buildings / address */}
+        {/* Center: Search places / addresses */}
         <div className="hab-map-search-box">
           <Icon name="search" size={14} className="hab-map-search-icon" />
           <input
             type="text"
-            placeholder="Search campus buildings, libraries, cafes…"
+            placeholder="Search places, streets, addresses…"
             value={geoQuery}
             onChange={(e) => handleGeoSearch(e.target.value)}
             onFocus={() => geoResults.length > 0 && setShowGeoDropdown(true)}
@@ -986,28 +987,12 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
         {/* Right: Actions */}
         <div className="hab-map-bar-right">
           <button
-            className={`btn ${dropPinMode ? 'primary pulse-btn' : 'subtle'}`}
-            onClick={() => {
-              setDropPinMode((v) => !v);
-              if (draftMarkerRef.current) {
-                draftMarkerRef.current.remove();
-                draftMarkerRef.current = null;
-              }
-            }}
-            title={dropPinMode ? 'Click on map to drop pin' : 'Drop a pin on map'}
+            className="btn primary"
+            onClick={handleAddPinAtCenter}
+            title="Drop a pin at the center of the current map view"
           >
-            <Icon name="pin" size={14} />
-            <span>{dropPinMode ? 'Click Map…' : 'Drop Pin'}</span>
-          </button>
-
-          <button
-            className={`btn ${isLocating ? 'loading primary' : 'subtle'}`}
-            onClick={() => handleLocateMe(true)}
-            title="Find Current Location"
-            disabled={isLocating}
-          >
-            <Icon name="target" size={14} className={isLocating ? 'spin-icon' : ''} />
-            <span>{isLocating ? 'Locating…' : 'My Location'}</span>
+            <Icon name="plus" size={14} />
+            <span>Add Place</span>
           </button>
 
           <div style={{ position: 'relative' }}>
@@ -1269,10 +1254,10 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                     </div>
 
                     <div className="hab-form-group">
-                      <label className="hab-form-label">Study Notes &amp; Tips (Optional)</label>
+                      <label className="hab-form-label">Notes &amp; Details (Optional)</label>
                       <textarea
                         className="hab-textarea"
-                        placeholder="e.g. Plenty of outlets on the west wall. Quietest before 2pm. Wi-Fi: Campus-Guest."
+                        placeholder="e.g. Best entrance on the west side, parking tips, quietest hours…"
                         rows={3}
                         value={modalPlace.notes}
                         onChange={(e) => setModalPlace({ ...modalPlace, notes: e.target.value })}
@@ -1367,15 +1352,26 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                         <span>Saved Places</span>
                         <span className="hab-cat-badge">{places.length}</span>
                       </div>
-                      <button
-                        type="button"
-                        className="icon-btn subtle hab-sidebar-collapse-btn"
-                        onClick={() => setIsSidebarOpen(false)}
-                        title="Hide sidebar (Full map view)"
-                        aria-label="Hide sidebar"
-                      >
-                        <Icon name="panel-close" size={15} />
-                      </button>
+                      <div className="hab-sidebar-title-actions">
+                        <button
+                          type="button"
+                          className="btn subtle small"
+                          onClick={handleAddPinAtCenter}
+                          title="Add place at map center"
+                        >
+                          <Icon name="plus" size={13} />
+                          <span>Add</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="icon-btn subtle hab-sidebar-collapse-btn"
+                          onClick={() => setIsSidebarOpen(false)}
+                          title="Hide sidebar (Full map view)"
+                          aria-label="Hide sidebar"
+                        >
+                          <Icon name="panel-close" size={15} />
+                        </button>
+                      </div>
                     </div>
                     <div className="hab-sidebar-search">
                       <Icon name="filter" size={13} />
@@ -1398,7 +1394,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                       <div className="hab-sidebar-empty">
                         <Icon name="pin" size={24} />
                         <p>No places found</p>
-                        <small>Click “Drop Pin” on the map to save your first building or study spot.</small>
+                        <small>Click on the map or “Add Place” to mark your first location.</small>
                       </div>
                     ) : (
                       filteredPlaces.map((p) => {
@@ -1472,7 +1468,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
         </AnimatePresence>
 
         {/* Map Canvas Container */}
-        <div className={`hab-map-canvas-wrap ${dropPinMode ? 'cursor-pin' : ''}`}>
+        <div className="hab-map-canvas-wrap">
           <div ref={mapContainerRef} className="hab-map-container" />
 
           {/* Floating Expand Sidebar Button when sidebar is collapsed */}
@@ -1488,17 +1484,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
               <span>Saved Places</span>
               <span className="hab-cat-badge">{places.length}</span>
             </button>
-          )}
-
-          {/* Drop Pin Instruction Banner */}
-          {dropPinMode && (
-            <div className="hab-map-instruction-banner">
-              <span className="pulse-dot" />
-              <span>Click anywhere on a building, street, or spot to drop your pin</span>
-              <button className="btn subtle tiny" onClick={() => setDropPinMode(false)}>
-                Cancel
-              </button>
-            </div>
           )}
 
           {/* Floating Map Controls */}
@@ -1527,22 +1512,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
               aria-label="Zoom Out"
             >
               <span style={{ fontSize: 16, lineHeight: 1 }}>−</span>
-            </button>
-            <button
-              className="hab-float-btn"
-              onClick={() => mapRef.current?.resetNorthPitch({ duration: 600 })}
-              title="Reset North"
-              aria-label="Reset North"
-            >
-              <Icon name="compass" size={14} />
-            </button>
-            <button
-              className={`hab-float-btn ${is3dPitch ? 'active' : ''}`}
-              onClick={() => setIs3dPitch((v) => !v)}
-              title="Toggle 3D Perspective Tilt"
-              aria-label="Toggle 3D Perspective Tilt"
-            >
-              <span style={{ fontSize: 11, fontWeight: 700 }}>3D</span>
             </button>
           </div>
 
@@ -1682,7 +1651,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                 <p className="subtle" style={{ margin: '4px 0 16px', fontSize: '12px' }}>
                   {editingCategory
                     ? 'Update category color and icon. All pins in this category will inherit the new color.'
-                    : 'Create a custom category to group your study spots. All pins in this category will share its color.'}
+                    : 'Create a custom category to group your places. All pins in this category will share its color.'}
                 </p>
 
                 <div className="hab-form-group" style={{ marginBottom: 14 }}>
@@ -1690,7 +1659,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                   <input
                     type="text"
                     className="hab-input"
-                    placeholder="e.g. Quiet Zones, Cafes, Computer Labs…"
+                    placeholder="e.g. Restaurants, Shops, Home, Work…"
                     value={newCatName}
                     autoFocus
                     onChange={(e) => setNewCatName(e.target.value)}
