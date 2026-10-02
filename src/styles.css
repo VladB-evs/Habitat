@@ -17281,4 +17281,171 @@ figcaption {
   color: var(--text);
 }
 
+/* ---- POI overlay popup (Overture Maps interactive layer) ---- */
+.hab-poi-popup-wrap .maplibregl-popup-content {
+  background: var(--bg-surface, var(--bg-2, #1a1a1c));
+  border: 1px solid var(--border-2, rgba(255, 255, 255, 0.12));
+  border-radius: 14px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4), 0 2px 8px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 0;
+  color: var(--text);
+  font-family: inherit;
+  min-width: 220px;
+  max-width: 300px;
+  overflow: hidden;
+  animation: popup-in 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.hab-poi-popup-wrap .maplibregl-popup-tip {
+  border-top-color: var(--bg-surface, var(--bg-2, #1a1a1c));
+}
+
+.hab-poi-popup-wrap .maplibregl-popup-close-button {
+  color: var(--text-2);
+  font-size: 18px;
+  right: 6px;
+  top: 6px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+
+.hab-poi-popup-wrap .maplibregl-popup-close-button:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.07));
+}
+
+.hab-poi-popup-body {
+  padding: 14px 14px 12px;
+}
+
+.hab-poi-popup-name {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.3;
+  margin: 0 0 4px;
+  padding-right: 16px;
+}
+
+.hab-poi-popup-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  background: var(--bg-3, rgba(255, 255, 255, 0.06));
+  padding: 2px 7px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+}
+
+.hab-poi-popup-addr {
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.4;
+  margin: 6px 0 0;
+}
+
+.hab-poi-popup-actions {
+  display: flex;
+  gap: 6px;
+  padding: 0 14px 12px;
+}
+
+.hab-poi-popup-actions .btn {
+  flex: 1;
+  justify-content: center;
+  font-size: 11.5px;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+/* ---- POI toggle switch in style menu ---- */
+.hab-poi-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 9px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.hab-poi-toggle-row:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.07));
+}
+
+.hab-poi-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hab-poi-toggle-label .hab-style-icon-box {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+}
+
+.hab-poi-toggle-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.hab-poi-toggle-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.hab-poi-toggle-desc {
+  font-size: 10px;
+  color: var(--text-2);
+  margin-top: 1px;
+}
+
+.hab-poi-switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--bg-3, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--border-2, rgba(255, 255, 255, 0.1));
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  flex-shrink: 0;
+}
+
+.hab-poi-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), background 0.2s;
+}
+
+.hab-poi-switch.on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.hab-poi-switch.on::after {
+  transform: translateX(14px);
+  background: #ffffff;
+}
+
+
 

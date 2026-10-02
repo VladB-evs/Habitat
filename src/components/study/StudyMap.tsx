@@ -2,8 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
+import { Protocol as PMTilesProtocol } from 'pmtiles';
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
+
+// Register pmtiles:// protocol for Overture Maps vector tiles
+const pmtilesProtocol = new PMTilesProtocol();
+maplibregl.addProtocol('pmtiles', pmtilesProtocol.tile);
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../../api';
 import { ask } from '../../confirm';
@@ -14,6 +19,8 @@ import { Icon, TypeIcon } from '../Icons';
 import { SplitControls } from '../SplitControls';
 
 type MapStyleKey = 'auto' | 'dark' | 'light' | 'voyager' | 'satellite';
+
+const OVERTURE_PLACES_PMTILES = 'pmtiles://https://overturemaps-extras-us-west-2.s3.us-west-2.amazonaws.com/tiles/2026-09-23.1/places.pmtiles';
 
 const SATELLITE_STYLE: maplibregl.StyleSpecification = {
   version: 8,
@@ -30,6 +37,10 @@ const SATELLITE_STYLE: maplibregl.StyleSpecification = {
       maxzoom: 22,
       attribution: '© Google',
     },
+    'overture-places': {
+      type: 'vector',
+      url: OVERTURE_PLACES_PMTILES,
+    },
   },
   layers: [
     {
@@ -39,8 +50,96 @@ const SATELLITE_STYLE: maplibregl.StyleSpecification = {
       minzoom: 0,
       maxzoom: 22,
     },
+    {
+      id: 'poi-dots',
+      type: 'circle',
+      source: 'overture-places',
+      'source-layer': 'places',
+      minzoom: 14,
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 3, 16, 5, 18, 7],
+        'circle-color': '#ffffff',
+        'circle-stroke-width': 1.8,
+        'circle-stroke-color': 'rgba(0,0,0,0.5)',
+        'circle-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 14.5, 0.85],
+        'circle-stroke-opacity': ['interpolate', ['linear'], ['zoom'], 14, 0, 14.5, 0.7],
+      },
+    },
+    {
+      id: 'poi-labels',
+      type: 'symbol',
+      source: 'overture-places',
+      'source-layer': 'places',
+      minzoom: 15.5,
+      layout: {
+        'text-field': ['coalesce', ['get', 'name'], ''],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 15.5, 10, 18, 12.5],
+        'text-offset': [0, 1.4],
+        'text-anchor': 'top',
+        'text-max-width': 9,
+        'text-allow-overlap': false,
+        'text-font': ['Open Sans Regular', 'Arial Unicode MS Regular'],
+      },
+      paint: {
+        'text-color': '#ffffff',
+        'text-halo-color': 'rgba(0,0,0,0.7)',
+        'text-halo-width': 1.2,
+        'text-opacity': ['interpolate', ['linear'], ['zoom'], 15.5, 0, 16, 1],
+      },
+    },
   ],
 };
+
+// Category keyword mapping: Overture basic_category → best matching user category name
+const OVERTURE_CATEGORY_MAP: Record<string, string[]> = {
+  coffee: ['cafe', 'coffee_shop', 'coffee', 'tea_house'],
+  restaurant: ['restaurant', 'fast_food', 'food_court', 'diner', 'pizzeria', 'sushi', 'steakhouse', 'noodle', 'seafood', 'buffet', 'bistro', 'brasserie', 'ramen'],
+  bar: ['bar', 'pub', 'nightclub', 'lounge', 'wine_bar', 'beer_garden', 'cocktail'],
+  hotel: ['hotel', 'motel', 'hostel', 'resort', 'inn', 'bed_and_breakfast', 'lodge', 'guesthouse', 'accommodation'],
+  library: ['library', 'bookstore', 'book_shop'],
+  shopping: ['shop', 'store', 'mall', 'supermarket', 'market', 'retail', 'boutique', 'department_store', 'convenience', 'grocery'],
+  gym: ['gym', 'fitness', 'sports_centre', 'yoga', 'pilates', 'swimming_pool'],
+  park: ['park', 'garden', 'nature', 'trail', 'playground', 'forest', 'beach', 'recreation'],
+  school: ['school', 'university', 'college', 'education', 'academy', 'kindergarten'],
+  hospital: ['hospital', 'clinic', 'doctor', 'pharmacy', 'dentist', 'medical', 'healthcare', 'veterinary'],
+  office: ['office', 'coworking', 'business', 'corporate', 'workspace'],
+  transport: ['bus_station', 'train_station', 'airport', 'ferry', 'subway', 'metro', 'taxi', 'gas_station', 'fuel', 'parking'],
+  museum: ['museum', 'gallery', 'art', 'exhibition', 'theater', 'theatre', 'cinema', 'concert'],
+  worship: ['church', 'mosque', 'temple', 'synagogue', 'chapel', 'shrine', 'worship'],
+  bank: ['bank', 'atm', 'finance', 'insurance', 'credit_union'],
+};
+
+function matchOvertureCategory(overtureCategory: string | undefined, userCategories: StudyCategory[]): string {
+  if (!overtureCategory || userCategories.length === 0) return userCategories[0]?.name || '';
+  const lower = overtureCategory.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+
+  // Try direct match against user category names first
+  for (const uc of userCategories) {
+    if (uc.name.toLowerCase() === lower || lower.includes(uc.name.toLowerCase()) || uc.name.toLowerCase().includes(lower)) {
+      return uc.name;
+    }
+  }
+
+  // Map Overture → canonical group, then match group to user categories
+  let matchedGroup = '';
+  for (const [group, keywords] of Object.entries(OVERTURE_CATEGORY_MAP)) {
+    if (keywords.some((k) => lower.includes(k) || k.includes(lower))) {
+      matchedGroup = group;
+      break;
+    }
+  }
+
+  if (matchedGroup) {
+    for (const uc of userCategories) {
+      const ucLower = uc.name.toLowerCase();
+      if (ucLower.includes(matchedGroup) || matchedGroup.includes(ucLower)) {
+        return uc.name;
+      }
+    }
+  }
+
+  return userCategories[0]?.name || '';
+}
 
 const MAP_STYLES: Record<Exclude<MapStyleKey, 'auto' | 'satellite'>, string> = {
   dark: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
@@ -126,6 +225,17 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
   });
   const [showStyleMenu, setShowStyleMenu] = useState(false);
 
+  // POI overlay visibility
+  const [showPoi, setShowPoi] = useState(() => {
+    try {
+      const saved = localStorage.getItem('habitat:map:show-poi');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const poiPopupRef = useRef<maplibregl.Popup | null>(null);
+
   const handleSelectStyle = (key: MapStyleKey) => {
     setMapStyleKey(key);
     setShowStyleMenu(false);
@@ -185,7 +295,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
   const userAccentRef = useRef(userAccent);
   userAccentRef.current = userAccent;
 
-  const handleDropPinRef = useRef<(lat: number, lng: number, prefilledName?: string, prefilledAddress?: string) => Promise<void>>();
+  const handleDropPinRef = useRef<(lat: number, lng: number, prefilledName?: string, prefilledAddress?: string, overtureCategory?: string) => Promise<void>>();
   const moveDraftPinRef = useRef<(lat: number, lng: number) => Promise<void>>();
   const handleLocateMeRef = useRef<(fly?: boolean) => Promise<void>>();
 
@@ -305,6 +415,100 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
         return;
       }
 
+      // Check if user clicked on an Overture POI dot/label
+      try {
+        const poiFeatures = map.queryRenderedFeatures(e.point, { layers: ['poi-dots', 'poi-labels'] });
+        if (poiFeatures.length > 0) {
+          const feat = poiFeatures[0];
+          const props = feat.properties || {};
+          const poiName = props.name || '';
+          const poiCategory = props.basic_category || props.category || '';
+          const geom = feat.geometry as { type: string; coordinates: [number, number] };
+          const poiLng = geom.coordinates[0];
+          const poiLat = geom.coordinates[1];
+
+          // Close any existing POI popup
+          if (poiPopupRef.current) {
+            poiPopupRef.current.remove();
+            poiPopupRef.current = null;
+          }
+
+          // Build popup HTML
+          const catLabel = poiCategory ? poiCategory.replace(/_/g, ' ') : '';
+          const popupDiv = document.createElement('div');
+
+          const bodyDiv = document.createElement('div');
+          bodyDiv.className = 'hab-poi-popup-body';
+          if (poiName) {
+            const nameEl = document.createElement('div');
+            nameEl.className = 'hab-poi-popup-name';
+            nameEl.textContent = poiName;
+            bodyDiv.appendChild(nameEl);
+          }
+          if (catLabel) {
+            const catEl = document.createElement('div');
+            catEl.className = 'hab-poi-popup-cat';
+            catEl.textContent = catLabel;
+            bodyDiv.appendChild(catEl);
+          }
+
+          // Address placeholder — will be filled by reverse geocoding
+          const addrEl = document.createElement('div');
+          addrEl.className = 'hab-poi-popup-addr';
+          addrEl.textContent = 'Loading address…';
+          bodyDiv.appendChild(addrEl);
+          popupDiv.appendChild(bodyDiv);
+
+          const actionsDiv = document.createElement('div');
+          actionsDiv.className = 'hab-poi-popup-actions';
+
+          const saveBtn = document.createElement('button');
+          saveBtn.className = 'btn primary small';
+          saveBtn.innerHTML = '<span>Save to My Places</span>';
+
+          const dirBtn = document.createElement('button');
+          dirBtn.className = 'btn subtle small';
+          dirBtn.innerHTML = '<span>Directions</span>';
+          dirBtn.addEventListener('click', () => {
+            window.open(`https://www.google.com/maps/dir/?api=1&destination=${poiLat},${poiLng}`, '_blank');
+          });
+
+          actionsDiv.appendChild(saveBtn);
+          actionsDiv.appendChild(dirBtn);
+          popupDiv.appendChild(actionsDiv);
+
+          const popup = new maplibregl.Popup({
+            offset: 14,
+            closeButton: true,
+            className: 'hab-poi-popup-wrap',
+            maxWidth: '300px',
+          })
+            .setLngLat([poiLng, poiLat])
+            .setDOMContent(popupDiv)
+            .addTo(map);
+
+          poiPopupRef.current = popup;
+
+          // Save button handler
+          saveBtn.addEventListener('click', () => {
+            popup.remove();
+            poiPopupRef.current = null;
+            handleDropPinRef.current?.(poiLat, poiLng, poiName, addrEl.textContent !== 'Loading address…' ? addrEl.textContent || '' : '', poiCategory);
+          });
+
+          // Reverse geocode to fill address
+          reverseGeocode(poiLat, poiLng).then((geo) => {
+            if (geo?.address) {
+              addrEl.textContent = geo.address;
+            } else {
+              addrEl.textContent = `${poiLat.toFixed(5)}, ${poiLng.toFixed(5)}`;
+            }
+          });
+
+          return; // Don't drop a pin — we showed the POI popup instead
+        }
+      } catch {}
+
       // Check if user clicked directly on a rendered vector map feature (e.g. building, POI, landmark, street)
       let featureName = '';
       try {
@@ -334,6 +538,20 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       handleDropPinRef.current?.(e.lngLat.lat, e.lngLat.lng);
     });
 
+    // POI hover: change cursor to pointer
+    map.on('mouseenter', 'poi-dots', () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', 'poi-dots', () => {
+      map.getCanvas().style.cursor = '';
+    });
+    map.on('mouseenter', 'poi-labels', () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', 'poi-labels', () => {
+      map.getCanvas().style.cursor = '';
+    });
+
     let resizeRaf: number | null = null;
     const ro = new ResizeObserver(() => {
       if (resizeRaf) cancelAnimationFrame(resizeRaf);
@@ -348,6 +566,10 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     // Cleanup
     return () => {
       ro.disconnect();
+      if (poiPopupRef.current) {
+        poiPopupRef.current.remove();
+        poiPopupRef.current = null;
+      }
       if (userLocMarkerRef.current) {
         userLocMarkerRef.current.remove();
         userLocMarkerRef.current = null;
@@ -363,6 +585,29 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     if (!map) return;
     map.setStyle(resolvedStyleUrl);
   }, [resolvedStyleUrl]);
+
+  // Toggle POI overlay visibility
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    try {
+      localStorage.setItem('habitat:map:show-poi', String(showPoi));
+    } catch {}
+
+    const setVisibility = () => {
+      const vis = showPoi ? 'visible' : 'none';
+      try {
+        if (map.getLayer('poi-dots')) map.setLayoutProperty('poi-dots', 'visibility', vis);
+        if (map.getLayer('poi-labels')) map.setLayoutProperty('poi-labels', 'visibility', vis);
+      } catch {}
+    };
+
+    if (map.isStyleLoaded()) {
+      setVisibility();
+    } else {
+      map.once('styledata', setVisibility);
+    }
+  }, [showPoi, resolvedStyleUrl]);
 
   // High precision reverse geocode helper: uses Photon (Komoot OSM) first for fast POI/building names, with fallback to Nominatim
   const reverseGeocode = async (lat: number, lng: number) => {
@@ -495,7 +740,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
   }, []);
 
   // Drop pin handler
-  const handleDropPin = useCallback(async (lat: number, lng: number, prefilledName?: string, prefilledAddress?: string) => {
+  const handleDropPin = useCallback(async (lat: number, lng: number, prefilledName?: string, prefilledAddress?: string, overtureCategory?: string) => {
     setSelectedPlaceId(null);
     setIsSidebarOpen(true);
 
@@ -510,7 +755,10 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     const accent = userAccentRef.current;
     const currentActiveCat = activeCategoryRef.current;
     const currentCats = categoriesRef.current;
-    const defaultCat = currentActiveCat !== 'all' ? currentActiveCat : (currentCats[0]?.name || '');
+    // If we have an Overture category hint, try to auto-match to user's categories
+    const defaultCat = overtureCategory
+      ? matchOvertureCategory(overtureCategory, currentCats)
+      : (currentActiveCat !== 'all' ? currentActiveCat : (currentCats[0]?.name || ''));
     const matchedCat = currentCats.find((c) => c.name === defaultCat);
     const draftColor = matchedCat?.color || accent;
 
@@ -1242,6 +1490,29 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                   </div>
 
                   <div className="hab-style-menu-divider" />
+
+                  {mapStyleKey === 'satellite' && (
+                    <>
+                      <div
+                        className="hab-poi-toggle-row"
+                        onClick={() => setShowPoi((v) => !v)}
+                        role="button"
+                        tabIndex={0}
+                      >
+                        <div className="hab-poi-toggle-label">
+                          <div className="hab-style-icon-box">
+                            <Icon name="building" size={13} />
+                          </div>
+                          <div className="hab-poi-toggle-info">
+                            <span className="hab-poi-toggle-name">Nearby Places</span>
+                            <span className="hab-poi-toggle-desc">Show clickable businesses &amp; POIs</span>
+                          </div>
+                        </div>
+                        <div className={`hab-poi-switch ${showPoi ? 'on' : ''}`} />
+                      </div>
+                      <div className="hab-style-menu-divider" />
+                    </>
+                  )}
 
                   <button
                     type="button"
