@@ -40,6 +40,31 @@ test('study:categoryCreate creates and returns a custom category', () => {
   assert.ok(all.some((c) => c.name === 'Quiet Zones'));
 });
 
+test('study:categoryPatch updates category fields and associated places', () => {
+  const cat = call('study:categoryCreate', {
+    name: 'Old Category Name',
+    color: '#3b82f6',
+    icon: 'pin',
+  });
+  assert.equal(cat.name, 'Old Category Name');
+
+  const patched = call('study:categoryPatch', {
+    id: cat.id,
+    patch: {
+      name: 'New Category Name',
+      color: '#ef4444',
+      icon: 'star',
+    },
+  });
+  assert.equal(patched.name, 'New Category Name');
+  assert.equal(patched.color, '#ef4444');
+  assert.equal(patched.icon, 'star');
+
+  const all = call('study:categories');
+  assert.ok(all.some((c) => c.name === 'New Category Name'));
+  assert.ok(!all.some((c) => c.name === 'Old Category Name'));
+});
+
 test('study:placeCreate creates a new study place with coordinates', () => {
   const place = call('study:placeCreate', {
     name: 'Widener Library Room 310',

@@ -180,6 +180,133 @@ const PRESET_COLORS = [
 const DEFAULT_CENTER: [number, number] = [-71.1167, 42.377];
 const DEFAULT_ZOOM = 16;
 
+export interface GeoSearchResult {
+  id: string | number;
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+  tag: string;
+  icon: string;
+  category?: string;
+  isHouse?: boolean;
+  isPoi?: boolean;
+}
+
+function formatPhotonFeature(f: any, originalQuery: string): GeoSearchResult {
+  const p = f.properties || {};
+  const coords = f.geometry?.coordinates || [0, 0];
+  const isHouse = p.osm_value === 'house' || p.type === 'house' || !!p.housenumber;
+
+  // If user searched e.g. 65B and OSM node has housenumber 65, preserve the user's sub-letter
+  let displayHouseNum = p.housenumber || '';
+  if (p.housenumber) {
+    const letterMatch = originalQuery.match(new RegExp(`\\b${p.housenumber}([a-zA-Z])\\b`, 'i'));
+    if (letterMatch) {
+      displayHouseNum = `${p.housenumber}${letterMatch[1].toUpperCase()}`;
+    }
+  }
+
+  let name = p.name;
+  if (!name) {
+    if (p.street && displayHouseNum) {
+      name = `${p.street} ${displayHouseNum}`;
+    } else if (p.street) {
+      name = p.street;
+    } else if (p.city || p.locality) {
+      name = p.locality || p.city;
+    } else {
+      name = originalQuery;
+    }
+  }
+
+  const addrParts: string[] = [];
+  if (displayHouseNum && p.street && name !== `${p.street} ${displayHouseNum}` && name !== p.street) {
+    addrParts.push(`${p.street} ${displayHouseNum}`);
+  } else if (p.street && name !== p.street && !name.includes(p.street)) {
+    addrParts.push(p.street);
+  }
+
+  const loc = p.locality || p.district;
+  if (loc && loc !== name && !addrParts.includes(loc)) addrParts.push(loc);
+  if (p.city && p.city !== name && !addrParts.includes(p.city)) addrParts.push(p.city);
+  if (p.postcode && !addrParts.includes(p.postcode)) addrParts.push(p.postcode);
+  if (p.country && p.country !== name && !addrParts.includes(p.country)) addrParts.push(p.country);
+
+  const address = addrParts.join(', ');
+
+  let tag = 'Place';
+  let icon = 'pin';
+  const val = (p.osm_value || '').toLowerCase();
+  const key = (p.osm_key || '').toLowerCase();
+
+  if (val === 'hotel' || key === 'tourism') {
+    tag = 'Hotel';
+    icon = 'building';
+  } else if (val === 'restaurant' || val === 'food' || val === 'fast_food') {
+    tag = 'Restaurant';
+    icon = 'coffee';
+  } else if (val === 'cafe' || val === 'bar' || val === 'pub') {
+    tag = val === 'cafe' ? 'Café' : 'Bar';
+    icon = 'coffee';
+  } else if (isHouse) {
+    tag = 'Address';
+    icon = 'home';
+  } else if (key === 'highway' || p.type === 'street') {
+    tag = 'Street';
+    icon = 'compass';
+  } else if (p.type === 'city' || p.type === 'district' || p.type === 'locality') {
+    tag = 'Area';
+    icon = 'globe';
+  }
+
+  return {
+    id: p.osm_id || `${coords[0]}_${coords[1]}_${name}`,
+    name,
+    address,
+    lat: coords[1],
+    lng: coords[0],
+    tag,
+    icon,
+    category: val || key || 'place',
+    isHouse,
+    isPoi: ['hotel', 'restaurant', 'cafe', 'bar', 'tourism', 'amenity'].includes(val),
+  };
+}
+
+function formatNominatimItem(item: any): GeoSearchResult {
+  const shortName = item.name || (item.display_name ? item.display_name.split(',')[0] : 'Location');
+  const parts = (item.display_name || '').split(',').map((s: string) => s.trim());
+  const address = parts.slice(1, 4).join(', ');
+  const type = (item.type || item.class || '').toLowerCase();
+  let tag = 'Place';
+  let icon = 'pin';
+  if (type.includes('hotel') || item.class === 'tourism') {
+    tag = 'Hotel';
+    icon = 'building';
+  } else if (type.includes('restaurant') || type.includes('cafe')) {
+    tag = 'Food';
+    icon = 'coffee';
+  } else if (item.class === 'highway') {
+    tag = 'Street';
+    icon = 'compass';
+  } else if (item.class === 'place' || item.class === 'building') {
+    tag = 'Address';
+    icon = 'home';
+  }
+
+  return {
+    id: item.place_id || item.osm_id || Math.random(),
+    name: shortName,
+    address: address || item.display_name || '',
+    lat: parseFloat(item.lat),
+    lng: parseFloat(item.lon),
+    tag,
+    icon,
+    category: item.type || item.class,
+  };
+}
+
 export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
   const { theme, navigate } = useApp();
   const mapContainerRef = useRef<HTMLDivElement>(null);
@@ -198,9 +325,9 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(() => {
     try {
       const saved = localStorage.getItem('habitat:study-map:sidebar-open');
-      return saved !== null ? saved === 'true' : true;
+      return saved !== null ? saved === 'true' : false;
     } catch {
-      return true;
+      return false;
     }
   });
 
@@ -208,10 +335,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     try {
       localStorage.setItem('habitat:study-map:sidebar-open', String(isSidebarOpen));
     } catch {}
-    const timer = setTimeout(() => {
-      mapRef.current?.resize();
-    }, 280);
-    return () => clearTimeout(timer);
   }, [isSidebarOpen]);
 
   const [mapStyleKey, setMapStyleKey] = useState<MapStyleKey>(() => {
@@ -235,6 +358,8 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     }
   });
   const poiPopupRef = useRef<maplibregl.Popup | null>(null);
+  const placePopupRef = useRef<maplibregl.Popup | null>(null);
+  const showPlacePopupRef = useRef<(p: StudyPlace) => void>();
 
   const handleSelectStyle = (key: MapStyleKey) => {
     setMapStyleKey(key);
@@ -265,12 +390,34 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
 
   // Search / geocoding
   const [geoQuery, setGeoQuery] = useState('');
-  const [geoResults, setGeoResults] = useState<any[]>([]);
+  const [geoResults, setGeoResults] = useState<GeoSearchResult[]>([]);
   const [isSearchingGeo, setIsSearchingGeo] = useState(false);
   const [showGeoDropdown, setShowGeoDropdown] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchAbortRef = useRef<AbortController | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [userLocMarker, setUserLocMarker] = useState<maplibregl.Marker | null>(null);
   const userLocMarkerRef = useRef<maplibregl.Marker | null>(null);
+
+  // Close search dropdown on click outside
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent | PointerEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
+        setShowGeoDropdown(false);
+      }
+    };
+    document.addEventListener('pointerdown', handleOutsideClick);
+    return () => document.removeEventListener('pointerdown', handleOutsideClick);
+  }, []);
+
+  // Cleanup debounce and fetch abort controllers on unmount
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      if (searchAbortRef.current) searchAbortRef.current.abort();
+    };
+  }, []);
 
   // Dynamic user accent color from CSS variables
   const userAccent = useMemo(() => {
@@ -350,7 +497,10 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       style: resolvedStyleUrl,
       center: initCenter,
       zoom: initZoom,
+      minZoom: 1.5,
       maxZoom: 20,
+      renderWorldCopies: false,
+      trackResize: false,
       pitchWithRotate: true,
       dragRotate: true,
       attributionControl: { compact: true },
@@ -406,6 +556,10 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     // Click handler on map
     map.on('click', (e: maplibregl.MapMouseEvent) => {
       const { lng, lat } = e.lngLat;
+      if (placePopupRef.current) {
+        placePopupRef.current.remove();
+        placePopupRef.current = null;
+      }
       if (selectedPlaceIdRef.current) {
         setSelectedPlaceId(null);
         return;
@@ -552,23 +706,43 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       map.getCanvas().style.cursor = '';
     });
 
-    let resizeRaf: number | null = null;
-    const ro = new ResizeObserver(() => {
-      if (resizeRaf) cancelAnimationFrame(resizeRaf);
-      resizeRaf = requestAnimationFrame(() => {
+    let resizeTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastSize = { w: 0, h: 0 };
+
+    const ro = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+
+      const { width, height } = entry.contentRect;
+      if (Math.abs(width - lastSize.w) < 1 && Math.abs(height - lastSize.h) < 1) {
+        return;
+      }
+
+      if (resizeTimer) clearTimeout(resizeTimer);
+
+      // Debounce resize so smooth spring animations and pane resizes don't clear WebGL framebuffers on every frame
+      resizeTimer = setTimeout(() => {
+        if (!mapRef.current) return;
+        lastSize = { w: width, h: height };
         map.resize();
-      });
+      }, 100);
     });
+
     if (mapContainerRef.current) {
       ro.observe(mapContainerRef.current);
     }
 
     // Cleanup
     return () => {
+      if (resizeTimer) clearTimeout(resizeTimer);
       ro.disconnect();
       if (poiPopupRef.current) {
         poiPopupRef.current.remove();
         poiPopupRef.current = null;
+      }
+      if (placePopupRef.current) {
+        placePopupRef.current.remove();
+        placePopupRef.current = null;
       }
       if (userLocMarkerRef.current) {
         userLocMarkerRef.current.remove();
@@ -722,8 +896,8 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     el.addEventListener('click', (e) => {
       e.stopPropagation();
       setSelectedPlaceId(place.id);
-      setIsSidebarOpen(true);
-      mapRef.current?.flyTo({ center: [place.lng, place.lat], zoom: 18, duration: 1200 });
+      mapRef.current?.flyTo({ center: [place.lng, place.lat], zoom: 17, duration: 800 });
+      showPlacePopupRef.current?.(place);
     });
 
     return el;
@@ -765,6 +939,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     const draftEl = createDraftMarkerElement(draftColor);
     const draftMarker = new maplibregl.Marker({ element: draftEl, anchor: 'bottom', draggable: true })
       .setLngLat([lng, lat])
+      .setSubpixelPositioning(true)
       .addTo(map);
 
     draftMarkerRef.current = draftMarker;
@@ -863,8 +1038,13 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
             draftMarkerRef.current = null;
           }
           setModalPlace(null);
-        } else if (selectedPlaceId) {
+          setIsSidebarOpen(false);
+        } else if (selectedPlaceId || placePopupRef.current) {
           setSelectedPlaceId(null);
+          if (placePopupRef.current) {
+            placePopupRef.current.remove();
+            placePopupRef.current = null;
+          }
         }
       }
     };
@@ -902,7 +1082,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
         const marker = markersRef.current.get(p.id)!;
         marker.setLngLat([p.lng, p.lat]);
         const el = marker.getElement();
-        el.className = `hab-pin-wrapper saved ${isSelected ? 'selected' : ''}`;
+        el.classList.toggle('selected', isSelected);
         const label = el.querySelector('.hab-pin-label-text') || el.querySelector('.hab-map-pin-label');
         if (label) label.textContent = p.name;
         const dot = el.querySelector('.hab-pin-label-dot') as HTMLElement | null;
@@ -913,16 +1093,13 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
         const el = createPlaceMarkerElement(p, cat, isSelected);
         const marker = new maplibregl.Marker({ element: el, anchor: 'bottom' })
           .setLngLat([p.lng, p.lat])
+          .setSubpixelPositioning(true)
           .addTo(map);
         markersRef.current.set(p.id, marker);
       }
     }
   }, [places, categories, activeCategory, selectedPlaceId, userAccent]);
 
-  // Selected place object
-  const selectedPlace = useMemo(() => {
-    return places.find((p) => p.id === selectedPlaceId) || null;
-  }, [places, selectedPlaceId]);
 
   // Filtered places list for the sidebar
   const filteredPlaces = useMemo(() => {
@@ -940,42 +1117,141 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     });
   }, [places, activeCategory, searchQuery]);
 
-  // Geocoding search handler
-  const handleGeoSearch = async (query: string) => {
-    setGeoQuery(query);
-    if (!query.trim()) {
+  // Input change handler with debounce
+  const handleGeoInputChange = (value: string) => {
+    setGeoQuery(value);
+
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = null;
+    }
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+      searchAbortRef.current = null;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
       setGeoResults([]);
       setShowGeoDropdown(false);
+      setIsSearchingGeo(false);
       return;
     }
-    setIsSearchingGeo(true);
+
     setShowGeoDropdown(true);
+    setIsSearchingGeo(true);
+
+    searchDebounceRef.current = setTimeout(() => {
+      executeGeoSearch(trimmed);
+    }, 280);
+  };
+
+  // Execute geo search against Photon (Komoot OSM) with candidate normalization and Nominatim fallback
+  const executeGeoSearch = async (query: string, selectFirst = false) => {
+    if (searchAbortRef.current) {
+      searchAbortRef.current.abort();
+    }
+    const abortCtrl = new AbortController();
+    searchAbortRef.current = abortCtrl;
+    setIsSearchingGeo(true);
+
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5`,
-        { headers: { Accept: 'application/json' } }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setGeoResults(data);
+      const center = mapRef.current?.getCenter();
+      const biasParams = center ? `&lat=${center.lat.toFixed(5)}&lon=${center.lng.toFixed(5)}` : '';
+
+      // Normalize candidate queries (e.g. "65B" -> "65") to match building nodes
+      const normalizedQuery = query.replace(/\b(\d+)[a-zA-Z]\b/g, '$1').trim();
+      const candidateQueries = [query];
+      if (normalizedQuery && normalizedQuery !== query) {
+        candidateQueries.push(normalizedQuery);
+      }
+
+      const fetchCandidate = async (q: string) => {
+        try {
+          const res = await fetch(
+            `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}${biasParams}&limit=6`,
+            {
+              headers: { Accept: 'application/json' },
+              signal: abortCtrl.signal,
+            }
+          );
+          if (!res.ok) return [];
+          const data = await res.json();
+          return ((data?.features as any[]) || []).map((f) => formatPhotonFeature(f, query));
+        } catch {
+          return [];
+        }
+      };
+
+      const candidateResults = (await Promise.all(candidateQueries.map(fetchCandidate))).flat();
+
+      let results: GeoSearchResult[] = [];
+
+      if (candidateResults.length > 0) {
+        // Deduplicate nearby or identical coordinates
+        const seen = new Set<string>();
+        for (const item of candidateResults) {
+          const key = `${Math.round(item.lat * 10000)}_${Math.round(item.lng * 10000)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            results.push(item);
+          }
+        }
+
+        // Rank: Exact address/building matches first, then POIs (hotels, restaurants), then streets
+        results.sort((a, b) => {
+          const scoreA = (a.isHouse ? 4 : 0) + (a.isPoi ? 3 : 0) + (a.tag === 'Street' ? 1 : 0);
+          const scoreB = (b.isHouse ? 4 : 0) + (b.isPoi ? 3 : 0) + (b.tag === 'Street' ? 1 : 0);
+          return scoreB - scoreA;
+        });
+
+        results = results.slice(0, 7);
+      }
+
+      // Fallback to Nominatim if Photon returned no results
+      if (results.length === 0 && !abortCtrl.signal.aborted) {
+        try {
+          const nomRes = await fetch(
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=5`,
+            {
+              headers: { Accept: 'application/json' },
+              signal: abortCtrl.signal,
+            }
+          );
+          if (nomRes.ok) {
+            const nomData = await nomRes.json();
+            if (Array.isArray(nomData)) {
+              results = nomData.map(formatNominatimItem);
+            }
+          }
+        } catch {}
+      }
+
+      if (!abortCtrl.signal.aborted) {
+        setGeoResults(results);
+        setShowGeoDropdown(true);
+
+        if (selectFirst && results.length > 0) {
+          handleSelectGeoResult(results[0]);
+        }
       }
     } catch {
-      setGeoResults([]);
+      if (!abortCtrl.signal.aborted) {
+        setGeoResults([]);
+      }
     } finally {
-      setIsSearchingGeo(false);
+      if (!abortCtrl.signal.aborted) {
+        setIsSearchingGeo(false);
+      }
     }
   };
 
-  // Fly to geocoded search result
-  const handleSelectGeoResult = (item: any) => {
+  // Fly to geocoded search result and prefill venue name / address
+  const handleSelectGeoResult = (item: GeoSearchResult) => {
     setShowGeoDropdown(false);
-    const shortName = item.display_name.split(',')[0];
-    setGeoQuery(shortName);
-    const lat = parseFloat(item.lat);
-    const lng = parseFloat(item.lon);
-
-    mapRef.current?.flyTo({ center: [lng, lat], zoom: 18, duration: 1500 });
-    handleDropPin(lat, lng, shortName, item.display_name);
+    setGeoQuery(item.name);
+    mapRef.current?.flyTo({ center: [item.lng, item.lat], zoom: 17.5, duration: 1400 });
+    handleDropPin(item.lat, item.lng, item.name, item.address, item.category);
   };
 
   // Helper to obtain location coordinates from hardware CoreLocation, browser GPS, or fast IP fallback
@@ -1069,6 +1345,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
 
       const m = new maplibregl.Marker({ element: el })
         .setLngLat([lng, lat])
+        .setSubpixelPositioning(true)
         .setPopup(popup)
         .addTo(map);
 
@@ -1162,7 +1439,9 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
           address: modalPlace.address.trim(),
         });
         await loadData();
-        setSelectedPlaceId(created.id);
+        setSelectedPlaceId(null);
+        setIsSidebarOpen(false);
+        mapRef.current?.flyTo({ center: [created.lng, created.lat], zoom: 17, duration: 800 });
       } else if (modalPlace.mode === 'edit' && modalPlace.place) {
         await api.study.placePatch(modalPlace.place.id, {
           name: modalPlace.name.trim(),
@@ -1172,9 +1451,12 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
           address: modalPlace.address.trim(),
         });
         await loadData();
+        setSelectedPlaceId(null);
+        setIsSidebarOpen(false);
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to save place:', e);
+      alert(e?.message || 'Failed to save place');
     } finally {
       if (draftMarkerRef.current) {
         draftMarkerRef.current.remove();
@@ -1186,6 +1468,10 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
 
   // Delete place
   const handleDeletePlace = async (id: string, name: string) => {
+    if (placePopupRef.current) {
+      placePopupRef.current.remove();
+      placePopupRef.current = null;
+    }
     if (!(await ask(`Delete “${name}”?`))) return;
     try {
       await api.study.placeDelete(id);
@@ -1195,6 +1481,83 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       console.error('Failed to delete place:', e);
     }
   };
+
+  // Show anchored place detail popup directly over the map pin
+  const showPlacePopup = useCallback((p: StudyPlace) => {
+    if (placePopupRef.current) {
+      placePopupRef.current.remove();
+      placePopupRef.current = null;
+    }
+    const map = mapRef.current;
+    if (!map) return;
+
+    const cat = categoriesRef.current.find((c) => c.name === p.category);
+    const color = cat?.color || userAccentRef.current;
+
+    const popupDiv = document.createElement('div');
+    popupDiv.className = 'hab-place-popup';
+
+    popupDiv.innerHTML = `
+      <div class="hab-place-popup-head">
+        <div class="hab-place-popup-title-row">
+          ${p.category ? `<span class="hab-place-popup-cat" style="background:${color}20; color:${color}; border:1px solid ${color}40;">${escapeHtml(p.category)}</span>` : ''}
+          <h4 class="hab-place-popup-name">${escapeHtml(p.name)}</h4>
+        </div>
+      </div>
+      ${p.address ? `<div class="hab-place-popup-addr">${escapeHtml(p.address)}</div>` : ''}
+      ${p.notes ? `<div class="hab-place-popup-notes">${escapeHtml(p.notes)}</div>` : ''}
+      <div class="hab-place-popup-actions">
+        <button type="button" class="btn subtle small hab-btn-dir">Directions</button>
+        <button type="button" class="btn subtle small hab-btn-edit">Edit</button>
+        <button type="button" class="btn subtle small danger hab-btn-del">Delete</button>
+      </div>
+    `;
+
+    popupDiv.querySelector('.hab-btn-dir')?.addEventListener('click', () => {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`, '_blank');
+    });
+
+    popupDiv.querySelector('.hab-btn-edit')?.addEventListener('click', () => {
+      if (placePopupRef.current) {
+        placePopupRef.current.remove();
+        placePopupRef.current = null;
+      }
+      setIsSidebarOpen(true);
+      setModalPlace({
+        mode: 'edit',
+        place: p,
+        lat: p.lat,
+        lng: p.lng,
+        name: p.name,
+        category: p.category,
+        color: cat?.color || userAccentRef.current,
+        notes: p.notes || '',
+        address: p.address || '',
+      });
+    });
+
+    popupDiv.querySelector('.hab-btn-del')?.addEventListener('click', () => {
+      if (placePopupRef.current) {
+        placePopupRef.current.remove();
+        placePopupRef.current = null;
+      }
+      handleDeletePlace(p.id, p.name);
+    });
+
+    const popup = new maplibregl.Popup({
+      closeButton: true,
+      closeOnClick: false,
+      className: 'hab-place-popup-wrap',
+      offset: [0, -38],
+    })
+      .setLngLat([p.lng, p.lat])
+      .setDOMContent(popupDiv)
+      .addTo(map);
+
+    placePopupRef.current = popup;
+  }, []);
+
+  showPlacePopupRef.current = showPlacePopup;
 
   // Add pin directly at the center of the current map view
   const handleAddPinAtCenter = useCallback(() => {
@@ -1256,8 +1619,9 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
       setNewCategoryModal(false);
       setEditingCategory(null);
       setNewCatName('');
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to save category:', e);
+      alert(e?.message || 'Failed to save category');
     }
   };
 
@@ -1306,60 +1670,104 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
     <div className="hab-map-view">
       {/* Top Header / Bar */}
       <div className="hab-map-top-bar">
-        {/* Left: Sidebar toggle & Title */}
+        {/* Left: Title & place count */}
         <div className="hab-map-bar-left">
-          <button
-            className={`btn ${isSidebarOpen ? 'active' : 'subtle'} hab-map-sidebar-toggle-btn`}
-            onClick={() => setIsSidebarOpen((v) => !v)}
-            title={isSidebarOpen ? 'Hide places sidebar (Full map view)' : 'Show places sidebar'}
-            aria-label={isSidebarOpen ? 'Hide places sidebar' : 'Show places sidebar'}
-          >
-            <Icon name={isSidebarOpen ? 'panel-close' : 'panel-open'} size={15} />
-            <span>{isSidebarOpen ? 'Hide Places' : 'Show Places'}</span>
-          </button>
           <span className="hab-map-title">
             <Icon name="map" size={16} />
-            <span>Map</span>
+            <span className="hab-title-label">Map</span>
           </span>
-          <span className="hab-map-place-count">{places.length} places</span>
+          <button
+            type="button"
+            className={`hab-map-place-count ${isSidebarOpen ? 'active' : ''}`}
+            onClick={() => setIsSidebarOpen((v) => !v)}
+            title={isSidebarOpen ? 'Hide saved places' : 'Show saved places'}
+          >
+            <span className="hab-place-count-num">{places.length}</span>
+            <span className="hab-place-count-text"> places</span>
+          </button>
         </div>
 
         {/* Center: Search places / addresses */}
-        <div className="hab-map-search-box">
+        <div className="hab-map-search-box" ref={searchBoxRef}>
           <Icon name="search" size={14} className="hab-map-search-icon" />
           <input
             type="text"
-            placeholder="Search places, streets, addresses…"
+            placeholder="Search hotels, places, streets, addresses…"
             value={geoQuery}
-            onChange={(e) => handleGeoSearch(e.target.value)}
-            onFocus={() => geoResults.length > 0 && setShowGeoDropdown(true)}
+            onChange={(e) => handleGeoInputChange(e.target.value)}
+            onFocus={() => {
+              if (geoQuery.trim()) {
+                setShowGeoDropdown(true);
+                if (geoResults.length === 0 && !isSearchingGeo) {
+                  executeGeoSearch(geoQuery.trim());
+                }
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                if (geoResults.length > 0) {
+                  handleSelectGeoResult(geoResults[0]);
+                } else if (geoQuery.trim()) {
+                  if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+                  executeGeoSearch(geoQuery.trim(), true);
+                }
+              } else if (e.key === 'Escape') {
+                setShowGeoDropdown(false);
+              }
+            }}
           />
-          {isSearchingGeo && <span className="spinner-subtle" />}
+          {isSearchingGeo && <span className="hab-search-spinner" />}
           {geoQuery && (
             <button
+              type="button"
               className="icon-btn subtle hab-search-clear"
               onClick={() => {
                 setGeoQuery('');
                 setGeoResults([]);
                 setShowGeoDropdown(false);
+                if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+                if (searchAbortRef.current) searchAbortRef.current.abort();
               }}
+              title="Clear search"
             >
               <Icon name="x" size={12} />
             </button>
           )}
 
           {/* Autocomplete dropdown */}
-          {showGeoDropdown && geoResults.length > 0 && (
+          {showGeoDropdown && (geoResults.length > 0 || isSearchingGeo || geoQuery.trim()) && (
             <div className="hab-map-geo-dropdown popover">
-              {geoResults.map((r, i) => (
-                <button key={i} className="hab-map-geo-item" onClick={() => handleSelectGeoResult(r)}>
-                  <Icon name="map-pin" size={14} />
+              {geoResults.map((r) => (
+                <button
+                  key={r.id}
+                  type="button"
+                  className="hab-map-geo-item"
+                  onClick={() => handleSelectGeoResult(r)}
+                >
+                  <div className="hab-map-geo-icon-box">
+                    <Icon name={r.icon || 'map-pin'} size={15} />
+                  </div>
                   <div className="hab-map-geo-text">
-                    <strong>{r.display_name.split(',')[0]}</strong>
-                    <small>{r.display_name.split(',').slice(1, 3).join(',')}</small>
+                    <div className="hab-map-geo-title-row">
+                      <strong className="hab-map-geo-name">{r.name}</strong>
+                      {r.tag && <span className={`hab-geo-tag hab-geo-tag-${r.tag.toLowerCase()}`}>{r.tag}</span>}
+                    </div>
+                    {r.address && <small className="hab-map-geo-addr">{r.address}</small>}
                   </div>
                 </button>
               ))}
+              {geoResults.length === 0 && isSearchingGeo && (
+                <div className="hab-map-geo-status">
+                  <span className="hab-search-spinner" style={{ position: 'static' }} />
+                  <span>Searching places &amp; addresses…</span>
+                </div>
+              )}
+              {geoResults.length === 0 && !isSearchingGeo && geoQuery.trim() && (
+                <div className="hab-map-geo-status">
+                  <span>No places found for “{geoQuery}”</span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1367,12 +1775,12 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
         {/* Right: Actions */}
         <div className="hab-map-bar-right">
           <button
-            className="btn primary"
+            className="btn primary hab-map-add-btn"
             onClick={handleAddPinAtCenter}
             title="Drop a pin at the center of the current map view"
           >
             <Icon name="plus" size={14} />
-            <span>Add Place</span>
+            <span className="hab-btn-label">Add Place</span>
           </button>
 
           <div style={{ position: 'relative' }}>
@@ -1538,7 +1946,15 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
         <button
           type="button"
           className={`hab-cat-chip ${activeCategory === 'all' ? 'active' : ''}`}
-          onClick={() => setActiveCategory('all')}
+          onClick={() => {
+            if (activeCategory === 'all') {
+              setIsSidebarOpen((v) => !v);
+            } else {
+              setActiveCategory('all');
+              setIsSidebarOpen(true);
+            }
+          }}
+          title={isSidebarOpen && activeCategory === 'all' ? 'Hide saved places' : 'Show all saved places'}
           style={activeCategory === 'all' ? { backgroundColor: userAccent, color: '#ffffff' } : undefined}
         >
           <Icon name="map" size={13} />
@@ -1558,7 +1974,10 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
             >
               <span
                 className="hab-cat-chip-label"
-                onClick={() => setActiveCategory(c.name)}
+                onClick={() => {
+                  setActiveCategory(c.name);
+                  setIsSidebarOpen(true);
+                }}
               >
                 {!isActive && <span className="hab-cat-color-dot" style={{ backgroundColor: bg }} />}
                 <TypeIcon icon={c.icon} size={13} />
@@ -1635,6 +2054,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                           draftMarkerRef.current = null;
                         }
                         setModalPlace(null);
+                        setIsSidebarOpen(false);
                       }}
                     >
                       <Icon name="x" size={15} />
@@ -1789,6 +2209,7 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                             draftMarkerRef.current = null;
                           }
                           setModalPlace(null);
+                          setIsSidebarOpen(false);
                         }}
                       >
                         Cancel
@@ -1815,15 +2236,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                         <span className="hab-cat-badge">{places.length}</span>
                       </div>
                       <div className="hab-sidebar-title-actions">
-                        <button
-                          type="button"
-                          className="btn subtle small"
-                          onClick={handleAddPinAtCenter}
-                          title="Add place at map center"
-                        >
-                          <Icon name="plus" size={13} />
-                          <span>Add</span>
-                        </button>
                         <button
                           type="button"
                           className="icon-btn subtle hab-sidebar-collapse-btn"
@@ -1869,7 +2281,8 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
                             className={`hab-sidebar-item ${isSelected ? 'selected' : ''}`}
                             onClick={() => {
                               setSelectedPlaceId(p.id);
-                              mapRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 18, duration: 1200 });
+                              mapRef.current?.flyTo({ center: [p.lng, p.lat], zoom: 17, duration: 800 });
+                              showPlacePopup(p);
                             }}
                           >
                             <span className="hab-item-color-bar" style={{ background: tint }} />
@@ -1976,114 +2389,6 @@ export function StudyMap({ initialPlaceId }: { initialPlaceId?: string }) {
               <span style={{ fontSize: 16, lineHeight: 1 }}>−</span>
             </button>
           </div>
-
-          {/* Selected Place Popover / Detail Card */}
-          <AnimatePresence>
-            {selectedPlace && !modalPlace && (
-              <motion.div
-                className="hab-map-place-card"
-                initial={{ opacity: 0, y: 15, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 15, scale: 0.95 }}
-                transition={spring}
-              >
-                <div className="hab-card-head">
-                  <div className="hab-card-title-group">
-                    {selectedPlace.category ? (
-                      <span
-                        className="hab-card-cat-badge"
-                        style={{
-                          backgroundColor:
-                            selectedPlace.color ||
-                            categories.find((c) => c.name === selectedPlace.category)?.color ||
-                            userAccent,
-                        }}
-                      >
-                        {selectedPlace.category}
-                      </span>
-                    ) : null}
-                    <h3>{selectedPlace.name}</h3>
-                  </div>
-                  <button
-                    className="icon-btn subtle"
-                    onClick={() => setSelectedPlaceId(null)}
-                    aria-label="Close"
-                  >
-                    <Icon name="x" size={14} />
-                  </button>
-                </div>
-
-                {selectedPlace.address && (
-                  <div className="hab-card-row address">
-                    <Icon name="map-pin" size={13} />
-                    <span>{selectedPlace.address}</span>
-                  </div>
-                )}
-
-                {selectedPlace.notes && (
-                  <div className="hab-card-notes">
-                    <p>{selectedPlace.notes}</p>
-                  </div>
-                )}
-
-                <div className="hab-card-coords">
-                  <span>
-                    {selectedPlace.lat.toFixed(5)}, {selectedPlace.lng.toFixed(5)}
-                  </span>
-                  <button
-                    className="icon-btn subtle tiny"
-                    title="Copy coordinates"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${selectedPlace.lat}, ${selectedPlace.lng}`);
-                    }}
-                  >
-                    <Icon name="copy" size={12} />
-                  </button>
-                </div>
-
-                <div className="hab-card-actions">
-                  <button
-                    className="btn subtle small"
-                    onClick={() => {
-                      const url = `https://www.google.com/maps/dir/?api=1&destination=${selectedPlace.lat},${selectedPlace.lng}`;
-                      window.open(url, '_blank');
-                    }}
-                  >
-                    <Icon name="compass" size={13} /> Directions
-                  </button>
-
-                  <button
-                    className="btn subtle small"
-                    onClick={() => {
-                      const cat = categories.find((c) => c.name === selectedPlace.category);
-                      const tint = cat?.color || userAccent;
-                      setIsSidebarOpen(true);
-                      setModalPlace({
-                        mode: 'edit',
-                        place: selectedPlace,
-                        lat: selectedPlace.lat,
-                        lng: selectedPlace.lng,
-                        name: selectedPlace.name,
-                        category: selectedPlace.category,
-                        color: tint,
-                        notes: selectedPlace.notes || '',
-                        address: selectedPlace.address || '',
-                      });
-                    }}
-                  >
-                    <Icon name="settings" size={13} /> Edit
-                  </button>
-
-                  <button
-                    className="btn subtle small danger"
-                    onClick={() => handleDeletePlace(selectedPlace.id, selectedPlace.name)}
-                  >
-                    <Icon name="trash" size={13} /> Delete
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
       </div>
 
