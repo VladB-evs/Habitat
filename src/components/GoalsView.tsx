@@ -16,7 +16,7 @@ const PRESET_COLORS = ['#ec5b5b', '#e67e22', '#f1c40f', '#2ecc71', '#1abc9c', '#
 const PRESET_ICONS = ['target', 'flame', 'sparkles', 'star', 'rocket', 'heart', 'dumbbell', 'bookmark'];
 
 export function GoalsView() {
-  const { theme, openPageBeside } = useApp();
+  const { theme } = useApp();
   const { narrow } = useLayout();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,8 +83,7 @@ export function GoalsView() {
   };
 
   const deleteGoal = async (g: Goal) => {
-    const ok = await ask(`Delete goal "${g.title || 'Untitled'}"?`, {
-      detail: 'This will also delete any steps attached to this goal.',
+    const ok = await ask(`Delete goal "${g.title || 'Untitled'}"? Any steps attached will also be removed.`, {
       confirmLabel: 'Delete Goal',
       danger: true,
     });
@@ -152,7 +151,7 @@ export function GoalsView() {
             <button className="btn primary" onClick={() => setShowAddModal(true)}>
               <Icon name="plus" size={14} /> <span>New Goal</span>
             </button>
-            <SplitControls onSplit={() => openPageBeside({ kind: 'goals' })} />
+            <SplitControls />
           </div>
         </PageActions>
       </header>
