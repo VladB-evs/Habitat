@@ -15,7 +15,7 @@ export type View =
   /** No id is the gallery of boards; an id is one board, open. */
   | { kind: 'canvas'; id?: string }
   | { kind: 'study' }
-  | { kind: 'map'; placeId?: string }
+  | { kind: 'goals' }
   | { kind: 'deck'; id: string }
   | { kind: 'studyNote'; id: string }
   | { kind: 'tags' }
@@ -42,7 +42,7 @@ export function getViewInfo(v: View | undefined, types?: ObjType[]): { title: st
     case 'tags': return { title: 'Tags', icon: 'hash' };
     case 'canvas': return { title: 'Canvas', icon: 'canvas' };
     case 'study': return { title: 'Study', icon: 'study' };
-    case 'map': return { title: 'Map', icon: 'map' };
+    case 'goals': return { title: 'Goals', icon: 'target' };
     case 'deck': return { title: 'Deck', icon: 'deck' };
     case 'studyNote': return { title: 'Study Note', icon: 'doc' };
     case 'type': {
@@ -125,7 +125,7 @@ function initialView(): View {
   if (h.startsWith('/deck/')) return { kind: 'deck', id: h.slice(6) };
   if (h.startsWith('/note/')) return { kind: 'studyNote', id: h.slice(6) };
   if (h.startsWith('/study')) return { kind: 'study' };
-  if (h.startsWith('/map')) return { kind: 'map' };
+  if (h.startsWith('/goals')) return { kind: 'goals' };
   if (h.startsWith('/tags')) return { kind: 'tags' };
   if (h.startsWith('/people')) return { kind: 'people' };
   if (h.startsWith('/media')) return { kind: 'media' };

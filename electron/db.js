@@ -7,6 +7,7 @@ const { DatabaseSync } = require('node:sqlite');
 const files = require('./files');
 const canvas = require('./canvas');
 const study = require('./study');
+const goals = require('./goals');
 const media = require('./media');
 const recur = require('./recur');
 const synclog = require('./synclog');
@@ -831,6 +832,41 @@ function gcFiles() {
   return { removed, freed };
 }
 
+/**
+ * Maintenance sweep: remove stale tables (such as legacy map tables `study_places` and `study_categories`),
+ * orphaned files, and run VACUUM + PRAGMA optimize to compact storage and reclaim disk space.
+ */
+function sweepDatabase() {
+  let droppedTables = 0;
+  const legacyTables = ['study_places', 'study_categories'];
+  for (const t of legacyTables) {
+    try {
+      const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(t);
+      if (exists) {
+        db.exec(`DROP TABLE IF EXISTS ${t};`);
+        droppedTables++;
+      }
+    } catch (e) {
+      console.warn(`[sweep] failed to drop legacy table ${t}:`, e?.message || e);
+    }
+  }
+
+  // Sweep orphaned files
+  const { removed, freed } = gcFiles();
+
+  // Reclaim disk space and optimize sqlite pages
+  try {
+    db.exec('VACUUM;');
+  } catch (e) {
+    console.warn('[sweep] VACUUM warning:', e?.message || e);
+  }
+  try {
+    db.exec('PRAGMA optimize;');
+  } catch {}
+
+  return { droppedTables, removed, freed };
+}
+
 // ---------- core operations ----------
 
 
@@ -1492,6 +1528,7 @@ const PALETTE = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300
 // Study keeps to itself: its own tables, no object types of its own, nothing in
 // the sidebar's type list. So it gets the connection and nothing else.
 const studyApi = study.create(() => db);
+const goalsApi = goals.create(() => db);
 
 /**
  * Take bytes into the store and remember what they are. Returns the reference
@@ -1517,6 +1554,7 @@ const api = {
     fileRow: (hash) => db.prepare('SELECT * FROM files WHERE hash = ?').get(String(hash)) ?? null,
   }),
   ...studyApi,
+  ...goalsApi,
   ...media.channels({
     addFile: addFileBytes,
     getKv: (k) => api['kv:get'](k),
@@ -2670,6 +2708,7 @@ const api = {
   },
 
   'files:gc': () => gcFiles(),
+  'files:sweep': () => sweepDatabase(),
 
   'automations:list': () => loadAutomations(),
 
@@ -2961,6 +3000,8 @@ function initDb(file) {
   db.exec(canvas.SCHEMA);
   db.exec(canvas.INDEXES);
   db.exec(study.SCHEMA);
+  db.exec(goals.SCHEMA);
+  db.exec(goals.INDEXES);
   // Columns before indexes: a vault from an earlier build still has the old
   // shape of these tables, and an index over a column that hasn't been added
   // yet fails the statement and stops the app from opening at all.
@@ -3065,10 +3106,6 @@ function migrate() {
        DELETE FROM templates WHERE type_id = 'vocab';
        DELETE FROM types WHERE id = 'vocab';`
     );
-  });
-
-  runOnce('study-remove-premade-categories', () => {
-    db.prepare("DELETE FROM study_categories WHERE name IN ('Dorm', 'Favorites', 'Lab', 'Lecture Hall', 'Library', 'Study Spot')").run();
   });
 
   /**
@@ -3275,6 +3312,10 @@ function migrate() {
       nextProps.push(doingDef);
     }
     db.prepare('UPDATE types SET properties = ? WHERE id = ?').run(JSON.stringify(nextProps), 'task');
+  });
+
+  runOnce('drop-map-module-v1', () => {
+    sweepDatabase();
   });
 }
 

@@ -44,14 +44,3 @@ fs.rmSync(outBin, { force: true });
 fs.copyFileSync(built, outBin);
 fs.chmodSync(outBin, 0o755);
 console.log(`• habitat-ai → ${path.relative(root, outBin)}`);
-
-// Ensure LocationHelper.app is also in native/ for electron-builder extraResources
-const srcLocApp = path.join(root, 'electron', 'bin', 'LocationHelper.app');
-const destLocApp = path.join(outDir, 'LocationHelper.app');
-if (fs.existsSync(srcLocApp)) {
-  fs.rmSync(destLocApp, { recursive: true, force: true });
-  fs.cpSync(srcLocApp, destLocApp, { recursive: true });
-  const locBin = path.join(destLocApp, 'Contents', 'MacOS', 'LocationHelper');
-  if (fs.existsSync(locBin)) fs.chmodSync(locBin, 0o755);
-  console.log(`• LocationHelper.app → ${path.relative(root, destLocApp)}`);
-}

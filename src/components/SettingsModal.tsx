@@ -296,7 +296,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
                       </div>
                       {notice && <div className="s-notice">{notice}</div>}
                     </div>
-                    <Attachments />
+                    <StorageSweep />
                   </div>
                 </section>
               </>
@@ -542,11 +542,10 @@ function SpellCheck() {
 }
 
 /**
- * What attachments are taking up, and a way to sweep what nothing points at.
- * Deliberately manual: walking every note to prove a file is unused is not
- * something to do on a timer.
+ * Storage and cleanup: what attachments and database take up, and a maintenance
+ * sweep to purge stale data (e.g. legacy tables), unused attachments, and compact storage.
  */
-function Attachments() {
+function StorageSweep() {
   const [stats, setStats] = useState<Awaited<ReturnType<typeof api.files.stats>> | null>(null);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
@@ -561,32 +560,50 @@ function Attachments() {
   const sweep = async () => {
     setBusy(true);
     try {
-      const { removed, freed } = await api.files.gc();
-      setNote(
-        removed ? `Removed ${removed} unused ${removed === 1 ? 'file' : 'files'}, freeing ${size(freed)}.` : 'Nothing to clean up.'
-      );
+      const res = await api.files.sweep();
+      const parts = [];
+      if (res.droppedTables > 0) parts.push(`purged ${res.droppedTables} stale ${res.droppedTables === 1 ? 'module table' : 'module tables'}`);
+      if (res.removed > 0) parts.push(`removed ${res.removed} unused ${res.removed === 1 ? 'attachment' : 'attachments'}`);
+      if (res.freed > 0) parts.push(`freed ${size(res.freed)}`);
+      
+      const summary = parts.length > 0
+        ? `Cleaned: ${parts.join(', ')}. Database compacted.`
+        : 'Storage is clean. Database compacted.';
+      setNote(summary);
       await load();
+    } catch (e: any) {
+      setNote(e?.message || 'Sweep failed');
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="set-item">
-      <div>
-        <div className="set-name">Attachments</div>
-        <div className="set-note">
-          {stats.count} {stats.count === 1 ? 'file' : 'files'} · {size(stats.bytes)}
-          {stats.unusedCount > 0 && ` · ${stats.unusedCount} unused (${size(stats.unusedBytes)})`}
-          {note && ` — ${note}`}
+    <>
+      <div className="set-item">
+        <div>
+          <div className="set-name">Attachments</div>
+          <div className="set-note">
+            {stats.count} {stats.count === 1 ? 'file' : 'files'} · {size(stats.bytes)}
+            {stats.unusedCount > 0 && ` · ${stats.unusedCount} unused (${size(stats.unusedBytes)})`}
+          </div>
         </div>
       </div>
-      <div className="set-ctl">
-        <button className="btn subtle" disabled={busy || stats.unusedCount === 0} onClick={sweep}>
-          {busy ? 'Cleaning…' : 'Clean up'}
-        </button>
+      <div className="set-item">
+        <div>
+          <div className="set-name">Maintenance sweep</div>
+          <div className="set-note">
+            Removes stale module data, unreferenced attachments, and compacts the database.
+            {note && ` — ${note}`}
+          </div>
+        </div>
+        <div className="set-ctl">
+          <button className="btn subtle" disabled={busy} onClick={sweep}>
+            {busy ? 'Sweeping…' : 'Sweep storage'}
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

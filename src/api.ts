@@ -24,9 +24,8 @@ import type {
   StudyNote,
   StudyOverview,
   StudyQueue,
-  StudyPlace,
-  StudyCategory,
-  CurrentLocation,
+  Goal,
+  GoalStep,
   Obj,
   ObjType,
   Person,
@@ -459,15 +458,24 @@ export const api = {
       dry?: boolean;
     }): Promise<{ cards: ParsedCard[] | Card[]; deck: Deck | null }> => inv('study:noteToCards', p),
     history: (days?: number): Promise<{ day: string; n: number; again: number }[]> => inv('study:history', { days }),
-    places: (p?: { category?: string }): Promise<StudyPlace[]> => inv('study:places', p ?? {}),
-    placeCreate: (p: Partial<StudyPlace> & { lat: number; lng: number }): Promise<StudyPlace> => inv('study:placeCreate', p),
-    placePatch: (id: string, patch: Partial<StudyPlace>): Promise<StudyPlace | null> => inv('study:placePatch', { id, patch }),
-    placeDelete: (id: string): Promise<boolean> => inv('study:placeDelete', id),
-    categories: (): Promise<StudyCategory[]> => inv('study:categories'),
-    categoryCreate: (p: { name: string; color?: string; icon?: string }): Promise<StudyCategory> => inv('study:categoryCreate', p),
-    categoryPatch: (id: string, patch: { name?: string; color?: string; icon?: string }): Promise<StudyCategory> => inv('study:categoryPatch', { id, patch }),
-    categoryDelete: (idOrName: string): Promise<boolean> => inv('study:categoryDelete', idOrName),
-    currentLocation: (): Promise<CurrentLocation | null> => inv('study:currentLocation'),
+  },
+  goals: {
+    list: (p?: { category?: string }): Promise<Goal[]> => inv('goals:list', p ?? {}),
+    get: (id: string): Promise<Goal | null> => inv('goals:get', id),
+    create: (p: {
+      title: string;
+      description?: string;
+      category?: string;
+      targetDate?: string | null;
+      color?: string;
+      icon?: string;
+      steps?: (string | { title: string; completed?: boolean })[];
+    }): Promise<Goal> => inv('goals:create', p),
+    patch: (id: string, patch: Partial<Goal>): Promise<Goal | null> => inv('goals:patch', { id, patch }),
+    delete: (id: string): Promise<boolean> => inv('goals:delete', id),
+    stepAdd: (p: { goalId: string; title: string }): Promise<GoalStep> => inv('goals:stepAdd', p),
+    stepToggle: (p: { id: string; completed?: boolean }): Promise<GoalStep | null> => inv('goals:stepToggle', p),
+    stepDelete: (id: string): Promise<boolean> => inv('goals:stepDelete', id),
   },
   dashboard: {
     /** `null` when the user has never customised it — callers install the default layout. */
@@ -499,6 +507,8 @@ export const api = {
       inv('files:stats'),
     /** Deletes every stored file nothing points at any more. */
     gc: (): Promise<{ removed: number; freed: number }> => inv('files:gc'),
+    /** Cleans stale tables (e.g. legacy map module), removes orphaned files, and compacts DB. */
+    sweep: (): Promise<{ droppedTables: number; removed: number; freed: number }> => inv('files:sweep'),
     reveal: (hash: string): Promise<boolean> => inv('files:reveal', hash),
     open: (hash: string): Promise<boolean> => inv('files:open', hash),
     saveAs: (hash: string): Promise<boolean> => inv('files:saveAs', hash),

@@ -125,3 +125,24 @@ test('a location kept as an extra property folds back into a real one, not a dup
   const plain = api['objects:get']('tsk2');
   assert.deepEqual(plain.extraProps, [], 'a task that never had one is left alone');
 });
+
+test('legacy map tables and stale data are purged on migration or sweep', () => {
+  const raw = new DatabaseSync(file);
+  // Simulate an older vault that had study_places and study_categories
+  raw.exec('CREATE TABLE IF NOT EXISTS study_places (id TEXT PRIMARY KEY, name TEXT);');
+  raw.exec('CREATE TABLE IF NOT EXISTS study_categories (id TEXT PRIMARY KEY, name TEXT);');
+  raw.prepare("INSERT INTO study_places (id, name) VALUES ('p1', 'Library')").run();
+  raw.prepare("INSERT INTO study_categories (id, name) VALUES ('c1', 'Study Spot')").run();
+  raw.close();
+
+  const sweepRes = api['files:sweep']();
+  assert.equal(sweepRes.droppedTables, 2, 'dropped both study_places and study_categories');
+
+  const check = new DatabaseSync(file);
+  const tables = check.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
+  check.close();
+
+  assert.ok(!tables.includes('study_places'), 'study_places table dropped');
+  assert.ok(!tables.includes('study_categories'), 'study_categories table dropped');
+});
+

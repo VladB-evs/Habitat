@@ -21,16 +21,6 @@ exports.default = async function adhocSign(context) {
     execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', sidecar], { stdio: 'inherit' });
   }
 
-  const locHelperNative = path.join(app, 'Contents', 'Resources', 'native', 'LocationHelper.app');
-  if (fs.existsSync(locHelperNative)) {
-    execFileSync('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', locHelperNative], { stdio: 'inherit' });
-  }
-
-  const locHelperUnpacked = path.join(app, 'Contents', 'Resources', 'app.asar.unpacked', 'electron', 'bin', 'LocationHelper.app');
-  if (fs.existsSync(locHelperUnpacked)) {
-    execFileSync('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', locHelperUnpacked], { stdio: 'inherit' });
-  }
-
   // --deep so the helper apps and frameworks inside are signed too.
   execFileSync('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', app], { stdio: 'inherit' });
   execFileSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', app], { stdio: 'inherit' });

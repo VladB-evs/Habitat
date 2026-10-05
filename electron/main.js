@@ -232,14 +232,6 @@ function createWindow() {
   });
 
   win.webContents.session.setSpellCheckerEnabled(spellcheckEnabled());
-  win.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
-    if (permission === 'geolocation') return callback(true);
-    callback(false);
-  });
-  win.webContents.session.setPermissionCheckHandler((_wc, permission) => {
-    if (permission === 'geolocation') return true;
-    return false;
-  });
   win.webContents.on('context-menu', (_e, params) => showContextMenu(params));
 
   win.webContents.setWindowOpenHandler(({ url }) => {
@@ -261,10 +253,6 @@ function createWindow() {
       win.showInactive();
       setTimeout(async () => {
         try {
-          if (process.env.HABITAT_SCRIPT) {
-            await win.webContents.executeJavaScript(process.env.HABITAT_SCRIPT);
-            await new Promise((r) => setTimeout(r, 800));
-          }
           const img = await win.webContents.capturePage();
           fs.writeFileSync(process.env.HABITAT_SHOT, img.toPNG());
         } catch (e) {

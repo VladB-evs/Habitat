@@ -27,9 +27,6 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
-  optimizeDeps: {
-    exclude: ['maplibre-gl'],
-  },
   build: {
     outDir: 'dist',
     chunkSizeWarningLimit: 900,
@@ -51,7 +48,6 @@ export default defineConfig({
         advancedChunks: {
           minSize: 0,
           groups: [
-            { name: 'maplibre', test: /node_modules[\\/]maplibre-gl[\\/]/, priority: 45 },
             { name: 'katex', test: /node_modules[\\/]katex[\\/]/, priority: 40 },
             { name: 'highlight', test: /node_modules[\\/](highlight\.js|lowlight|fault|format)[\\/]/, priority: 35 },
             { name: 'editor', test: /node_modules[\\/](@tiptap|prosemirror-|orderedmap|rope-sequence|w3c-keyname)/, priority: 30 },

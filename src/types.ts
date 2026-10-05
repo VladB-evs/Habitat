@@ -426,36 +426,28 @@ export interface ParsedCard {
   extra?: Record<string, unknown>;
 }
 
-export interface StudyPlace {
+export interface GoalStep {
   id: string;
-  name: string;
-  category: string;
-  color?: string;
-  lat: number;
-  lng: number;
-  zoom?: number | null;
-  notes?: string;
-  address?: string;
+  goalId: string;
+  title: string;
+  completed: boolean;
+  position: number;
+  createdAt: number;
+}
+
+export interface Goal {
+  id: string;
+  title: string;
+  description: string;
+  category?: string;
+  targetDate: string | null;
+  completed: boolean;
+  completedAt: number | null;
+  color: string;
+  icon: string;
   createdAt: number;
   updatedAt: number;
-}
-
-export interface StudyCategory {
-  id: string;
-  name: string;
-  color?: string;
-  icon?: string;
-  createdAt: number;
-}
-
-export interface CurrentLocation {
-  lat: number;
-  lng: number;
-  city?: string;
-  region?: string;
-  country?: string;
-  acc?: number;
-  isHardware?: boolean;
+  steps: GoalStep[];
 }
 
 export interface Stats {

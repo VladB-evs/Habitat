@@ -12,9 +12,6 @@
 // not a scan over parsed JSON.
 
 const { randomUUID } = require('crypto');
-const { execFile, execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
 const srs = require('./srs');
 
 const uid = () => randomUUID().replace(/-/g, '').slice(0, 16);
@@ -71,26 +68,6 @@ CREATE TABLE IF NOT EXISTS reviews (
   day TEXT NOT NULL,
   before TEXT NOT NULL DEFAULT '{}'
 );
-CREATE TABLE IF NOT EXISTS study_places (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL DEFAULT '',
-  category TEXT NOT NULL DEFAULT '',
-  color TEXT NOT NULL DEFAULT '',
-  lat REAL NOT NULL,
-  lng REAL NOT NULL,
-  zoom REAL,
-  notes TEXT NOT NULL DEFAULT '',
-  address TEXT NOT NULL DEFAULT '',
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS study_categories (
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL UNIQUE,
-  color TEXT NOT NULL DEFAULT '',
-  icon TEXT NOT NULL DEFAULT 'pin',
-  created_at INTEGER NOT NULL
-);
 `;
 
 /**
@@ -109,8 +86,6 @@ CREATE INDEX IF NOT EXISTS idx_cards_obj ON cards(obj_id);
 CREATE INDEX IF NOT EXISTS idx_cards_note ON cards(note_id);
 CREATE INDEX IF NOT EXISTS idx_reviews_day ON reviews(day);
 CREATE INDEX IF NOT EXISTS idx_reviews_card ON reviews(card_id);
-CREATE INDEX IF NOT EXISTS idx_study_places_cat ON study_places(category);
-CREATE INDEX IF NOT EXISTS idx_study_places_updated ON study_places(updated_at);
 `;
 
 const json = (s, fallback) => {
@@ -179,34 +154,6 @@ function parseCard(r) {
     lapses: r.lapses,
     suspended: !!r.suspended,
     lastAt: r.last_at,
-    createdAt: r.created_at,
-  };
-}
-
-function parsePlace(r) {
-  if (!r) return null;
-  return {
-    id: r.id,
-    name: r.name,
-    category: r.category,
-    color: r.color,
-    lat: r.lat,
-    lng: r.lng,
-    zoom: r.zoom,
-    notes: r.notes,
-    address: r.address,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-  };
-}
-
-function parseCategory(r) {
-  if (!r) return null;
-  return {
-    id: r.id,
-    name: r.name,
-    color: r.color,
-    icon: r.icon,
     createdAt: r.created_at,
   };
 }
@@ -726,173 +673,6 @@ function create(getDb) {
         .all(from)
         .map((r) => ({ day: r.day, n: r.n, again: r.again || 0 }));
     },
-
-    // ---------- places ----------
-    'study:places': ({ category } = {}) => {
-      if (category && category !== 'all') {
-        return db()
-          .prepare('SELECT * FROM study_places WHERE category = ? ORDER BY updated_at DESC')
-          .all(category)
-          .map(parsePlace);
-      }
-      return db().prepare('SELECT * FROM study_places ORDER BY updated_at DESC').all().map(parsePlace);
-    },
-
-    'study:placeCreate': ({ name, category, color, lat, lng, zoom, notes, address } = {}) => {
-      const id = uid();
-      const t = now();
-      db()
-        .prepare(
-          'INSERT INTO study_places (id, name, category, color, lat, lng, zoom, notes, address, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        )
-        .run(
-          id,
-          String(name || 'Untitled Place'),
-          String(category || ''),
-          String(color || ''),
-          Number(lat || 0),
-          Number(lng || 0),
-          zoom != null ? Number(zoom) : null,
-          String(notes || ''),
-          String(address || ''),
-          t,
-          t
-        );
-      return parsePlace(db().prepare('SELECT * FROM study_places WHERE id = ?').get(id));
-    },
-
-    'study:placePatch': ({ id, patch }) => {
-      const cur = db().prepare('SELECT * FROM study_places WHERE id = ?').get(String(id));
-      if (!cur) return null;
-      const p = patch || {};
-      const name = p.name !== undefined ? String(p.name) : cur.name;
-      const category = p.category !== undefined ? String(p.category) : cur.category;
-      const color = p.color !== undefined ? String(p.color) : cur.color;
-      const lat = p.lat !== undefined ? Number(p.lat) : cur.lat;
-      const lng = p.lng !== undefined ? Number(p.lng) : cur.lng;
-      const zoom = p.zoom !== undefined ? (p.zoom != null ? Number(p.zoom) : null) : cur.zoom;
-      const notes = p.notes !== undefined ? String(p.notes) : cur.notes;
-      const address = p.address !== undefined ? String(p.address) : cur.address;
-      const t = now();
-      db()
-        .prepare(
-          'UPDATE study_places SET name = ?, category = ?, color = ?, lat = ?, lng = ?, zoom = ?, notes = ?, address = ?, updated_at = ? WHERE id = ?'
-        )
-        .run(name, category, color, lat, lng, zoom, notes, address, t, String(id));
-      return parsePlace(db().prepare('SELECT * FROM study_places WHERE id = ?').get(String(id)));
-    },
-
-    'study:placeDelete': (id) => {
-      db().prepare('DELETE FROM study_places WHERE id = ?').run(String(id));
-      return true;
-    },
-
-    // ---------- categories ----------
-    'study:categories': () => {
-      try {
-        db().prepare("DELETE FROM study_categories WHERE name IN ('Dorm', 'Favorites', 'Lab', 'Lecture Hall', 'Library', 'Study Spot') AND (SELECT COUNT(*) FROM study_places WHERE category = study_categories.name) = 0").run();
-      } catch {}
-      return db().prepare('SELECT * FROM study_categories ORDER BY name ASC').all().map(parseCategory);
-    },
-
-    'study:categoryCreate': ({ name, color, icon } = {}) => {
-      const id = uid();
-      const t = now();
-      const n = String(name || '').trim();
-      if (!n) throw new Error('Category name required');
-      db()
-        .prepare('INSERT OR IGNORE INTO study_categories (id, name, color, icon, created_at) VALUES (?, ?, ?, ?, ?)')
-        .run(id, n, String(color || ''), String(icon || 'pin'), t);
-      return parseCategory(db().prepare('SELECT * FROM study_categories WHERE name = ?').get(n));
-    },
-
-    'study:categoryPatch': ({ id, patch } = {}) => {
-      const cur = db().prepare('SELECT * FROM study_categories WHERE id = ? OR name = ?').get(String(id), String(id));
-      if (!cur) throw new Error('Category not found');
-      const name = patch?.name !== undefined ? String(patch.name).trim() : cur.name;
-      const color = patch?.color !== undefined ? String(patch.color) : cur.color;
-      const icon = patch?.icon !== undefined ? String(patch.icon) : cur.icon;
-      db().prepare('UPDATE study_categories SET name = ?, color = ?, icon = ? WHERE id = ?').run(name, color, icon, cur.id);
-      if (name && name !== cur.name) {
-        db().prepare('UPDATE study_places SET category = ? WHERE category = ?').run(name, cur.name);
-      }
-      return parseCategory(db().prepare('SELECT * FROM study_categories WHERE id = ?').get(cur.id));
-    },
-
-    'study:categoryDelete': (idOrName) => {
-      db().prepare('DELETE FROM study_categories WHERE id = ? OR name = ?').run(String(idOrName), String(idOrName));
-      return true;
-    },
-
-    // ---------- geolocation ----------
-    'study:currentLocation': async () => {
-      // 1. On macOS, query genuine hardware/Wi-Fi CoreLocation first
-      try {
-        const macLoc = await getMacCoreLocation();
-        if (macLoc && typeof macLoc.lat === 'number' && typeof macLoc.lng === 'number') {
-          return macLoc;
-        }
-      } catch {}
-
-      // 2. Fall back to multi-provider IP geolocation
-      const providers = [
-        async () => {
-          const res = await fetch('https://ipwho.is/', { signal: AbortSignal.timeout(4000) });
-          if (!res.ok) throw new Error('ipwho failed');
-          const d = await res.json();
-          if (d && d.success && typeof d.latitude === 'number' && typeof d.longitude === 'number') {
-            return {
-              lat: d.latitude,
-              lng: d.longitude,
-              city: d.city || '',
-              region: d.region || '',
-              country: d.country || '',
-            };
-          }
-          throw new Error('invalid ipwho response');
-        },
-        async () => {
-          const res = await fetch('https://api.bigdatacloud.net/data/reverse-geocode-client', { signal: AbortSignal.timeout(4000) });
-          if (!res.ok) throw new Error('bigdatacloud failed');
-          const d = await res.json();
-          if (d && typeof d.latitude === 'number' && typeof d.longitude === 'number') {
-            return {
-              lat: d.latitude,
-              lng: d.longitude,
-              city: d.city || d.locality || '',
-              region: d.principalSubdivision || '',
-              country: d.countryName || '',
-            };
-          }
-          throw new Error('invalid bigdatacloud response');
-        },
-        async () => {
-          const res = await fetch('https://freeipapi.com/api/json', { signal: AbortSignal.timeout(4000) });
-          if (!res.ok) throw new Error('freeipapi failed');
-          const d = await res.json();
-          if (d && typeof d.latitude === 'number' && typeof d.longitude === 'number') {
-            return {
-              lat: d.latitude,
-              lng: d.longitude,
-              city: d.cityName || '',
-              region: d.regionName || '',
-              country: d.countryName || '',
-            };
-          }
-          throw new Error('invalid freeipapi response');
-        },
-      ];
-
-      for (const p of providers) {
-        try {
-          const loc = await p();
-          if (loc && typeof loc.lat === 'number' && typeof loc.lng === 'number') {
-            return loc;
-          }
-        } catch {}
-      }
-      return null;
-    },
   };
 }
 
@@ -904,111 +684,6 @@ function create(getDb) {
 function forgetObject(db, objectId) {
   db.prepare('UPDATE cards SET obj_id = NULL WHERE obj_id = ?').run(String(objectId));
   return 0;
-}
-
-function getMacCoreLocation() {
-  if (process.platform !== 'darwin') return Promise.resolve(null);
-
-  const candidates = [
-    // 1. Packaged app: in extraResources (native/LocationHelper.app)
-    path.join(process.resourcesPath || '', 'native', 'LocationHelper.app', 'Contents', 'MacOS', 'LocationHelper'),
-    // 2. Packaged app: in asar.unpacked
-    path.join((__dirname || '').replace('app.asar', 'app.asar.unpacked'), 'bin', 'LocationHelper.app', 'Contents', 'MacOS', 'LocationHelper'),
-    // 3. Dev mode: in electron/bin
-    path.join(__dirname, 'bin', 'LocationHelper.app', 'Contents', 'MacOS', 'LocationHelper'),
-    // 4. Dev mode: in root native
-    path.join(__dirname, '..', 'native', 'LocationHelper.app', 'Contents', 'MacOS', 'LocationHelper'),
-    // 5. User data bin
-    path.join(require('electron').app?.getPath('userData') || '', 'bin', 'LocationHelper.app', 'Contents', 'MacOS', 'LocationHelper'),
-  ];
-
-  const isInsideAsar = (p) => p.includes('app.asar') && !p.includes('app.asar.unpacked');
-  let binPath = candidates.find((p) => p && !isInsideAsar(p) && fs.existsSync(p));
-
-  // If running inside app.asar and not unpacked, extract to userData/bin
-  if (!binPath) {
-    try {
-      const electronApp = require('electron').app;
-      const userDataDir = electronApp ? electronApp.getPath('userData') : path.join(require('os').homedir(), '.habitat');
-      const userBinApp = path.join(userDataDir, 'bin', 'LocationHelper.app');
-      const userBinMacOs = path.join(userBinApp, 'Contents', 'MacOS');
-      const userBinPath = path.join(userBinMacOs, 'LocationHelper');
-      const userBinPlist = path.join(userBinApp, 'Contents', 'Info.plist');
-
-      const srcDir = path.join(__dirname, 'bin', 'LocationHelper.app', 'Contents');
-      const srcBin = path.join(srcDir, 'MacOS', 'LocationHelper');
-      const srcPlist = path.join(srcDir, 'Info.plist');
-
-      if (!fs.existsSync(userBinPath)) {
-        fs.mkdirSync(userBinMacOs, { recursive: true });
-        if (fs.existsSync(srcPlist)) {
-          fs.copyFileSync(srcPlist, userBinPlist);
-        }
-        if (fs.existsSync(srcBin)) {
-          fs.copyFileSync(srcBin, userBinPath);
-          fs.chmodSync(userBinPath, 0o755);
-        }
-        try {
-          execSync(`codesign -s - -f "${userBinApp}"`, { timeout: 5000 });
-        } catch {}
-      }
-      if (fs.existsSync(userBinPath)) {
-        binPath = userBinPath;
-      }
-    } catch (e) {
-      console.warn('[LocationHelper] extraction fallback error:', e);
-    }
-  }
-
-  if (!binPath) {
-    console.warn('[LocationHelper] no valid LocationHelper executable found');
-    return Promise.resolve(null);
-  }
-
-  try {
-    fs.chmodSync(binPath, 0o755);
-  } catch {}
-
-  return new Promise((resolve) => {
-    execFile(binPath, { timeout: 10000 }, async (error, stdout, stderr) => {
-      if (error || !stdout) {
-        console.warn('[LocationHelper] execution failed:', error?.message || error, stderr);
-        return resolve(null);
-      }
-      try {
-        const parsed = JSON.parse(stdout.trim());
-        if (typeof parsed.lat === 'number' && typeof parsed.lng === 'number') {
-          let city = '';
-          let region = '';
-          let country = '';
-          try {
-            const revRes = await fetch(
-              `https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${parsed.lat}&longitude=${parsed.lng}`,
-              { signal: AbortSignal.timeout(2500) }
-            );
-            if (revRes.ok) {
-              const d = await revRes.json();
-              city = d.locality || d.city || '';
-              region = d.principalSubdivision || '';
-              country = d.countryName || '';
-            }
-          } catch {}
-          return resolve({
-            lat: parsed.lat,
-            lng: parsed.lng,
-            accuracy: parsed.acc,
-            isHardware: true,
-            city,
-            region,
-            country,
-          });
-        }
-      } catch (parseErr) {
-        console.warn('[LocationHelper] JSON parse error:', parseErr);
-      }
-      resolve(null);
-    });
-  });
 }
 
 module.exports = { SCHEMA, INDEXES, create, forgetObject, parseCards, titleFromBody };
