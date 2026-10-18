@@ -3001,13 +3001,14 @@ function initDb(file) {
   db.exec(canvas.INDEXES);
   db.exec(study.SCHEMA);
   db.exec(goals.SCHEMA);
-  db.exec(goals.INDEXES);
   // Columns before indexes: a vault from an earlier build still has the old
   // shape of these tables, and an index over a column that hasn't been added
   // yet fails the statement and stops the app from opening at all.
   ensureColumn('reviews', 'before', "before TEXT NOT NULL DEFAULT '{}'");
   ensureColumn('cards', 'note_id', 'note_id TEXT');
   ensureColumn('study_notes', 'props', "props TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn('goals', 'is_north_star', 'is_north_star INTEGER NOT NULL DEFAULT 0');
+  db.exec(goals.INDEXES);
   db.exec(study.INDEXES);
   ensureColumn('objects', 'extra_props', "extra_props TEXT NOT NULL DEFAULT '[]'");
   ensureColumn('objects', 'search_text', "search_text TEXT NOT NULL DEFAULT ''");

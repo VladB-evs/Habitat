@@ -58,7 +58,9 @@ export function DateField({
     if (parsed.minutes !== null) setMinutes(parsed.minutes);
   }, [parsed]);
 
-  const open = () => {
+  const open = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    e?.stopPropagation();
     const at = fromValue(value);
     setText('');
     confirmedPastRef.current = null;
@@ -134,15 +136,31 @@ export function DateField({
 
   return (
     <>
-      <button ref={btnRef} className={`date-btn ${className}` + (shown ? '' : ' empty')} onClick={open}>
+      <button
+        ref={btnRef}
+        type="button"
+        className={`date-btn ${className}` + (shown ? '' : ' empty')}
+        onClick={open}
+      >
         <Icon name="calendar-days" size={12} />
         <span className="date-btn-val">{shown || placeholder}</span>
       </button>
 
       {pos && (
         <>
-          <div className="backdrop date-backdrop" onClick={() => setPos(null)} />
-          <div className={'popover date-pop' + (time ? ' with-time' : '')} style={pos}>
+          <div
+            className="backdrop date-backdrop"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setPos(null);
+            }}
+          />
+          <div
+            className={'popover date-pop' + (time ? ' with-time' : '')}
+            style={pos}
+            onClick={(e) => e.stopPropagation()}
+          >
             <input
               className="popover-search"
               placeholder={time ? 'tomorrow 3pm…' : 'next friday…'}
@@ -159,7 +177,15 @@ export function DateField({
 
             <div className="date-presets">
               {PRESETS.map(([label, of]) => (
-                <button key={label} className="date-preset" onClick={() => commit({ key: of(todayKey()), minutes })}>
+                <button
+                  key={label}
+                  type="button"
+                  className="date-preset"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    commit({ key: of(todayKey()), minutes });
+                  }}
+                >
                   {label}
                 </button>
               ))}
@@ -168,11 +194,27 @@ export function DateField({
             <div className="date-cols">
               <div className="date-cal">
                 <div className="date-monthbar">
-                  <button className="icon-btn" onClick={() => setMonth(monthStartKey(month, -1))} aria-label="Previous month">
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setMonth(monthStartKey(month, -1));
+                    }}
+                    aria-label="Previous month"
+                  >
                     <Icon name="chevron-left" size={14} />
                   </button>
                   <span>{new Date(month + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</span>
-                  <button className="icon-btn" onClick={() => setMonth(monthStartKey(month, 1))} aria-label="Next month">
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setMonth(monthStartKey(month, 1));
+                    }}
+                    aria-label="Next month"
+                  >
                     <Icon name="chevron-right" size={14} />
                   </button>
                 </div>
@@ -185,6 +227,7 @@ export function DateField({
                   {monthCells(month).map((c) => (
                     <button
                       key={c.key}
+                      type="button"
                       className={
                         'date-cell' +
                         (c.inMonth ? '' : ' out') +
@@ -193,7 +236,10 @@ export function DateField({
                         (c.key === current?.key ? ' picked' : '') +
                         (c.key === cursor ? ' cursor' : '')
                       }
-                      onClick={() => commit({ key: c.key, minutes }, !time)}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        commit({ key: c.key, minutes }, !time);
+                      }}
                     >
                       {c.day}
                     </button>
@@ -214,7 +260,14 @@ export function DateField({
             </div>
 
             <div className="date-foot">
-              <button className="date-clear" onClick={clear}>
+              <button
+                type="button"
+                className="date-clear"
+                onClick={(e) => {
+                  e.preventDefault();
+                  clear();
+                }}
+              >
                 Clear
               </button>
             </div>
@@ -261,8 +314,12 @@ function TimeList({
       {SLOTS.map((m) => (
         <button
           key={m}
+          type="button"
           className={'date-time' + (m === nearest ? ' on' : '') + (isPastTime(m) ? ' past' : '')}
-          onClick={() => onPick(m)}
+          onClick={(e) => {
+            e.preventDefault();
+            onPick(m);
+          }}
         >
           {fmtClock(m)}
         </button>

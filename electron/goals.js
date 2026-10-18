@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS goals (
   completed_at INTEGER,
   color TEXT NOT NULL DEFAULT '#ec5b5b',
   icon TEXT NOT NULL DEFAULT 'target',
+  is_north_star INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS goal_steps (
 const INDEXES = `
 CREATE INDEX IF NOT EXISTS idx_goal_steps_goal ON goal_steps(goal_id);
 CREATE INDEX IF NOT EXISTS idx_goals_updated ON goals(updated_at);
+CREATE INDEX IF NOT EXISTS idx_goals_north_star ON goals(is_north_star);
 `;
 
 function parseStep(r) {
@@ -62,6 +64,7 @@ function parseGoal(r, steps = []) {
     completedAt: r.completed_at || null,
     color: r.color,
     icon: r.icon,
+    isNorthStar: !!r.is_north_star,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     steps,
@@ -94,18 +97,27 @@ function create(getDb) {
 
     'goals:get': (id) => getGoal(id),
 
-    'goals:create': ({ title, description, category, targetDate, color, icon, steps } = {}) => {
+    'goals:create': ({ title, description, category, targetDate, color, icon, isNorthStar, steps } = {}) => {
       const id = uid();
       const t = now();
       const cat = String(category || 'Personal').trim();
       const clr = String(color || '#ec5b5b');
       const icn = String(icon || 'target');
 
+      let northStarVal = 0;
+      if (isNorthStar) {
+        const existing = db().prepare('SELECT id FROM goals WHERE is_north_star = 1').get();
+        if (existing) {
+          throw new Error('A North Star goal already exists. Complete or remove it first.');
+        }
+        northStarVal = 1;
+      }
+
       db()
         .prepare(
-          'INSERT INTO goals (id, title, description, category, target_date, completed, completed_at, color, icon, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?)'
+          'INSERT INTO goals (id, title, description, category, target_date, completed, completed_at, color, icon, is_north_star, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, NULL, ?, ?, ?, ?, ?)'
         )
-        .run(id, String(title || '').trim(), String(description || '').trim(), cat, targetDate || null, clr, icn, t, t);
+        .run(id, String(title || '').trim(), String(description || '').trim(), cat, targetDate || null, clr, icn, northStarVal, t, t);
 
       if (Array.isArray(steps) && steps.length > 0) {
         const insStep = db().prepare(
@@ -136,6 +148,18 @@ function create(getDb) {
       let completed = cur.completed;
       let completedAt = cur.completed_at;
 
+      let isNorthStar = cur.is_north_star;
+      if (patch?.isNorthStar !== undefined) {
+        const wantsNorthStar = patch.isNorthStar ? 1 : 0;
+        if (wantsNorthStar === 1 && cur.is_north_star !== 1) {
+          const existing = db().prepare('SELECT id FROM goals WHERE is_north_star = 1 AND id != ?').get(String(id));
+          if (existing) {
+            throw new Error('A North Star goal already exists. Complete or remove it first.');
+          }
+        }
+        isNorthStar = wantsNorthStar;
+      }
+
       if (patch?.completed !== undefined) {
         const nextCompleted = patch.completed ? 1 : 0;
         if (nextCompleted !== cur.completed) {
@@ -146,9 +170,9 @@ function create(getDb) {
 
       db()
         .prepare(
-          'UPDATE goals SET title = ?, description = ?, category = ?, target_date = ?, completed = ?, completed_at = ?, color = ?, icon = ?, updated_at = ? WHERE id = ?'
+          'UPDATE goals SET title = ?, description = ?, category = ?, target_date = ?, completed = ?, completed_at = ?, color = ?, icon = ?, is_north_star = ?, updated_at = ? WHERE id = ?'
         )
-        .run(title, description, category, targetDate, completed, completedAt, color, icon, t, String(id));
+        .run(title, description, category, targetDate, completed, completedAt, color, icon, isNorthStar, t, String(id));
 
       return getGoal(id);
     },
@@ -188,6 +212,14 @@ function create(getDb) {
         db().prepare('UPDATE goals SET completed = 1, completed_at = ? WHERE id = ? AND completed = 0').run(t, step.goal_id);
       }
 
+      return parseStep(db().prepare('SELECT * FROM goal_steps WHERE id = ?').get(String(id)));
+    },
+
+    'goals:stepUpdate': ({ id, title } = {}) => {
+      const step = db().prepare('SELECT goal_id FROM goal_steps WHERE id = ?').get(String(id));
+      if (!step) return null;
+      db().prepare('UPDATE goal_steps SET title = ? WHERE id = ?').run(String(title || '').trim(), String(id));
+      db().prepare('UPDATE goals SET updated_at = ? WHERE id = ?').run(now(), step.goal_id);
       return parseStep(db().prepare('SELECT * FROM goal_steps WHERE id = ?').get(String(id)));
     },
 

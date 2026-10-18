@@ -469,11 +469,13 @@ export const api = {
       targetDate?: string | null;
       color?: string;
       icon?: string;
+      isNorthStar?: boolean;
       steps?: (string | { title: string; completed?: boolean })[];
     }): Promise<Goal> => inv('goals:create', p),
     patch: (id: string, patch: Partial<Goal>): Promise<Goal | null> => inv('goals:patch', { id, patch }),
     delete: (id: string): Promise<boolean> => inv('goals:delete', id),
     stepAdd: (p: { goalId: string; title: string }): Promise<GoalStep> => inv('goals:stepAdd', p),
+    stepUpdate: (p: { id: string; title: string }): Promise<GoalStep | null> => inv('goals:stepUpdate', p),
     stepToggle: (p: { id: string; completed?: boolean }): Promise<GoalStep | null> => inv('goals:stepToggle', p),
     stepDelete: (id: string): Promise<boolean> => inv('goals:stepDelete', id),
   },

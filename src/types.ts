@@ -445,6 +445,7 @@ export interface Goal {
   completedAt: number | null;
   color: string;
   icon: string;
+  isNorthStar?: boolean;
   createdAt: number;
   updatedAt: number;
   steps: GoalStep[];

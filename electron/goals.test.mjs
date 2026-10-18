@@ -84,7 +84,56 @@ test('goals:patch and goals:delete work cleanly', () => {
 
   const step = api['goals:stepAdd']({ goalId: g.id, title: 'Extra Step' });
   assert.ok(step.id);
+  assert.equal(step.title, 'Extra Step');
+
+  const updatedStep = api['goals:stepUpdate']({ id: step.id, title: 'Edited Extra Step' });
+  assert.equal(updatedStep.title, 'Edited Extra Step');
 
   api['goals:delete'](g.id);
   assert.equal(api['goals:get'](g.id), null);
 });
+
+test('goals: North Star goal cannot be duplicated or replaced', () => {
+  const g1 = api['goals:create']({
+    title: 'North Star #1',
+    isNorthStar: true,
+  });
+  assert.equal(g1.isNorthStar, true);
+
+  const list1 = api['goals:list']();
+  const found1 = list1.find((item) => item.id === g1.id);
+  assert.equal(found1?.isNorthStar, true);
+
+  // Trying to create a second North Star must fail
+  assert.throws(() => {
+    api['goals:create']({
+      title: 'North Star #2',
+      isNorthStar: true,
+    });
+  }, /already exists/);
+
+  // Creating a normal goal works fine
+  const normal = api['goals:create']({
+    title: 'Normal Goal',
+    isNorthStar: false,
+  });
+  assert.equal(normal.isNorthStar, false);
+
+  // Trying to promote the normal goal to North Star while g1 exists must fail
+  assert.throws(() => {
+    api['goals:patch']({
+      id: normal.id,
+      patch: { isNorthStar: true },
+    });
+  }, /already exists/);
+
+  // Editing g1 itself without changing isNorthStar works fine
+  const updatedG1 = api['goals:patch']({
+    id: g1.id,
+    patch: { title: 'North Star Updated' },
+  });
+  assert.equal(updatedG1.isNorthStar, true);
+  assert.equal(updatedG1.title, 'North Star Updated');
+});
+
+

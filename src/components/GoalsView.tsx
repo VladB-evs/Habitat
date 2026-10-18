@@ -23,6 +23,7 @@ export function GoalsView() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'completed'>('all');
   const [showAddModal, setShowAddModal] = useState(false);
+  const [createAsNorthStar, setCreateAsNorthStar] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
   const [celebrating, setCelebrating] = useState(false);
   const [celebrationBanner, setCelebrationBanner] = useState<string | null>(null);
@@ -97,6 +98,8 @@ export function GoalsView() {
     }
   };
 
+  const currentNorthStar = useMemo(() => goals.find((g) => g.isNorthStar) || null, [goals]);
+
   const filtered = useMemo(() => {
     return goals.filter((g) => {
       if (filterStatus === 'active' && g.completed) return false;
@@ -113,6 +116,11 @@ export function GoalsView() {
   }, [goals, filterStatus, searchQuery]);
 
   const activeCount = useMemo(() => goals.filter((g) => !g.completed).length, [goals]);
+
+  const handleOpenAdd = (isNorthStar = false) => {
+    setCreateAsNorthStar(isNorthStar);
+    setShowAddModal(true);
+  };
 
   return (
     <div className="page goals-page">
@@ -148,7 +156,12 @@ export function GoalsView() {
 
         <PageActions>
           <div className="page-actions">
-            <button className="btn primary" onClick={() => setShowAddModal(true)}>
+            {!currentNorthStar && (
+              <button className="btn subtle" onClick={() => handleOpenAdd(true)}>
+                <Icon name="compass" size={14} /> <span>Set North Star</span>
+              </button>
+            )}
+            <button className="btn primary" onClick={() => handleOpenAdd(false)}>
               <Icon name="plus" size={14} /> <span>New Goal</span>
             </button>
             <SplitControls />
@@ -207,7 +220,7 @@ export function GoalsView() {
             <Icon name="target" size={36} />
             <h3>No goals match this view</h3>
             <p>Whether it’s a big milestone or a daily ritual, set your first aspiration.</p>
-            <button className="btn primary" onClick={() => setShowAddModal(true)}>
+            <button className="btn primary" onClick={() => handleOpenAdd(false)}>
               <Icon name="plus" size={14} /> Add a Goal
             </button>
           </div>
@@ -235,14 +248,18 @@ export function GoalsView() {
         {(showAddModal || editingGoal) && (
           <GoalEditorModal
             goal={editingGoal}
+            defaultIsNorthStar={createAsNorthStar}
+            existingNorthStarId={currentNorthStar?.id || null}
             onClose={() => {
               setShowAddModal(false);
               setEditingGoal(null);
+              setCreateAsNorthStar(false);
             }}
-            onSaved={(saved) => {
+            onSaved={() => {
               loadGoals();
               setShowAddModal(false);
               setEditingGoal(null);
+              setCreateAsNorthStar(false);
             }}
           />
         )}
@@ -269,6 +286,9 @@ function GoalCard({
   const [addingStep, setAddingStep] = useState(false);
   const [stepInput, setStepInput] = useState('');
   const stepInputRef = useRef<HTMLInputElement>(null);
+  const [editingStepId, setEditingStepId] = useState<string | null>(null);
+  const [editingStepTitle, setEditingStepTitle] = useState('');
+  const stepEditInputRef = useRef<HTMLInputElement>(null);
 
   const steps = goal.steps || [];
   const totalSteps = steps.length;
@@ -296,13 +316,42 @@ function GoalCard({
     }
   };
 
+  const handleCommitStepEdit = async (stepId: string) => {
+    const trimmed = editingStepTitle.trim();
+    setEditingStepId(null);
+    if (!trimmed) return;
+    try {
+      await api.goals.stepUpdate({ id: stepId, title: trimmed });
+      onReload();
+    } catch {
+      try {
+        const target = steps.find((s) => s.id === stepId);
+        await api.goals.stepDelete(stepId);
+        const added = await api.goals.stepAdd({ goalId: goal.id, title: trimmed });
+        if (target?.completed && added?.id) {
+          await api.goals.stepToggle({ id: added.id, completed: true });
+        }
+        onReload();
+      } catch (err) {
+        console.error('Failed to update step:', err);
+      }
+    }
+  };
+
   useEffect(() => {
     if (addingStep) stepInputRef.current?.focus();
   }, [addingStep]);
 
+  useEffect(() => {
+    if (editingStepId) {
+      stepEditInputRef.current?.focus();
+      stepEditInputRef.current?.select();
+    }
+  }, [editingStepId]);
+
   return (
     <motion.div
-      className={`hab-goal-card ${goal.completed ? 'completed' : ''}`}
+      className={`hab-goal-card ${goal.isNorthStar ? 'is-north-star' : ''} ${goal.completed ? 'completed' : ''}`}
       layout
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
@@ -311,9 +360,14 @@ function GoalCard({
     >
       <div className="hab-goal-card-top">
         <div className="hab-goal-icon-badge" style={{ background: `${goal.color || '#ec5b5b'}1c`, color: goal.color || '#ec5b5b' }}>
-          <Icon name={goal.icon || 'target'} size={18} />
+          <Icon name={goal.icon || (goal.isNorthStar ? 'compass' : 'target')} size={18} />
         </div>
         <div className="hab-goal-top-meta">
+          {goal.isNorthStar && (
+            <span className="hab-north-star-pill">
+              <span className="pill-star">✦</span> North Star
+            </span>
+          )}
           {goal.targetDate && (
             <span className="hab-goal-target-date">
               <Icon name="calendar" size={11} /> {goal.targetDate}
@@ -379,13 +433,42 @@ function GoalCard({
             {steps.map((st) => (
               <div key={st.id} className={`hab-goal-step-item ${st.completed ? 'done' : ''}`}>
                 <button
+                  type="button"
                   className={`hab-goal-step-check ${st.completed ? 'checked' : ''}`}
                   onClick={() => onToggleStep(st)}
                 >
                   {st.completed && <Icon name="check" size={11} />}
                 </button>
-                <span className="hab-goal-step-label">{st.title}</span>
+                {editingStepId === st.id ? (
+                  <input
+                    ref={stepEditInputRef}
+                    className="field hab-goal-step-inline-edit"
+                    value={editingStepTitle}
+                    onChange={(e) => setEditingStepTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleCommitStepEdit(st.id);
+                      } else if (e.key === 'Escape') {
+                        setEditingStepId(null);
+                      }
+                    }}
+                    onBlur={() => handleCommitStepEdit(st.id)}
+                  />
+                ) : (
+                  <span
+                    className="hab-goal-step-label"
+                    title="Click to rename step"
+                    onClick={() => {
+                      setEditingStepId(st.id);
+                      setEditingStepTitle(st.title);
+                    }}
+                  >
+                    {st.title}
+                  </span>
+                )}
                 <button
+                  type="button"
                   className="icon-btn hab-goal-step-del"
                   onClick={() => removeStep(st.id)}
                   title="Remove step"
@@ -422,23 +505,49 @@ function GoalCard({
   );
 }
 
+interface ModalStepItem {
+  id?: string;
+  title: string;
+  completed?: boolean;
+}
+
 function GoalEditorModal({
   goal,
+  defaultIsNorthStar = false,
+  existingNorthStarId = null,
   onClose,
   onSaved,
 }: {
   goal: Goal | null;
+  defaultIsNorthStar?: boolean;
+  existingNorthStarId?: string | null;
   onClose: () => void;
   onSaved: (goal: Goal) => void;
 }) {
   const [title, setTitle] = useState(goal?.title || '');
   const [description, setDescription] = useState(goal?.description || '');
   const [targetDate, setTargetDate] = useState<string | null>(goal?.targetDate || null);
+  const [isNorthStar, setIsNorthStar] = useState<boolean>(
+    goal ? !!goal.isNorthStar : defaultIsNorthStar
+  );
   const [color, setColor] = useState(goal?.color || '#ec5b5b');
-  const [icon, setIcon] = useState(goal?.icon || 'target');
-  const [stepsDraft, setStepsDraft] = useState<string[]>([]);
+  const [icon, setIcon] = useState(
+    goal?.icon || (defaultIsNorthStar ? 'compass' : 'target')
+  );
+  const [stepsList, setStepsList] = useState<ModalStepItem[]>(() => {
+    if (goal?.steps && Array.isArray(goal.steps)) {
+      return goal.steps.map((st) => ({
+        id: st.id,
+        title: st.title,
+        completed: st.completed,
+      }));
+    }
+    return [];
+  });
+  const [deletedStepIds, setDeletedStepIds] = useState<string[]>([]);
   const [newStepText, setNewStepText] = useState('');
   const [saving, setSaving] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const titleRef = useRef<HTMLInputElement>(null);
 
@@ -446,18 +555,43 @@ function GoalEditorModal({
     titleRef.current?.focus();
   }, []);
 
-  const addDraftStep = () => {
-    if (!newStepText.trim()) return;
-    setStepsDraft([...stepsDraft, newStepText.trim()]);
+  const handleUpdateStepTitle = (index: number, val: string) => {
+    setStepsList((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, title: val } : s))
+    );
+  };
+
+  const handleRemoveStep = (index: number) => {
+    const item = stepsList[index];
+    if (item?.id) {
+      setDeletedStepIds((prev) => [...prev, item.id!]);
+    }
+    setStepsList((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAddStepItem = () => {
+    const trimmed = newStepText.trim();
+    if (!trimmed) return;
+    setStepsList((prev) => [...prev, { title: trimmed, completed: false }]);
     setNewStepText('');
   };
+
+  const hasOtherNorthStar = !!existingNorthStarId && (!goal || goal.id !== existingNorthStarId);
 
   const handleSave = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!title.trim() || saving) return;
     setSaving(true);
+    setErrorMsg(null);
 
     try {
+      const pendingSteps = [...stepsList];
+      if (newStepText.trim()) {
+        pendingSteps.push({ title: newStepText.trim(), completed: false });
+      }
+
+      const finalIsNorthStar = hasOtherNorthStar ? false : isNorthStar;
+
       if (goal) {
         const updated = await api.goals.patch(goal.id, {
           title: title.trim(),
@@ -465,15 +599,50 @@ function GoalEditorModal({
           targetDate,
           color,
           icon,
+          isNorthStar: finalIsNorthStar,
         });
-        if (updated) {
-          // If there were any draft steps added
-          for (const s of stepsDraft) {
-            await api.goals.stepAdd({ goalId: goal.id, title: s });
+
+        // 1. Delete removed steps
+        for (const sId of deletedStepIds) {
+          try {
+            await api.goals.stepDelete(sId);
+          } catch (delErr) {
+            console.error('Failed to delete step:', delErr);
           }
-          const final = await api.goals.get(goal.id);
-          onSaved(final || updated);
         }
+
+        // 2. Update existing or add new steps
+        for (const st of pendingSteps) {
+          const trimmedTitle = st.title.trim();
+          if (!trimmedTitle) continue;
+          if (st.id) {
+            const original = goal.steps?.find((o) => o.id === st.id);
+            if (original && original.title !== trimmedTitle) {
+              try {
+                await api.goals.stepUpdate({ id: st.id, title: trimmedTitle });
+              } catch {
+                try {
+                  await api.goals.stepDelete(st.id);
+                  const added = await api.goals.stepAdd({ goalId: goal.id, title: trimmedTitle });
+                  if (st.completed && added?.id) {
+                    await api.goals.stepToggle({ id: added.id, completed: true });
+                  }
+                } catch (stepFallbackErr) {
+                  console.error('Failed to update step via fallback:', stepFallbackErr);
+                }
+              }
+            }
+          } else {
+            try {
+              await api.goals.stepAdd({ goalId: goal.id, title: trimmedTitle });
+            } catch (addErr) {
+              console.error('Failed to add step:', addErr);
+            }
+          }
+        }
+
+        const final = await api.goals.get(goal.id);
+        onSaved(final || updated || goal);
       } else {
         const created = await api.goals.create({
           title: title.trim(),
@@ -481,12 +650,16 @@ function GoalEditorModal({
           targetDate,
           color,
           icon,
-          steps: stepsDraft.map((st) => ({ title: st })),
+          isNorthStar: finalIsNorthStar,
+          steps: pendingSteps
+            .filter((st) => st.title.trim())
+            .map((st) => ({ title: st.title.trim() })),
         });
         onSaved(created);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to save goal:', err);
+      setErrorMsg(err?.message || 'Failed to save goal. Please check all fields.');
     } finally {
       setSaving(false);
     }
@@ -509,20 +682,55 @@ function GoalEditorModal({
               <span className="goal-modal-badge" style={{ background: `${color}18`, color }}>
                 <Icon name={icon} size={18} />
               </span>
-              <h2>{goal ? 'Edit Goal' : 'Create New Goal'}</h2>
+              <h2>
+                {goal
+                  ? (isNorthStar ? 'Edit North Star' : 'Edit Goal')
+                  : (isNorthStar && !hasOtherNorthStar ? 'Set North Star Goal' : 'Create New Goal')}
+              </h2>
             </div>
             <button className="icon-btn" onClick={onClose} aria-label="Close" type="button">
               <Icon name="x" size={16} />
             </button>
           </div>
 
-          <form onSubmit={handleSave} className="hab-goal-modal-form">
+          <form onSubmit={handleSave} noValidate className="hab-goal-modal-form">
+            {/* North Star Toggle - completely removed if another North Star exists */}
+            {!hasOtherNorthStar && (
+              <div className={`hab-north-star-toggle-card ${isNorthStar ? 'active' : ''}`}>
+                <div className="toggle-info">
+                  <div className="toggle-title-row">
+                    <span className="toggle-star">✦</span>
+                    <strong>North Star Goal</strong>
+                  </div>
+                  <p>The single biggest overarching goal of all.</p>
+                </div>
+                <label className="switch-label">
+                  <input
+                    type="checkbox"
+                    checked={isNorthStar}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsNorthStar(checked);
+                      if (checked && (!goal || !goal.isNorthStar)) {
+                        setIcon('compass');
+                      }
+                    }}
+                  />
+                  <span className="switch-slider" />
+                </label>
+              </div>
+            )}
+
             <div className="form-group">
-              <label>Goal Title</label>
+              <label>{isNorthStar && !hasOtherNorthStar ? 'North Star Title' : 'Goal Title'}</label>
               <input
                 ref={titleRef}
                 className="field"
-                placeholder="e.g. Run a 10K, Learn Swift, Read 12 Books"
+                placeholder={
+                  isNorthStar && !hasOtherNorthStar
+                    ? 'e.g. Become Financially Independent, Launch My Studio'
+                    : 'e.g. Run a 10K, Learn Swift, Read 12 Books'
+                }
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 required
@@ -530,11 +738,11 @@ function GoalEditorModal({
             </div>
 
             <div className="form-group">
-              <label>Motivation / Notes</label>
+              <label>Motivation &amp; Notes</label>
               <textarea
-                className="field"
-                rows={2}
-                placeholder="Describe what achieving this looks like and why you want it…"
+                className="field hab-goal-textarea"
+                rows={4}
+                placeholder="Describe what achieving this looks like, why it matters, key context, or notes…"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
@@ -578,50 +786,78 @@ function GoalEditorModal({
               </div>
             </div>
 
-            {/* Sub-steps in creation */}
+            {/* Milestones / Steps - view, edit, add, delete */}
             <div className="form-group">
-              <label>Key Milestones / Steps (Optional)</label>
-              <div className="hab-goal-modal-steps-draft">
-                {stepsDraft.map((st, i) => (
-                  <div key={i} className="draft-step-item">
-                    <Icon name="check" size={13} className="step-icon" />
-                    <span>{st}</span>
+              <div className="hab-goal-modal-steps-head">
+                <label>Key Milestones &amp; Steps (Optional)</label>
+                {stepsList.length > 0 && (
+                  <span className="hab-goal-modal-steps-count">
+                    {stepsList.length} {stepsList.length === 1 ? 'step' : 'steps'}
+                  </span>
+                )}
+              </div>
+
+              <div className="hab-goal-modal-steps-list">
+                {stepsList.map((st, i) => (
+                  <div key={st.id || `step-${i}`} className="modal-step-row">
+                    <span className="step-num">{i + 1}</span>
+                    <input
+                      type="text"
+                      className="field modal-step-input"
+                      value={st.title}
+                      placeholder={`Step ${i + 1}…`}
+                      onChange={(e) => handleUpdateStepTitle(i, e.target.value)}
+                    />
                     <button
                       type="button"
-                      className="icon-btn"
-                      onClick={() => setStepsDraft(stepsDraft.filter((_, idx) => idx !== i))}
+                      className="icon-btn modal-step-del-btn"
+                      onClick={() => handleRemoveStep(i)}
+                      title="Remove step"
                       aria-label="Remove step"
                     >
-                      <Icon name="x" size={12} />
+                      <Icon name="x" size={13} />
                     </button>
                   </div>
                 ))}
+
                 <div className="draft-step-add-row">
                   <input
                     type="text"
                     className="field"
-                    placeholder="Add a milestone step…"
+                    placeholder="Add a milestone or next step…"
                     value={newStepText}
                     onChange={(e) => setNewStepText(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
-                        addDraftStep();
+                        handleAddStepItem();
                       }
                     }}
                   />
-                  <button type="button" className="btn subtle" onClick={addDraftStep} disabled={!newStepText.trim()}>
-                    Add
+                  <button
+                    type="button"
+                    className="btn subtle"
+                    onClick={handleAddStepItem}
+                    disabled={!newStepText.trim()}
+                  >
+                    <Icon name="plus" size={12} /> Add
                   </button>
                 </div>
               </div>
             </div>
 
+            {errorMsg && <div className="hab-goal-modal-error">{errorMsg}</div>}
+
             <div className="modal-actions">
               <button type="button" className="btn subtle" onClick={onClose} disabled={saving}>
                 Cancel
               </button>
-              <button type="submit" className="btn primary" disabled={!title.trim() || saving}>
+              <button
+                type="submit"
+                className="btn primary"
+                onClick={handleSave}
+                disabled={!title.trim() || saving}
+              >
                 {saving ? 'Saving…' : goal ? 'Update Goal' : 'Create Goal'}
               </button>
             </div>

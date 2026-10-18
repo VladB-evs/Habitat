@@ -15999,6 +15999,37 @@ figcaption {
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.08);
 }
 
+.hab-goal-card.is-north-star {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  box-shadow: 0 0 16px -2px var(--hab-aura-glow, color-mix(in srgb, var(--accent) 22%, transparent)),
+              0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.hab-goal-card.is-north-star:hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+  box-shadow: 0 0 22px 0 var(--hab-aura-glow, color-mix(in srgb, var(--accent) 30%, transparent)),
+              0 4px 18px rgba(0, 0, 0, 0.08);
+}
+
+.hab-north-star-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 2px;
+}
+
+.hab-north-star-pill .pill-star {
+  font-size: 10px;
+}
+
 .hab-goal-card.completed {
   opacity: 0.88;
   border-color: color-mix(in srgb, #2ecc71 35%, var(--border));
@@ -16300,6 +16331,106 @@ figcaption {
   gap: 14px;
 }
 
+.hab-north-star-toggle-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.hab-north-star-toggle-card.active {
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-1));
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border-2));
+}
+
+.hab-north-star-toggle-card.disabled {
+  opacity: 0.6;
+}
+
+.toggle-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toggle-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13.5px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.toggle-star {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+.toggle-info p {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-2);
+  line-height: 1.4;
+}
+
+.switch-label {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 24px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.switch-label.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.switch-label input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.switch-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: var(--bg-3);
+  border: 1px solid var(--border-2);
+  transition: 0.2s ease;
+  border-radius: 24px;
+}
+
+.switch-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: #fff;
+  transition: 0.2s ease;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.switch-label input:checked + .switch-slider {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+.switch-label input:checked + .switch-slider:before {
+  transform: translateX(18px);
+}
+
 .hab-goal-modal-form .form-group {
   display: flex;
   flex-direction: column;
@@ -16360,29 +16491,128 @@ figcaption {
   border-color: var(--accent);
 }
 
-.hab-goal-modal-steps-draft {
+.hab-goal-textarea {
+  min-height: 108px;
+  max-height: 280px;
+  line-height: 1.5;
+  resize: vertical;
+  font-family: inherit;
+  font-size: 13px;
+  padding: 8px 12px;
+}
+
+.hab-goal-modal-error {
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--danger, #ff4d4f) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger, #ff4d4f) 40%, transparent);
+  border-radius: 8px;
+  color: var(--danger, #ff4d4f);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.hab-goal-modal-steps-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hab-goal-modal-steps-count {
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.hab-goal-modal-steps-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 
-.draft-step-item {
+.modal-step-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
-  background: var(--bg-3);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  font-size: 13px;
+  padding: 4px 8px;
+  transition: border-color 0.15s ease;
 }
 
-.draft-step-item span {
+.modal-step-row:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
+}
+
+.modal-step-row .step-num {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-3);
+  width: 16px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.modal-step-row .modal-step-input {
   flex: 1;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  font-size: 13px;
+  padding: 4px 6px;
+  color: var(--text);
+  outline: none;
+}
+
+.modal-step-row .modal-step-input:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.modal-step-del-btn {
+  color: var(--text-3);
+  opacity: 0.6;
+  flex-shrink: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.modal-step-del-btn:hover {
+  opacity: 1;
+  color: var(--danger, #ff4d4f);
 }
 
 .draft-step-add-row {
   display: flex;
   gap: 6px;
+  margin-top: 2px;
+}
+
+.draft-step-add-row input {
+  flex: 1;
+}
+
+/* Inline step edit in GoalCard */
+.hab-goal-step-inline-edit {
+  flex: 1;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  height: 24px;
+}
+
+.hab-goal-step-label {
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin-left: -4px;
+  transition: background 0.15s ease;
+}
+
+.hab-goal-step-label:hover {
+  background: var(--bg-3);
 }
 
 /* ============================================================
