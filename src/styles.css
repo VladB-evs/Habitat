@@ -15974,12 +15974,21 @@ figcaption {
   line-height: 1.5;
 }
 
-/* Cards Grid */
+/* Cards Grid — Dynamic Lego Masonry */
 .hab-goals-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  display: flex;
+  align-items: flex-start;
   gap: 16px;
+  width: 100%;
   padding-bottom: 30px;
+}
+
+.hab-goals-col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
 }
 
 .hab-goal-card {
@@ -16622,7 +16631,7 @@ figcaption {
 /* Container queries for multi-pane split view */
 @container (max-width: 680px) {
   .hab-goals-grid {
-    grid-template-columns: 1fr;
+    flex-direction: column;
   }
 
   .hab-goals-toolbar {
@@ -16669,8 +16678,13 @@ figcaption {
 }
 
 :root[data-narrow] .hab-goals-grid {
-  grid-template-columns: 1fr;
+  flex-direction: column;
   gap: 12px;
+}
+
+:root[data-narrow] .hab-goals-col {
+  gap: 12px;
+  width: 100%;
 }
 
 /* On mobile / coarse touch devices, actions must be visible without hover */

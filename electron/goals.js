@@ -38,6 +38,7 @@ const INDEXES = `
 CREATE INDEX IF NOT EXISTS idx_goal_steps_goal ON goal_steps(goal_id);
 CREATE INDEX IF NOT EXISTS idx_goals_updated ON goals(updated_at);
 CREATE INDEX IF NOT EXISTS idx_goals_north_star ON goals(is_north_star);
+CREATE INDEX IF NOT EXISTS idx_goals_created ON goals(created_at);
 `;
 
 function parseStep(r) {
@@ -90,8 +91,8 @@ function create(getDb) {
   return {
     'goals:list': ({ category } = {}) => {
       const q = category
-        ? db().prepare('SELECT * FROM goals WHERE category = ? ORDER BY completed ASC, updated_at DESC').all(String(category))
-        : db().prepare('SELECT * FROM goals ORDER BY completed ASC, updated_at DESC').all();
+        ? db().prepare('SELECT * FROM goals WHERE category = ? ORDER BY is_north_star DESC, created_at ASC').all(String(category))
+        : db().prepare('SELECT * FROM goals ORDER BY is_north_star DESC, created_at ASC').all();
       return q.map((r) => parseGoal(r, getStepsFor(r.id)));
     },
 

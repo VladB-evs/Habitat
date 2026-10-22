@@ -21,7 +21,7 @@ export function GoalsView() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'completed'>('all');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'completed'>('all');
   const [showAddModal, setShowAddModal] = useState(false);
   const [createAsNorthStar, setCreateAsNorthStar] = useState(false);
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
@@ -102,7 +102,8 @@ export function GoalsView() {
 
   const filtered = useMemo(() => {
     return goals.filter((g) => {
-      if (filterStatus === 'active' && g.completed) return false;
+      // The "All" tab only shows ongoing/active goals; completed ones belong in "Done"
+      if (filterStatus === 'all' && g.completed) return false;
       if (filterStatus === 'completed' && !g.completed) return false;
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -114,6 +115,106 @@ export function GoalsView() {
       return true;
     });
   }, [goals, filterStatus, searchQuery]);
+
+  // North Star is always first, then remaining goals in the order they were added
+  const sortedGoals = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      if (a.isNorthStar && !b.isNorthStar) return -1;
+      if (!a.isNorthStar && b.isNorthStar) return 1;
+      const tA = a.createdAt || 0;
+      const tB = b.createdAt || 0;
+      if (tA !== tB) return tA - tB;
+      return (a.id || '').localeCompare(b.id || '');
+    });
+  }, [filtered]);
+
+  const gridRef = useRef<HTMLDivElement>(null);
+  const [columnCount, setColumnCount] = useState<number>(() => {
+    if (typeof window === 'undefined') return 1;
+    const w = window.innerWidth;
+    if (w < 680) return 1;
+    if (w < 1040) return 2;
+    if (w < 1440) return 3;
+    return 4;
+  });
+
+  useEffect(() => {
+    const el = gridRef.current;
+    if (!el) return;
+
+    const calcCols = (w: number) => {
+      if (w < 680) return 1;
+      if (w < 1040) return 2;
+      if (w < 1440) return 3;
+      return 4;
+    };
+
+    const update = () => {
+      if (gridRef.current) {
+        const w = gridRef.current.clientWidth || window.innerWidth;
+        const next = calcCols(w);
+        setColumnCount((prev) => (prev !== next ? next : prev));
+      }
+    };
+
+    update();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+          const w = entry.contentRect.width;
+          if (w > 0) {
+            const next = calcCols(w);
+            setColumnCount((prev) => (prev !== next ? next : prev));
+          }
+        }
+      });
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+  }, []);
+
+  // Lego dynamic grid packing: distribute cards into shortest columns
+  const columns = useMemo(() => {
+    if (sortedGoals.length === 0) return [];
+    if (columnCount <= 1) return [sortedGoals];
+
+    const cols: Goal[][] = Array.from({ length: columnCount }, () => []);
+    const colHeights = new Array(columnCount).fill(0);
+
+    const getGoalWeight = (g: Goal): number => {
+      let weight = 130;
+      if (g.description) {
+        weight += Math.min(80, Math.ceil(g.description.length / 35) * 18);
+      }
+      const stepsCount = g.steps?.length || 0;
+      if (stepsCount > 0) {
+        weight += 60 + stepsCount * 36;
+      }
+      return weight;
+    };
+
+    // North Star (or first added goal) ALWAYS goes into column 0
+    cols[0].push(sortedGoals[0]);
+    colHeights[0] += getGoalWeight(sortedGoals[0]) + 16;
+
+    // Distribute subsequent goals into the shortest column
+    for (let i = 1; i < sortedGoals.length; i++) {
+      const g = sortedGoals[i];
+      let minCol = 0;
+      let minH = colHeights[0];
+      for (let c = 1; c < columnCount; c++) {
+        if (colHeights[c] < minH) {
+          minH = colHeights[c];
+          minCol = c;
+        }
+      }
+      cols[minCol].push(g);
+      colHeights[minCol] += getGoalWeight(g) + 16;
+    }
+
+    return cols;
+  }, [sortedGoals, columnCount]);
 
   const activeCount = useMemo(() => goals.filter((g) => !g.completed).length, [goals]);
 
@@ -195,12 +296,6 @@ export function GoalsView() {
               All
             </button>
             <button
-              className={filterStatus === 'active' ? 'on' : ''}
-              onClick={() => setFilterStatus('active')}
-            >
-              Active
-            </button>
-            <button
               className={filterStatus === 'completed' ? 'on' : ''}
               onClick={() => setFilterStatus('completed')}
             >
@@ -215,31 +310,46 @@ export function GoalsView() {
             <Icon name="target" size={32} />
             <p>Loading your goals…</p>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : sortedGoals.length === 0 ? (
           <div className="hab-goals-empty-state">
-            <Icon name="target" size={36} />
-            <h3>No goals match this view</h3>
-            <p>Whether it’s a big milestone or a daily ritual, set your first aspiration.</p>
-            <button className="btn primary" onClick={() => handleOpenAdd(false)}>
-              <Icon name="plus" size={14} /> Add a Goal
-            </button>
+            <Icon name={filterStatus === 'completed' ? 'check' : 'target'} size={36} />
+            <h3>{filterStatus === 'completed' ? 'No completed goals yet' : 'No goals match this view'}</h3>
+            <p>
+              {filterStatus === 'completed'
+                ? 'Goals you finish will be celebrated and collected here.'
+                : 'Whether it’s a big milestone or a daily ritual, set your first aspiration.'}
+            </p>
+            {filterStatus !== 'completed' && (
+              <button className="btn primary" onClick={() => handleOpenAdd(false)}>
+                <Icon name="plus" size={14} /> Add a Goal
+              </button>
+            )}
           </div>
         ) : (
-          <div className="hab-goals-grid">
-            <AnimatePresence>
-              {filtered.map((g) => (
-                <GoalCard
-                  key={g.id}
-                  goal={g}
-                  onToggleGoal={() => toggleGoal(g)}
-                  onToggleStep={(s) => toggleStep(g, s)}
-                  onEdit={() => setEditingGoal(g)}
-                  onDelete={() => deleteGoal(g)}
-                  onReload={loadGoals}
-                />
-              ))}
-            </AnimatePresence>
-          </div>
+          <motion.div
+            key={filterStatus}
+            className="hab-goals-grid"
+            ref={gridRef}
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.12 }}
+          >
+            {columns.map((col, colIdx) => (
+              <div key={colIdx} className="hab-goals-col">
+                {col.map((g) => (
+                  <GoalCard
+                    key={g.id}
+                    goal={g}
+                    onToggleGoal={() => toggleGoal(g)}
+                    onToggleStep={(s) => toggleStep(g, s)}
+                    onEdit={() => setEditingGoal(g)}
+                    onDelete={() => deleteGoal(g)}
+                    onReload={loadGoals}
+                  />
+                ))}
+              </div>
+            ))}
+          </motion.div>
         )}
       </div>
 
@@ -350,12 +460,8 @@ function GoalCard({
   }, [editingStepId]);
 
   return (
-    <motion.div
+    <div
       className={`hab-goal-card ${goal.isNorthStar ? 'is-north-star' : ''} ${goal.completed ? 'completed' : ''}`}
-      layout
-      initial={{ opacity: 0, scale: 0.96 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.95 }}
       style={{ '--goal-accent': goal.color || '#ec5b5b' } as React.CSSProperties}
     >
       <div className="hab-goal-card-top">
@@ -501,7 +607,7 @@ function GoalCard({
           </div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
