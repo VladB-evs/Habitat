@@ -226,11 +226,14 @@ export function Editor({
   onSave,
   /** The object being edited, so a flashcard cut from this note remembers where it came from. */
   objectId,
+  /** The drag grip in the margin. A one-paragraph thought has no blocks to rearrange. */
+  handle = true,
 }: {
   content: any;
   placeholder?: string;
   onSave: (json: any) => void;
   objectId?: string;
+  handle?: boolean;
 }) {
   const { openObject } = useApp();
   const [wrap, setWrap] = useState<HTMLElement | null>(null);
@@ -360,7 +363,7 @@ export function Editor({
     <div className="editor-wrap" ref={setWrap}>
       <EditorContent editor={editor} className="editor" />
       <KeepWriting editor={editor} />
-      <BlockHandle editor={editor} container={wrap} />
+      {handle && <BlockHandle editor={editor} container={wrap} />}
       <MathBar editor={editor} />
       <TableMenu editor={editor} />
       <SelectionMenu editor={editor} objectId={objectId} />

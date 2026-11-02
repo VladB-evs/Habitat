@@ -48,7 +48,7 @@ export function normalize(w: DashWidget, index: number): DashWidget {
 
 /** What a brand-new dashboard looks like — an engaging, useful default setup. */
 export function defaultLayout(): DashWidget[] {
-  const kinds = ['greeting', 'quick', 'habits', 'agenda', 'tasks', 'scratchpad', 'tiles', 'pinned', 'recent', 'quote'];
+  const kinds = ['greeting', 'quick', 'agenda', 'tasks', 'scratchpad', 'tiles', 'pinned', 'recent', 'quote'];
   return kinds
     .map((kind) => widgetDef(kind))
     .filter((d): d is WidgetDef => !!d)

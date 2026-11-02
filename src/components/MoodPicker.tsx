@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useId, type CSSProperties } from 'react';
 import { motion } from 'motion/react';
 import { spring } from '../motion';
 import { Icon } from './Icons';
@@ -23,9 +23,26 @@ export function moodMeta(score: number | undefined) {
   return MOODS.find((m) => m.score === score);
 }
 
-export function MoodPicker({ value, onPick }: { value?: number; onPick: (score: number | null) => void }) {
+export function MoodPicker({
+  value,
+  onPick,
+  /** Icons only, no labels — for the many pickers down a day's column, where a
+   *  mood is a glance rather than a decision to sit with. */
+  compact = false,
+}: {
+  value?: number;
+  onPick: (score: number | null) => void;
+  compact?: boolean;
+}) {
+  // A day now holds several of these at once, so the sliding highlight needs an
+  // id per picker. One shared id makes the highlight jump between moments.
+  const scope = useId();
   return (
-    <div className="mood-row" role="radiogroup" aria-label="Daily mood">
+    <div
+      className={'mood-row' + (compact ? ' compact' : '')}
+      role="radiogroup"
+      aria-label={compact ? 'Mood for this moment' : 'Daily mood'}
+    >
       {MOODS.map((m) => {
         const on = value === m.score;
         return (
@@ -46,7 +63,7 @@ export function MoodPicker({ value, onPick }: { value?: number; onPick: (score: 
           >
             {on && (
               <motion.span
-                layoutId="mood-sel"
+                layoutId={'mood-sel' + scope}
                 className="mood-sel"
                 transition={spring}
               />
@@ -56,9 +73,9 @@ export function MoodPicker({ value, onPick }: { value?: number; onPick: (score: 
               animate={{ scale: on ? 1.1 : 1 }}
               transition={spring}
             >
-              <Icon name={m.icon} size={18} />
+              <Icon name={m.icon} size={compact ? 15 : 18} />
             </motion.span>
-            <span className="mood-label">{m.label}</span>
+            {!compact && <span className="mood-label">{m.label}</span>}
           </motion.button>
         );
       })}

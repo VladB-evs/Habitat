@@ -3,12 +3,11 @@ import { api } from '../api';
 import { DayTasks } from '../components/DayTasks';
 import { Icon, TypeIcon } from '../components/Icons';
 import { Avatar } from '../components/People';
-import { MOODS, moodMeta } from '../components/MoodPicker';
 import { motion } from 'motion/react';
 import { dealtIn, stagger } from '../motion';
 import { objectChanged, onObjectChanged } from '../objects';
 import { useApp } from '../store';
-import type { Agenda, AgendaDay, AgendaEvent, AgendaTask, DailyMeta, Person, StudyOverview } from '../types';
+import type { Agenda, AgendaDay, AgendaEvent, AgendaTask, Person, StudyOverview } from '../types';
 import { addDays, ago, birthdayCountdown, fmtBirthday, greeting, PEOPLE_TYPE, todayKey, typeColor } from '../util';
 import type { WidgetDef, WidgetProps, WidgetSettingsProps } from './kit';
 import { useAutoHide, useDash } from './kit';
@@ -519,184 +518,6 @@ function ScratchpadSettings({ config, set }: WidgetSettingsProps) {
   );
 }
 
-/* ---------- daily habit & mood check-in ---------- */
-
-function HabitsBody({ w = 3, h = 2 }: WidgetProps) {
-  const { navigate } = useApp();
-  const [metas, setMetas] = useState<DailyMeta[]>([]);
-  const [todayNote, setTodayNote] = useState<any>(null);
-  const today = todayKey();
-
-  useEffect(() => {
-    api.daily.list().then(setMetas);
-    api.daily.get(today).then(setTodayNote);
-    return onObjectChanged(() => {
-      api.daily.list().then(setMetas);
-      api.daily.get(today).then(setTodayNote);
-    });
-  }, [today]);
-
-  // Calculate journal streak
-  const sortedDays = [...metas].map((m) => m.dateKey).filter(Boolean).sort().reverse();
-  const daySet = new Set(sortedDays);
-  let streak = 0;
-  let check = today;
-  if (daySet.has(check) || daySet.has(addDays(check, -1))) {
-    if (!daySet.has(check)) check = addDays(check, -1);
-    while (daySet.has(check)) {
-      streak++;
-      check = addDays(check, -1);
-    }
-  }
-
-  // Last 7 days dot history
-  const last7 = Array.from({ length: 7 }, (_, i) => addDays(today, -(6 - i)));
-
-  const onSelectMood = async (score: number | null) => {
-    let target = todayNote;
-    if (!target) {
-      if (score === null) return;
-      target = await api.daily.create(today, null);
-    }
-    const props = { ...target.props };
-    if (score === null) delete props.mood;
-    else props.mood = score;
-    target = { ...target, props };
-    setTodayNote(target);
-    await api.objects.update(target.id, { props });
-    api.daily.list().then(setMetas);
-  };
-
-  const metaByDate = new Map(metas.map((m) => [m.dateKey, m]));
-  const currentMood = todayNote?.props?.mood;
-
-  // Dedicated compact 1-row view when h === 1
-  if (h === 1) {
-    return (
-      <div className="w-habits h-1">
-        <div className="habits-header compact">
-          <div
-            className="habits-streak"
-            onClick={() => navigate({ kind: 'daily' })}
-            style={{ cursor: 'pointer' }}
-            title="Open Daily Journal"
-          >
-            <span className="habits-flame">
-              <Icon name="flame" size={16} />
-            </span>
-            <span className="habits-count">{streak}</span>
-            <span className="habits-streak-label">{streak === 1 ? 'day' : 'days'}</span>
-          </div>
-          <div className="habits-dots">
-            {last7.map((d) => {
-              const m = metaByDate.get(d);
-              const hasNote = !!m;
-              const mood = m?.mood;
-              const moodInfo = mood ? moodMeta(mood) : null;
-              const isToday = d === today;
-              return (
-                <div
-                  key={d}
-                  className={'habit-dot' + (hasNote ? ' active' : '') + (isToday ? ' today' : '')}
-                  style={moodInfo ? { background: moodInfo.color, borderColor: moodInfo.color } : undefined}
-                  title={`${new Date(d + 'T12:00:00').toLocaleDateString(undefined, {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric',
-                  })}: ${hasNote ? 'Entry logged' : 'No entry'}`}
-                />
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="habits-mood-buttons compact">
-          {MOODS.map((m) => {
-            const on = currentMood === m.score;
-            return (
-              <button
-                key={m.score}
-                type="button"
-                className={'h-mood-btn icon-only' + (on ? ' on' : '')}
-                style={{ '--mood-c': m.color } as any}
-                onClick={() => onSelectMood(on ? null : m.score)}
-                title={m.label}
-              >
-                <Icon name={m.icon} size={15} />
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
-  // Full rich view when h >= 2 (fills space beautifully, no empty void)
-  const isNarrow = w != null && w <= 2;
-
-  return (
-    <div className="w-habits">
-      <div className="habits-header">
-        <div className="habits-streak">
-          <span className="habits-flame">
-            <Icon name="flame" size={18} />
-          </span>
-          <span className="habits-count">{streak}</span>
-          <span className="habits-streak-label">{streak === 1 ? 'day streak' : 'days streak'}</span>
-        </div>
-        <div className="habits-dots">
-          {last7.map((d) => {
-            const m = metaByDate.get(d);
-            const hasNote = !!m;
-            const mood = m?.mood;
-            const moodInfo = mood ? moodMeta(mood) : null;
-            const isToday = d === today;
-            return (
-              <div
-                key={d}
-                className={'habit-dot' + (hasNote ? ' active' : '') + (isToday ? ' today' : '')}
-                style={moodInfo ? { background: moodInfo.color, borderColor: moodInfo.color } : undefined}
-                title={`${new Date(d + 'T12:00:00').toLocaleDateString(undefined, {
-                  weekday: 'short',
-                  month: 'short',
-                  day: 'numeric',
-                })}: ${hasNote ? 'Entry logged' : 'No entry'}`}
-              />
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="habits-mood-section">
-        <div className="habits-mood-label">How are you feeling today?</div>
-        <div className="habits-mood-buttons">
-          {MOODS.map((m) => {
-            const on = currentMood === m.score;
-            return (
-              <button
-                key={m.score}
-                type="button"
-                className={'h-mood-btn' + (on ? ' on' : '') + (isNarrow ? ' icon-only' : '')}
-                style={{ '--mood-c': m.color } as any}
-                onClick={() => onSelectMood(on ? null : m.score)}
-                title={m.label}
-              >
-                <Icon name={m.icon} size={16} />
-                {!isNarrow && <span>{m.label}</span>}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <button className="habits-journal-btn" onClick={() => navigate({ kind: 'daily' })}>
-        <Icon name="calendar" size={13} />
-        <span>{todayNote?.snippet ? `Today: “${todayNote.snippet.slice(0, 52)}…”` : "Open today's journal note"}</span>
-      </button>
-    </div>
-  );
-}
-
 /* ---------- study & flashcards due ---------- */
 
 function StudyBody() {
@@ -1076,21 +897,6 @@ export const BUILTIN_WIDGETS: WidgetDef[] = [
     defaultConfig: { text: '', color: 'yellow' },
     Body: ScratchpadBody,
     Settings: ScratchpadSettings,
-  },
-  {
-    kind: 'habits',
-    name: 'Habit & Mood Check-In',
-    desc: 'Track daily journaling streaks, 7-day history, and log your mood.',
-    icon: 'flame',
-    group: 'Productivity',
-    card: true,
-    singleton: true,
-    defaultW: 3,
-    defaultH: 2,
-    minW: 2,
-    minH: 1,
-    maxH: 6,
-    Body: HabitsBody,
   },
   {
     kind: 'study',

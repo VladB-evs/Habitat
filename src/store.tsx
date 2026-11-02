@@ -34,8 +34,8 @@ export type LinkTarget = 'current' | 'side';
 export function getViewInfo(v: View | undefined, types?: ObjType[]): { title: string; icon: string } {
   if (!v) return { title: 'Home', icon: 'grid' };
   switch (v.kind) {
-    case 'dashboard': return { title: 'Dashboard', icon: 'grid' };
-    case 'daily': return { title: 'Daily Notes', icon: 'calendar' };
+    case 'dashboard': return { title: 'Home', icon: 'grid' };
+    case 'daily': return { title: 'Journal', icon: 'calendar' };
     case 'tasks': return { title: v.tab === 'calendar' ? 'Calendar' : 'Tasks', icon: v.tab === 'calendar' ? 'calendar-clock' : 'circle-check' };
     case 'people': return { title: 'People', icon: 'people' };
     case 'media': return { title: 'Media', icon: 'film' };

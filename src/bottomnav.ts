@@ -31,8 +31,8 @@ export interface NavBuiltin {
 }
 
 export const NAV_BUILTINS: NavBuiltin[] = [
-  { key: 'dashboard', label: 'Dashboard', icon: 'grid' },
-  { key: 'daily', label: 'Daily Notes', icon: 'calendar' },
+  { key: 'dashboard', label: 'Home', icon: 'grid' },
+  { key: 'daily', label: 'Journal', icon: 'calendar' },
   { key: 'tasks', label: 'Tasks', icon: 'circle-check' },
   { key: 'goals', label: 'Goals', icon: 'target' },
   { key: 'capture', label: 'Capture', icon: 'plus' },
@@ -46,7 +46,7 @@ export const NAV_BUILTINS: NavBuiltin[] = [
 
 export const NAV_BUILTIN_MAP = new Map(NAV_BUILTINS.map((b) => [b.key, b]));
 
-/** Dashboard, Daily Notes, Tasks up front, everything else behind Types / More. */
+/** Home, Journal, Tasks up front, everything else behind Types / More. */
 export const DEFAULT_NAV: NavKey[] = ['dashboard', 'daily', 'tasks', 'types', 'more'];
 
 /** Five comfortably fit a 375px screen without crowding; a sixth still fits, snugly. */

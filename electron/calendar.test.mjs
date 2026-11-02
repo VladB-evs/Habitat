@@ -321,6 +321,7 @@ test('moving one occurrence takes it out of the series and leaves the rest', () 
     occurrence: '2026-10-12',
     dayKey: '2026-10-13',
     startMinute: 19 * 60,
+    allowPast: true,
   });
 
   assert.notEqual(moved.id, series.id, 'the moved day becomes its own object');

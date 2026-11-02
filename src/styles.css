@@ -34,6 +34,13 @@
   --hl-type: #e78a4e;
   --hl-meta: #7daea3;
   --hl-variable: #d3869b;
+  /* The hours of the day, for the journal's time gutter. Warm as the sun comes
+     up, cool after dark, so a day's rhythm is legible before its words are. */
+  --hour-dawn: #d49a4e;
+  --hour-morning: #c9a338;
+  --hour-afternoon: #9aa176;
+  --hour-evening: #b681ae;
+  --hour-night: #7b88b8;
 }
 
 :root[data-theme='light'] {
@@ -60,6 +67,11 @@
   --hl-type: #c35e0a;
   --hl-meta: #45707a;
   --hl-variable: #945e80;
+  --hour-dawn: #9a6512;
+  --hour-morning: #85690a;
+  --hour-afternoon: #5c6334;
+  --hour-evening: #7d4876;
+  --hour-night: #434f7d;
 }
 
 /* ---------- layout tokens ----------
@@ -2222,8 +2234,307 @@ button.version.version-update {
   border-radius: 20px;
 }
 
-.daily-editor {
+/* ---------- the journal, as moments ----------
+   A day is a column of moments down one rail: the time on the left, written by
+   the clock, and the thought to the right of it. The rail is continuous and the
+   moments are not boxed — a day should read as one stretch of time, not as a
+   list of cards. */
+
+.journal {
   margin-top: 14px;
+  padding-bottom: 32px;
+}
+
+/* The gutter holds the widest clock the locale can print — "11:41 AM" — on one
+   line. A time that wraps stops being a time and becomes a paragraph. */
+.journal {
+  --rail: 74px;
+}
+
+.moment {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  gap: 2px;
+}
+
+.moment-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding-top: 3px;
+}
+
+.moment-time,
+.composer-time {
+  border: none;
+  background: transparent;
+  padding: 0 10px 0 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--text-3);
+  cursor: pointer;
+  text-align: right;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.moment-time:hover {
+  color: var(--text);
+}
+
+.moment-time.untimed {
+  font-style: italic;
+}
+
+/* The band of the day a moment falls in. Scrolling the journal shows when you
+   write before a single word of it is read. */
+.moment.band-dawn .moment-time {
+  color: var(--hour-dawn);
+}
+
+.moment.band-morning .moment-time {
+  color: var(--hour-morning);
+}
+
+.moment.band-afternoon .moment-time {
+  color: var(--hour-afternoon);
+}
+
+.moment.band-evening .moment-time {
+  color: var(--hour-evening);
+}
+
+.moment.band-night .moment-time {
+  color: var(--hour-night);
+}
+
+.moment-time-input {
+  width: 52px;
+  margin-right: 8px;
+  padding: 1px 4px;
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* The rail itself. Tinted by the moment's own mood where it has one, so a day's
+   feeling is readable as a vertical stripe down the side of its text. */
+.moment-stem {
+  flex: 1;
+  width: 2px;
+  margin-right: 9px;
+  min-height: 12px;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.moment-body {
+  min-width: 0;
+  padding-bottom: 2px;
+}
+
+/* The editor's own min-height is sized for a whole page. A moment is a thought,
+   often one line, and has to be allowed to be exactly as tall as it is. */
+.moment .editor .ProseMirror {
+  min-height: 0;
+}
+
+.composer .editor .ProseMirror {
+  min-height: 30px;
+}
+
+.moment .editor .ProseMirror > p:first-child,
+.composer .editor .ProseMirror > p:first-child {
+  margin-top: 0;
+}
+
+.moment .editor .ProseMirror > p:last-child,
+.composer .editor .ProseMirror > p:last-child {
+  margin-bottom: 0;
+}
+
+.moment-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+
+.moment:hover .moment-foot,
+.moment:focus-within .moment-foot,
+.moment-foot.has-mood {
+  opacity: 1;
+}
+
+.moment-del {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+:root[data-coarse] .moment-del {
+  width: var(--hit);
+  height: var(--hit);
+}
+
+.moment-del:hover {
+  color: var(--hl-keyword);
+  background: var(--bg-2);
+}
+
+/* The silence between two moments, drawn roughly to scale. This is the thing
+   that gives a day a shape: a long quiet morning is a long quiet rail. */
+/* Dotted where the stem is solid, and on exactly the same pixels, so the rail
+   reads as one line down the day that simply goes quiet between moments:
+   the rail's width, less the stem's own right margin and width. */
+.moment-gap {
+  position: relative;
+  margin-left: calc(var(--rail) - 11px);
+  border-left: 2px dotted var(--border);
+}
+
+.moment-gap-label {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* Always open, always at the bottom. Writing a moment is typing and pressing
+   one key — never opening a page and placing a cursor. */
+.composer {
+  display: grid;
+  grid-template-columns: var(--rail) 1fr;
+  gap: 2px;
+  margin-bottom: 4px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.composer-rail {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 3px;
+}
+
+/* Only ever drawn once there is text to stamp, so it always means "this is
+   the time this will be kept at". */
+.composer-time {
+  cursor: default;
+  color: var(--accent);
+}
+
+.composer-body {
+  min-width: 0;
+}
+
+.composer-commit {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.composer-kbd {
+  font-size: 11px;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
+
+/* One tick per moment, in that moment's mood. A day's weight, from outside it. */
+.day-weight {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 2px;
+  height: 7px;
+  margin-top: 4px;
+}
+
+.day-tick {
+  width: 2px;
+  height: 7px;
+  border-radius: 1px;
+  background: var(--text-3);
+}
+
+.cal-cell .day-weight {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  margin-top: 0;
+  justify-content: flex-end;
+}
+
+.mood-row.compact {
+  gap: 0;
+  margin-top: 0;
+  padding: 2px;
+  border-radius: 10px;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.mood-row.compact:hover {
+  background: var(--bg-2);
+  border-color: var(--border);
+}
+
+.mood-row.compact .mood-btn {
+  min-width: 0;
+  padding: 4px 5px;
+  border-radius: 7px;
+}
+
+/* A touch screen has no hover to reveal anything behind, so nothing hides. */
+:root[data-coarse] .moment-foot,
+:root[data-coarse] .mood-row.compact {
+  opacity: 1;
+}
+
+:root[data-coarse] .mood-row.compact {
+  background: var(--bg-2);
+  border-color: var(--border);
+}
+
+@media (max-width: 700px) {
+  .journal {
+    --rail: 60px;
+  }
+
+  .moment-time,
+  .composer-time {
+    padding-right: 8px;
+    font-size: 11px;
+  }
 }
 
 /* ---------- database table ---------- */
@@ -8248,200 +8559,6 @@ code.var-ref-name {
 
 .scratch-action-btn.danger {
   color: #e5484d;
-}
-
-/* --- widget: Habits --- */
-
-.w-habits {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  height: 100%;
-  justify-content: space-between;
-}
-
-.habits-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--border);
-}
-
-.habits-streak {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.habits-flame {
-  color: #ff6b35;
-  display: inline-flex;
-}
-
-.habits-count {
-  font-size: 18px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.habits-streak-label {
-  font-size: 12px;
-  color: var(--text-2);
-  font-weight: 500;
-}
-
-.habits-dots {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.habit-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 99px;
-  border: 1.5px solid var(--border-2);
-  background: transparent;
-  transition: all 0.15s ease;
-}
-
-.habit-dot.active {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-.habit-dot.today {
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-
-.habits-mood-section {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.habits-mood-label {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.habits-mood-buttons {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.h-mood-btn {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  padding: 7px 4px 6px;
-  border-radius: 9px;
-  border: 1px solid var(--border);
-  background: var(--bg-2);
-  color: var(--text-2);
-  font-size: 10.5px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-@media (hover: hover) {
-  .h-mood-btn:hover {
-    border-color: var(--mood-c, var(--accent));
-    color: var(--mood-c, var(--text));
-    transform: translateY(-1px);
-  }
-}
-
-.h-mood-btn.on {
-  border-color: var(--mood-c, var(--accent));
-  background: color-mix(in srgb, var(--mood-c, var(--accent)) 14%, var(--bg-2));
-  color: var(--mood-c, var(--accent));
-  font-weight: 600;
-}
-
-.habits-journal-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  font-size: 12px;
-  color: var(--text-2);
-  text-align: left;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-@media (hover: hover) {
-  .habits-journal-btn:hover {
-    background: var(--border);
-    color: var(--text);
-  }
-}
-
-.w-habits .h-mood-btn.icon-only {
-  padding: 8px 4px;
-  flex-direction: row;
-  justify-content: center;
-}
-
-/* Dedicated 1-row layout for habits widget when resized to 1 row tall */
-.w-habits.h-1 {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  justify-content: center;
-  gap: 5px;
-}
-
-.w-habits.h-1 .habits-header {
-  padding-bottom: 4px;
-  border-bottom: 1px solid var(--border);
-}
-
-.w-habits.h-1 .habits-count {
-  font-size: 15px;
-}
-
-.w-habits.h-1 .habits-streak-label {
-  font-size: 11px;
-}
-
-.w-habits.h-1 .habits-dots {
-  gap: 4px;
-}
-
-.w-habits.h-1 .habit-dot {
-  width: 8px;
-  height: 8px;
-}
-
-.w-habits.h-1 .habits-mood-buttons {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.w-habits.h-1 .h-mood-btn.icon-only {
-  flex: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 4px;
-  border-radius: 7px;
-  height: 26px;
 }
 
 /* --- widget: Study --- */
@@ -16702,3 +16819,146 @@ figcaption {
   grid-template-columns: 1fr;
 }
 
+
+/* ---------- sidebar: places in front, kinds of thing behind one row ---------- */
+
+.nav-browse {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+}
+
+.nav-browse:hover {
+  color: var(--text-2);
+}
+
+.nav-browse svg {
+  transition: transform 0.15s ease;
+}
+
+.nav-browse.open svg {
+  transform: rotate(90deg);
+}
+
+/* ---------- the day's other things ---------- */
+
+.day-things {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-bottom: 28px;
+}
+
+.day-thing {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.day-thing:hover {
+  background: var(--bg-2);
+}
+
+.day-thing-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.day-thing-meta {
+  flex: none;
+  color: var(--text-3);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- the hour of the day ----------
+   A few points of tint on the surfaces, and nothing else: the accent belongs to
+   the habitat's own aura, and text stays exactly as legible at every hour. */
+
+body {
+  transition: background-color 1.2s ease;
+}
+
+:root[data-theme='dark'][data-hour='dawn'] {
+  --bg: #181614;
+  --bg-2: #1f1d1a;
+  --sidebar-bg: #1d1b18;
+}
+
+:root[data-theme='dark'][data-hour='dusk'] {
+  --bg: #171413;
+  --bg-2: #1f1b19;
+  --sidebar-bg: #1c1816;
+}
+
+:root[data-theme='dark'][data-hour='night'] {
+  --bg: #131416;
+  --bg-2: #1a1b1e;
+  --sidebar-bg: #17181b;
+}
+
+:root[data-theme='light'][data-hour='dawn'] {
+  --bg: #fcf9f5;
+  --bg-2: #f6f1ea;
+  --sidebar-bg: #f6f0e8;
+}
+
+:root[data-theme='light'][data-hour='dusk'] {
+  --bg: #fbf7f2;
+  --bg-2: #f4eee6;
+  --sidebar-bg: #f4ede3;
+}
+
+:root[data-theme='light'][data-hour='night'] {
+  --bg: #f6f6f7;
+  --bg-2: #eeeef0;
+  --sidebar-bg: #eeeef0;
+}
+
+/* ---------- paper ----------
+   Flat fills are the clearest sign that something is software. A faint grain
+   over everything, never in the way of a click. */
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  opacity: 0.045;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 0 0.5  0 0 0 1.1 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+:root[data-theme='light'] body::after {
+  opacity: 0.06;
+}
+
+/* ---------- body text ----------
+   The words you write are in a serif; the controls around them stay sans. */
+
+.editor .ProseMirror {
+  font-family: 'Iowan Old Style', 'Charter', 'Palatino Linotype', Georgia, serif;
+}

@@ -2,105 +2,39 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { api } from '../api';
 import { ask } from '../confirm';
-import type { DailyMeta, Obj } from '../types';
+import type { DailyMeta } from '../types';
 import { addDays, ago, fmtMonthYear, monthCells, monthStartKey, relBadge, todayKey, weekOf } from '../util';
 import { dealtIn, snap, spring, stagger } from '../motion';
 import { DayTasks } from './DayTasks';
-import { Editor } from './Editor';
+import { DayJournal } from './DayJournal';
+import { DayThings } from './DayThings';
 import { Icon } from './Icons';
-import { MoodPicker, moodMeta } from './MoodPicker';
+import { moodMeta } from './MoodPicker';
 import { SplitControls } from './SplitControls';
 import { PageActions } from './PageActions';
-
-function docText(n: any): string {
-  let s = typeof n?.text === 'string' ? n.text : '';
-  if (Array.isArray(n?.content)) for (const c of n.content) s += docText(c);
-  return s;
-}
-
-const isEmptyDoc = (d: any) => !d || docText(d).trim() === '';
 
 export function DailyNotes() {
   const [dateKey, setDateKey] = useState(todayKey());
   const [mode, setMode] = useState<'day' | 'month' | 'list'>('day');
-  const [note, setNote] = useState<Obj | null>(null);
-  const [loaded, setLoaded] = useState(false);
   const [metas, setMetas] = useState<DailyMeta[]>([]);
-  const noteRef = useRef<Obj | null>(null);
-  const creatingRef = useRef(false);
-  const pendingRef = useRef<any>(null);
 
   useEffect(() => {
     let alive = true;
-    setLoaded(false);
-    noteRef.current = null;
-    api.daily.get(dateKey).then((n) => {
-      if (!alive) return;
-      setNote(n);
-      noteRef.current = n;
-      setLoaded(true);
-    });
     api.daily.list().then((m) => alive && setMetas(m));
     return () => {
       alive = false;
     };
   }, [dateKey]);
 
-  // The daily row is only created once something is actually written.
-  const saveJournal = async (json: any) => {
-    if (noteRef.current) {
-      api.objects.update(noteRef.current.id, { content: json });
-      return;
-    }
-    if (isEmptyDoc(json)) return;
-    if (creatingRef.current) {
-      pendingRef.current = json;
-      return;
-    }
-    creatingRef.current = true;
-    const n = await api.daily.create(dateKey, json);
-    noteRef.current = n;
-    setNote(n);
-    if (pendingRef.current) {
-      api.objects.update(n.id, { content: pendingRef.current });
-      pendingRef.current = null;
-    }
-    creatingRef.current = false;
-    api.daily.list().then(setMetas);
-  };
-
-  /**
-   * Simpler than `saveJournal`'s create-then-flush-the-pending-write dance —
-   * a mood pick is one deliberate tap, never a stream of autosaves racing each
-   * other, so there's nothing to queue. Gated on `loaded` at the call site:
-   * creating the row here before `daily:get` has resolved could otherwise
-   * stomp genuinely existing content with `daily:create`'s empty default.
-   */
-  const saveMood = async (score: number | null) => {
-    let target = noteRef.current;
-    if (!target) {
-      if (score === null) return;
-      target = await api.daily.create(dateKey, null);
-    }
-    const props = { ...target.props };
-    if (score === null) delete props.mood;
-    else props.mood = score;
-    target = { ...target, props };
-    noteRef.current = target;
-    setNote(target);
-    await api.objects.update(target.id, { props });
-    api.daily.list().then(setMetas);
-  };
-
   const deleteDaily = async (m: DailyMeta) => {
-    if (!(await ask(`Delete the journal entry for ${new Date(m.dateKey + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}? This also removes its links.`)))
+    if (
+      !(await ask(
+        `Delete every moment written on ${new Date(m.dateKey + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}? This also removes their links.`
+      ))
+    )
       return;
-    await api.objects.remove(m.id);
-    if (m.dateKey === dateKey) {
-      setNote(null);
-      noteRef.current = null;
-    }
-    setMetas((list) => list.filter((x) => x.id !== m.id));
+    await api.daily.remove(m.dateKey);
+    setMetas((list) => list.filter((x) => x.dateKey !== m.dateKey));
   };
 
   const today = todayKey();
@@ -118,8 +52,31 @@ export function DailyNotes() {
   };
 
   const metaMap = new Map(metas.map((m) => [m.dateKey, m.snippet]));
-  const moodMap = new Map(metas.map((m) => [m.dateKey, m.mood]));
-  const hasEntry = (k: string) => !!metaMap.get(k) || moodMap.has(k);
+  const countMap = new Map(metas.map((m) => [m.dateKey, m.moments]));
+  const moodsMap = new Map(metas.map((m) => [m.dateKey, m.moods]));
+  const hasEntry = (k: string) => !!metaMap.get(k) || !!countMap.get(k);
+
+  /**
+   * One tick per moment, up to six, each in its own mood's colour. A day's
+   * weight has to be visible before you open it — two moments and nine moments
+   * cannot look the same from the outside.
+   */
+  const weightTicks = (k: string) => {
+    const n = countMap.get(k) ?? 0;
+    if (!n) return null;
+    const moods = moodsMap.get(k) ?? [];
+    return (
+      <span className="day-weight" title={n === 1 ? '1 moment' : `${n} moments`}>
+        {Array.from({ length: Math.min(n, 6) }).map((_, i) => (
+          <span
+            key={i}
+            className="day-tick"
+            style={moodMeta(moods[i])?.color ? { background: moodMeta(moods[i])!.color } : undefined}
+          />
+        ))}
+      </span>
+    );
+  };
   const badge = relBadge(dateKey);
 
   const step = (n: number) => {
@@ -229,9 +186,7 @@ export function DailyNotes() {
               }}
             >
               <span className="cal-num">{c.day}</span>
-              {moodMap.get(c.key) != null && (
-                <span className="cal-mood" style={{ background: moodMeta(moodMap.get(c.key))?.color }} />
-              )}
+              {weightTicks(c.key)}
               {metaMap.get(c.key) && <span className="cal-snippet">{metaMap.get(c.key)}</span>}
             </motion.button>
           ))}
@@ -268,10 +223,7 @@ export function DailyNotes() {
                       {isSel && <motion.span layoutId="day-sel" className="day-sel" transition={spring} />}
                       <span className="dow">{d.toLocaleDateString('en-US', { weekday: 'short' })}</span>
                       <span className="num">{d.getDate()}</span>
-                      <span
-                        className="dot"
-                        style={moodMap.get(k) != null ? { background: moodMeta(moodMap.get(k))?.color } : undefined}
-                      />
+                      {weightTicks(k) ?? <span className="dot" />}
                     </motion.button>
                   );
                 })}
@@ -299,28 +251,16 @@ export function DailyNotes() {
                   year: 'numeric',
                 })}
               </div>
-              {/* Gated on `loaded` — creating the daily row from a mood pick before
-                  the fetch for this date resolves risks overwriting real content
-                  with `daily:create`'s empty default. See saveMood. */}
-              {loaded && <MoodPicker value={note?.props.mood} onPick={saveMood} />}
             </motion.div>
           </AnimatePresence>
 
           <div className="sect">Tasks</div>
-          <DayTasks key={dateKey} dateKey={dateKey} />
+          <DayTasks key={'tasks-' + dateKey} dateKey={dateKey} />
 
           <div className="sect">Journal</div>
-          {loaded && (
-            <div className="daily-editor">
-              <Editor
-                key={dateKey}
-                content={note?.content ?? null}
-                placeholder="How was your day? Type '@' to link anything, '/' for commands…"
-                onSave={saveJournal}
-              />
-            </div>
-          )}
+          <DayJournal key={'journal-' + dateKey} dateKey={dateKey} onChanged={() => api.daily.list().then(setMetas)} />
 
+          <DayThings key={'things-' + dateKey} dateKey={dateKey} />
         </>
       )}
     </div>

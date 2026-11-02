@@ -244,7 +244,7 @@ export function Automations() {
   const [open, setOpen] = useState<string | null>(null);
   const [ran, setRan] = useState<{ id: string; n: number } | null>(null);
   const [recipes, setRecipes] = useState<{ left: number; top: number } | null>(null);
-  const pickable = types.filter((t) => t.id !== 'daily' && t.id !== 'tag');
+  const pickable = types.filter((t) => t.id !== 'daily' && t.id !== 'entry' && t.id !== 'tag');
 
   useEffect(() => {
     api.automations.list().then(setRules);

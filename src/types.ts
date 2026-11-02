@@ -466,6 +466,12 @@ export interface DailyMeta {
    *  Carried here, not just on the full object, so a future mood-over-time
    *  graph can read it straight off `daily:list` like everything else does. */
   mood?: number;
+  /** How many moments the day holds. This is what gives a day its weight in a
+   *  strip or a calendar: two is a quiet day, nine is not. */
+  moments: number;
+  /** Every mood the day's moments carry, in the order they were written — a
+   *  day is rarely one feeling, so there is no single number to reduce it to. */
+  moods: number[];
 }
 
 /** What `events:create` takes. `repeat` is the same RRULE-ish string RepeatField

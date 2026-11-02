@@ -572,7 +572,7 @@ function asContext(row, typeNames) {
 }
 
 /** Operators the query bar understands, e.g. `type:task tag:habitat due:week`. */
-const OPERATORS = new Set(['type', 'tag', 'is', 'due', 'created', 'edited']);
+const OPERATORS = new Set(['type', 'tag', 'is', 'due', 'created', 'edited', 'mood']);
 
 /** Splits `type:task coffee shop` into its operators and the words left over. */
 function parseQuery(raw) {
@@ -694,6 +694,17 @@ function searchObjects({ q, content = false, limit = 0 }) {
     params.push(tag.id);
   }
   if (filters.is === 'pinned') where.push('o.pinned = 1');
+  if (filters.mood) {
+    // `mood:awful`, `mood:bad`, `mood:1`, or a span like `mood:1-2` — the way
+    // back to a moment by how it felt, which is what is remembered about it.
+    const names = { awful: 1, bad: 2, okay: 3, good: 4, great: 5 };
+    const [lo, hi] = String(filters.mood)
+      .split('-')
+      .map((x) => names[x] ?? Number(x));
+    if (!Number.isFinite(lo) || (hi !== undefined && !Number.isFinite(hi))) return [];
+    where.push("o.type_id = 'entry' AND json_extract(o.props, '$.mood') BETWEEN ? AND ?");
+    params.push(lo, hi ?? lo);
+  }
   for (const [key, column] of [
     ['created', 'created_at'],
     ['edited', 'updated_at'],
@@ -1072,14 +1083,17 @@ function renderInline(text, obj, ctx) {
 }
 
 /** Appends blocks to a daily note (today's by default), creating it if needed. */
+/**
+ * Quick capture, an automation and the natural-language "note that…" all land
+ * here, and all three are a thing that happened at a time — so each becomes its
+ * own moment rather than another paragraph on the end of a day-long document.
+ * Captured against an earlier day, where there is no clock to read, it sits at
+ * midday.
+ */
 function appendBlocksToDaily(blocks, dateKey) {
   const key = dateKey || todayKey();
-  const row = db.prepare("SELECT * FROM objects WHERE type_id = 'daily' AND date_key = ?").get(key);
-  if (!row)
-    return createObject({ typeId: 'daily', title: formatDateKey(key), dateKey: key, content: { type: 'doc', content: blocks } });
-  const doc = row.content ? JSON.parse(row.content) : { type: 'doc', content: [] };
-  doc.content = [...(doc.content || []), ...blocks];
-  return updateObject({ id: row.id, patch: { content: doc } });
+  const at = key === todayKey() ? now() : msOn(key, 12, 0);
+  return createEntry({ dateKey: key, at, content: { type: 'doc', content: blocks } });
 }
 
 /** Appends one paragraph to a daily note. */
@@ -1361,7 +1375,7 @@ function updateObject({ id, patch }) {
  * address book and the self card. Moving one in or out would leave the feature
  * that owns it holding an object it can't render.
  */
-const fixedType = (id) => id === 'daily' || id === 'tag' || id === PEOPLE_TYPE;
+const fixedType = (id) => id === 'daily' || id === 'entry' || id === 'tag' || id === PEOPLE_TYPE;
 
 /**
  * Move an object to a different type.
@@ -2090,6 +2104,67 @@ const api = {
   },
 
   /**
+   * What else happened on a day: everything made or changed on it, other than
+   * the journal itself. This is what lets the day be the way into a vault
+   * rather than a list of kinds — you remember *when*, not what it was called.
+   */
+  'day:touched': ({ dateKey }) => {
+    const from = msOn(dateKey, 0, 0);
+    const to = from + 86400000;
+    return db
+      .prepare(
+        `SELECT id, type_id, title, created_at, updated_at FROM objects
+          WHERE type_id NOT IN ('daily', 'entry', 'tag')
+            AND ((created_at >= ? AND created_at < ?) OR (updated_at >= ? AND updated_at < ?))
+          ORDER BY updated_at DESC LIMIT 40`
+      )
+      .all(from, to, from, to)
+      .map((r) => {
+        const made = r.created_at >= from && r.created_at < to;
+        return { id: r.id, typeId: r.type_id, title: r.title, kind: made ? 'made' : 'edited', at: made ? r.created_at : r.updated_at };
+      });
+  },
+
+  'entries:day': ({ dateKey }) => {
+    convertLegacyDays(dateKey);
+    return entriesOn(dateKey);
+  },
+
+  /** `at` is the caller's clock, so a moment written offline keeps its own time. */
+  'entries:create': ({ dateKey, at, content, mood }) => createEntry({ dateKey, at, content, mood }),
+
+  'entries:setMood': ({ id, mood }) => {
+    const row = db.prepare('SELECT props FROM objects WHERE id = ?').get(id);
+    if (!row) return null;
+    const props = JSON.parse(row.props || '{}');
+    if (mood === null || mood === undefined) delete props.mood;
+    else props.mood = Number(mood);
+    return updateObject({ id, patch: { props } });
+  },
+
+  /**
+   * Move a moment to another time on the same day — the one correction worth
+   * having, for when you write up something that happened an hour ago.
+   */
+  'entries:setTime': ({ id, hour, minute }) => {
+    const row = db.prepare('SELECT props FROM objects WHERE id = ?').get(id);
+    if (!row) return null;
+    const props = JSON.parse(row.props || '{}');
+    if (!props.day) return null;
+    const at = msOn(props.day, Math.max(0, Math.min(23, Number(hour) || 0)), Math.max(0, Math.min(59, Number(minute) || 0)));
+    delete props.untimed;
+    return updateObject({ id, patch: { props: { ...props, at }, title: `${formatDateKey(props.day)} · ${clockOf(at)}` } });
+  },
+
+  /** Erase a day: its moments, and the legacy document behind them. */
+  'daily:remove': ({ dateKey }) => {
+    for (const e of entriesOn(dateKey)) deleteObject(e.id);
+    const row = db.prepare("SELECT id FROM objects WHERE type_id = 'daily' AND date_key = ?").get(dateKey);
+    if (row) deleteObject(row.id);
+    return true;
+  },
+
+  /**
    * Import a whole vault: date-named files become daily notes, everything else
    * becomes a Note. Runs in two passes so [[wikilinks]] between imported files
    * resolve into real mentions. Nothing already here is overwritten.
@@ -2232,20 +2307,49 @@ const api = {
       .map((r) => asContext(r, names));
   },
 
-  // `mood` rides along here (not just on `daily:get`) so a future "mood over
-  // time" view can read it straight off the same list every other daily-notes
-  // UI already fetches, rather than needing one request per day.
-  'daily:list': () =>
-    db
-      .prepare("SELECT id, date_key, content, props, updated_at FROM objects WHERE type_id = 'daily' ORDER BY date_key DESC")
-      .all()
-      .map((r) => ({
-        id: r.id,
-        dateKey: r.date_key,
-        snippet: snippet(r.content),
-        updatedAt: r.updated_at,
-        mood: JSON.parse(r.props || '{}').mood,
-      })),
+  /**
+   * One row per day that has anything on it.
+   *
+   * Moments are the record now, so the counts and the moods come from them —
+   * that is what lets a strip or a calendar draw a day's weight rather than
+   * just mark it as used. The legacy day document still contributes a day, so
+   * a habitat written before moments existed lists its history either way.
+   */
+  'daily:list': () => {
+    convertLegacyDays();
+    const days = new Map();
+    const touch = (key) => {
+      let d = days.get(key);
+      if (!d) {
+        d = { id: key, dateKey: key, snippet: '', updatedAt: 0, mood: undefined, moments: 0, moods: [], first: '' };
+        days.set(key, d);
+      }
+      return d;
+    };
+    for (const r of db
+      .prepare("SELECT id, date_key, content, props, updated_at FROM objects WHERE type_id = 'daily' AND date_key IS NOT NULL")
+      .all()) {
+      const d = touch(r.date_key);
+      d.id = r.id;
+      d.snippet = snippet(r.content);
+      d.updatedAt = Math.max(d.updatedAt, r.updated_at);
+      d.mood = JSON.parse(r.props || '{}').mood;
+    }
+    for (const r of db
+      .prepare(`SELECT props, content, updated_at FROM objects WHERE type_id = ? ORDER BY json_extract(props, '$.at')`)
+      .all(ENTRY_TYPE)) {
+      const p = JSON.parse(r.props || '{}');
+      if (!p.day) continue;
+      const d = touch(p.day);
+      d.moments++;
+      d.updatedAt = Math.max(d.updatedAt, r.updated_at);
+      if (typeof p.mood === 'number') d.moods.push(p.mood);
+      if (!d.first) d.first = snippet(r.content);
+    }
+    return [...days.values()]
+      .map(({ first, ...d }) => ({ ...d, snippet: d.moments ? first : d.snippet }))
+      .sort((a, b) => (a.dateKey < b.dateKey ? 1 : -1));
+  },
 
   /**
    * Events, from scratch. The previous design kept one row per series and
@@ -2976,7 +3080,23 @@ const api = {
   'stats:get': () => {
     const counts = {};
     for (const r of db.prepare('SELECT type_id, COUNT(*) AS c FROM objects GROUP BY type_id').all()) counts[r.type_id] = r.c;
-    const recent = db.prepare('SELECT * FROM objects ORDER BY updated_at DESC LIMIT 8').all().map((r) => parseObj(r));
+    // A moment is part of its day, so "recently edited" lists the day, once,
+    // stamped with the time of the newest moment written in it.
+    const recent = [];
+    const seen = new Set();
+    for (const r of db.prepare('SELECT * FROM objects ORDER BY updated_at DESC LIMIT 80').all()) {
+      let o = parseObj(r);
+      if (r.type_id === ENTRY_TYPE) {
+        const day = o.props.day;
+        const row = day && db.prepare("SELECT * FROM objects WHERE type_id = 'daily' AND date_key = ?").get(day);
+        if (!row) continue;
+        o = { ...parseObj(row), updatedAt: r.updated_at };
+      }
+      if (seen.has(o.id)) continue;
+      seen.add(o.id);
+      recent.push(o);
+      if (recent.length === 8) break;
+    }
     const pinned = db.prepare('SELECT * FROM objects WHERE pinned = 1 ORDER BY updated_at DESC').all().map((r) => parseObj(r));
     return { counts, recent, pinned };
   },
@@ -3150,6 +3270,14 @@ function migrate() {
   // the type, and erased from any object that had already written one.
   runOnce('media-v3', () => media.dropCommentsProp(db));
 
+  // The journal is one object per moment, not one document per day. This runs
+  // on every start rather than once: an older build, or an import, can still
+  // write a day document after the first conversion, and its text would
+  // otherwise sit where the journal never looks. See `convertLegacyDays`.
+  // Moments first shipped with an icon name the type picker has no drawing for.
+  db.prepare("UPDATE types SET emoji = 'alarm-clock' WHERE id = 'entry' AND emoji = 'clock'").run();
+  convertLegacyDays();
+
   /**
    * Relationship becomes a multi-select — someone can be a colleague and a
    * friend — over a longer list of kinds. Single values become one-item lists,
@@ -3317,6 +3445,52 @@ function migrate() {
 
   runOnce('drop-map-module-v1', () => {
     sweepDatabase();
+  });
+
+  /**
+   * Overall day mood moves to each moment/entry on that day.
+   * Runs once so existing moments inherit their day's recorded mood if they
+   * don't have one, and future moods are picked per entry.
+   */
+  runOnce('transfer-daily-mood-to-entries-v1', () => {
+    ensureEntryType();
+    const dailyRows = db
+      .prepare("SELECT date_key, props FROM objects WHERE type_id = 'daily' AND date_key IS NOT NULL")
+      .all();
+    const dayMoods = new Map();
+    for (const r of dailyRows) {
+      try {
+        const p = JSON.parse(r.props || '{}');
+        if (typeof p.mood === 'number') {
+          dayMoods.set(r.date_key, p.mood);
+        }
+      } catch {}
+    }
+
+    if (dayMoods.size === 0) return;
+
+    const updEntry = db.prepare('UPDATE objects SET props = ?, updated_at = ? WHERE id = ?');
+    const t = now();
+
+    for (const [day, mood] of dayMoods.entries()) {
+      const entries = db
+        .prepare(`SELECT id, props FROM objects WHERE type_id = ? AND json_extract(props, '$.day') = ?`)
+        .all(ENTRY_TYPE, day);
+
+      if (entries.length > 0) {
+        for (const e of entries) {
+          try {
+            const p = JSON.parse(e.props || '{}');
+            if (typeof p.mood !== 'number') {
+              p.mood = mood;
+              updEntry.run(JSON.stringify(p), t, e.id);
+            }
+          } catch {}
+        }
+      } else {
+        createEntry({ dateKey: day, at: msOn(day, 12, 0), untimed: true, mood });
+      }
+    }
   });
 }
 
@@ -3725,6 +3899,197 @@ function ensureTagType() {
     'tag', 'Tag', 'tag', '#eb6834', '[]', 1, 0, now()
   );
   return getType('tag');
+}
+
+// ---------- Moments ----------
+//
+// A journal entry is one moment, not one day. It carries the clock time the app
+// read when it was written and its own mood, so a day becomes a column of
+// moments with a shape — a quiet morning, a dense evening — instead of one
+// block of text with the times typed by hand.
+
+const ENTRY_TYPE = 'entry';
+
+const ENTRY_PROPS = [
+  { id: 'at', name: 'Written', kind: 'datetime' },
+  { id: 'mood', name: 'Mood', kind: 'number' },
+];
+
+function ensureEntryType() {
+  const existing = getType(ENTRY_TYPE);
+  if (existing) return existing;
+  db.prepare('INSERT INTO types (id, name, emoji, color, properties, builtin, starred, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(
+    ENTRY_TYPE, 'Moment', 'alarm-clock', '#e87ba4', JSON.stringify(ENTRY_PROPS), 1, 0, now()
+  );
+  return getType(ENTRY_TYPE);
+}
+
+/**
+ * A paragraph that opens with a clock time. Both forms the journal was written
+ * in are here — "8:15 PM" and a bare 24-hour "20:15" — with the separator that
+ * sometimes follows swallowed so it never reappears at the head of the body.
+ */
+const TIME_LINE = /^\s*(\d{1,2})\s*[:.]\s*(\d{2})\s*(am|pm|a\.m\.|p\.m\.)?\s*[-–—:·|]?[ \t]*/i;
+
+/** Null for anything that is not an hour, so a stray "1.5x" cannot become a time. */
+function hour24(h, meridiem) {
+  if (!Number.isInteger(h) || h < 0 || h > 23) return null;
+  if (!meridiem) return h;
+  if (h > 12) return h; // "13:00 PM" — the 24-hour clock is the one that is right
+  if (h === 12) return /^p/i.test(meridiem) ? 12 : 0;
+  return /^p/i.test(meridiem) ? h + 12 : h;
+}
+
+/**
+ * Drop the first `n` characters of a paragraph while leaving everything that is
+ * not plain text — mentions, tags, line breaks — exactly where it was. Returns
+ * null when only whitespace is left, which is the case for a time on its own
+ * line.
+ */
+function dropLeadingChars(block, n) {
+  const content = [];
+  let left = n;
+  for (const node of block.content || []) {
+    if (left > 0 && node.type === 'text' && typeof node.text === 'string') {
+      if (node.text.length <= left) {
+        left -= node.text.length;
+        continue;
+      }
+      content.push({ ...node, text: node.text.slice(left) });
+      left = 0;
+      continue;
+    }
+    content.push(node);
+  }
+  while (content.length && content[0].type === 'hardBreak') content.shift();
+  if (!content.length) return null;
+  if (content.every((c) => c.type === 'text' && !String(c.text || '').trim())) return null;
+  return { ...block, content };
+}
+
+/** Midnight-based epoch ms for a wall-clock time on a given local day. */
+function msOn(dateKey, hour, minute) {
+  const [y, mo, d] = String(dateKey).split('-').map(Number);
+  return new Date(y, (mo || 1) - 1, d || 1, hour, minute, 0, 0).getTime();
+}
+
+const clockOf = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+/**
+ * One moment.
+ *
+ * `at` is epoch milliseconds — the clock the app read, never a time anybody
+ * typed — and `day` is the local date it belongs to, stored beside it so a
+ * day's moments are one lookup rather than a scan over every timestamp.
+ * `date_key` stays empty on purpose: it carries a unique index, and a day
+ * holds many moments.
+ */
+function createEntry({ dateKey, at, content = null, mood, untimed = false }) {
+  ensureEntryType();
+  const ms = Number(at) || now();
+  const day = dateKey || todayKey(new Date(ms));
+  const props = { at: ms, day };
+  if (untimed) props.untimed = true;
+  if (mood !== null && mood !== undefined) props.mood = Number(mood);
+  const title = untimed ? formatDateKey(day) : `${formatDateKey(day)} · ${clockOf(ms)}`;
+  // The day is what lists show and open, so a day with moments always has one.
+  if (!db.prepare("SELECT 1 FROM objects WHERE type_id = 'daily' AND date_key = ?").get(day))
+    createObject({ typeId: 'daily', title: formatDateKey(day), dateKey: day });
+  return createObject({ typeId: ENTRY_TYPE, title, props, content });
+}
+
+/**
+ * Read day documents back into moments.
+ *
+ * The journal used to be one document per day, with the times typed by hand —
+ * "8:15 PM" — ahead of each thought. That hand-typed structure is the record,
+ * so nothing is guessed: every top-level paragraph that opens with a clock time
+ * starts a moment, and the paragraphs after it are its body. Blank paragraphs
+ * were separators and are dropped. Anything before the first time becomes one
+ * untimed moment for that day.
+ *
+ * Nothing is deleted. The day document stays exactly as it was, as a safety
+ * net; only its search text is cleared, so a search finds the moment instead of
+ * two copies of the same sentence. That cleared search text is also how this
+ * knows a day is done: a document written to afterwards gets its search text
+ * back, and is read again — skipping any moment already there, so running it
+ * twice never doubles anything.
+ */
+function convertLegacyDays(onlyDay) {
+  ensureEntryType();
+  const rows = db
+    .prepare(
+      `SELECT id, date_key, content, props FROM objects
+        WHERE type_id = 'daily' AND content IS NOT NULL AND date_key IS NOT NULL AND search_text != ''` +
+        (onlyDay ? ' AND date_key = ?' : '')
+    )
+    .all(...(onlyDay ? [onlyDay] : []));
+  const norm = (t) => String(t || '').toLowerCase().replace(/\s+/g, ' ').trim();
+  for (const r of rows) {
+    let doc;
+    try {
+      doc = JSON.parse(r.content);
+    } catch {
+      continue;
+    }
+    const top = Array.isArray(doc?.content) ? doc.content : [];
+    const have = new Set(
+      db
+        .prepare("SELECT search_text FROM objects WHERE type_id = ? AND json_extract(props, '$.day') = ?")
+        .all(ENTRY_TYPE, r.date_key)
+        .map((e) => norm(e.search_text))
+    );
+
+    const moments = [];
+    let cur = null;
+    for (const b of top) {
+      if (!plainText({ type: 'doc', content: [b] }).trim()) continue; // separator
+      // Matched against the first inline node's own text, never the joined
+      // paragraph: the character count has to be exact to cut the prefix off
+      // without eating into a mention that follows it.
+      const lead = b.content?.[0]?.type === 'text' ? String(b.content[0].text || '') : '';
+      const m = lead.match(TIME_LINE);
+      const hour = m ? hour24(Number(m[1]), m[3]) : null;
+      if (m && hour !== null && Number(m[2]) <= 59) {
+        cur = { at: msOn(r.date_key, hour, Number(m[2])), blocks: [] };
+        moments.push(cur);
+        const rest = dropLeadingChars(b, m[0].length);
+        if (rest) cur.blocks.push(rest);
+        continue;
+      }
+      if (!cur) {
+        cur = { at: msOn(r.date_key, 0, 0), untimed: true, blocks: [] };
+        moments.push(cur);
+      }
+      cur.blocks.push(b);
+    }
+
+    let dayMood;
+    try {
+      const p = JSON.parse(r.props || '{}');
+      if (typeof p.mood === 'number') dayMood = p.mood;
+    } catch {}
+
+    for (const x of moments) {
+      if (!x.blocks.length) continue;
+      const content = { type: 'doc', content: x.blocks };
+      if (have.has(norm(plainText(content)))) continue;
+      createEntry({ dateKey: r.date_key, at: x.at, untimed: x.untimed, content, mood: dayMood });
+    }
+    db.prepare("UPDATE objects SET search_text = '' WHERE id = ?").run(r.id);
+  }
+}
+
+/** A day's moments, oldest first — the order they were lived in. */
+function entriesOn(dateKey) {
+  ensureEntryType();
+  return db
+    .prepare(
+      `SELECT * FROM objects WHERE type_id = ? AND json_extract(props, '$.day') = ?
+        ORDER BY json_extract(props, '$.at')`
+    )
+    .all(ENTRY_TYPE, dateKey)
+    .map((r) => parseObj(r, true));
 }
 
 // ---------- Events ----------

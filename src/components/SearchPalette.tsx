@@ -14,9 +14,10 @@ const OPERATORS: [string, string][] = [
   ['is:pinned', 'pinned only'],
   ['due:week', 'dated in the next 7 days'],
   ['edited:today', 'touched today'],
+  ['mood:bad', 'moments by how they felt'],
 ];
 
-const OPERATOR_RE = /^(type|tag|is|due|created|edited):/i;
+const OPERATOR_RE = /^(type|tag|is|due|created|edited|mood):/i;
 
 /** The words left once the operators are taken out — what actually got matched. */
 const plainWords = (q: string) =>

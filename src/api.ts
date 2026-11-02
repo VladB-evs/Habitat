@@ -345,6 +345,19 @@ export const api = {
     create: (dateKey: string, content: any): Promise<Obj> => inv('daily:create', { dateKey, content }),
     append: (text: string, dateKey?: string): Promise<Obj | null> => inv('daily:append', { text, dateKey }),
     list: (): Promise<DailyMeta[]> => inv('daily:list'),
+    remove: (dateKey: string): Promise<boolean> => inv('daily:remove', { dateKey }),
+  },
+  /** Everything else made or changed on a day — the way into the vault by when. */
+  dayTouched: (dateKey: string): Promise<{ id: string; typeId: string; title: string; kind: 'made' | 'edited'; at: number }[]> =>
+    inv('day:touched', { dateKey }),
+  /** The journal's real unit: one moment, at the time the clock said. */
+  entries: {
+    day: (dateKey: string): Promise<Obj[]> => inv('entries:day', { dateKey }),
+    create: (p: { dateKey: string; at: number; content: any; mood?: number }): Promise<Obj> =>
+      inv('entries:create', p),
+    setMood: (id: string, mood: number | null): Promise<Obj | null> => inv('entries:setMood', { id, mood }),
+    setTime: (id: string, hour: number, minute: number): Promise<Obj | null> =>
+      inv('entries:setTime', { id, hour, minute }),
   },
   events: {
     create: (input: NewEvent): Promise<Obj> => inv('events:create', input),

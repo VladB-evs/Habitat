@@ -141,9 +141,9 @@ function WidgetFrame({
       <div className="w-body">
         <WidgetFrameCtx.Provider value={frame}>
           {!def ? (
-            <div className="w-empty">Unknown widget “{w.kind}”.</div>
+            <div className="w-empty">Something used to live here.</div>
           ) : !available ? (
-            <div className="w-empty">Not available here — this habitat has no matching object type.</div>
+            <div className="w-empty">Nothing of that kind lives in this habitat yet.</div>
           ) : (
             <def.Body id={w.id} config={w.config} set={onConfig} w={wWidth} h={h} />
           )}
@@ -161,7 +161,7 @@ function WidgetFrame({
               className={'w-tool' + (isFull ? ' on' : '')}
               onClick={onToggleWidth}
               title={isFull ? 'Collapse to half width (3 columns)' : 'Expand to full width (6 columns)'}
-              aria-label="Toggle widget width"
+              aria-label="Toggle width"
             >
               <Icon name="columns" size={13} />
             </button>
@@ -187,13 +187,13 @@ function WidgetFrame({
               <button
                 className={'w-tool' + (settingsOpen ? ' on' : '')}
                 onClick={onToggleSettings}
-                title="Widget settings"
-                aria-label="Widget settings"
+                title="How this looks"
+                aria-label="How this looks"
               >
                 <Icon name="settings" size={13} />
               </button>
             )}
-            <button className="w-tool danger" onClick={onRemove} title="Remove widget" aria-label="Remove widget">
+            <button className="w-tool danger" onClick={onRemove} title="Take this away" aria-label="Take this away">
               <Icon name="trash" size={13} />
             </button>
           </div>
@@ -209,7 +209,7 @@ function WidgetFrame({
           <div
             className="w-resize-bottom"
             onPointerDown={(e) => onResizeStart('bottom', e)}
-            title="Drag down or up to resize widget height"
+            title="Drag to change height"
           >
             <div className="w-resize-bottom-grip" />
           </div>
@@ -317,8 +317,8 @@ function WidgetPicker({
       <div className="picker">
         <div className="picker-head">
           <div>
-            <h2>Add a widget</h2>
-            <div className="picker-sub">Choose a widget to add to your dashboard. You can resize and arrange it anytime.</div>
+            <h2>Put something here</h2>
+            <div className="picker-sub">Choose what to put on this page. You can move and resize it anytime.</div>
           </div>
           <button className="icon-btn" onClick={onClose} aria-label="Close">
             <Icon name="x" size={15} />
@@ -353,7 +353,7 @@ function WidgetPicker({
                       {taken && <span className="pk-chip">Added</span>}
                       {missing && <span className="pk-chip">Unavailable</span>}
                     </span>
-                    <span className="pk-desc">{missing ? 'This habitat has no matching object type.' : d.desc}</span>
+                    <span className="pk-desc">{missing ? 'Nothing of that kind lives here yet.' : d.desc}</span>
                   </span>
                   <span className="pk-plus">
                     <Icon name="plus" size={15} />
@@ -405,7 +405,17 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    api.dashboard.get().then((l) => setWidgets(l?.widgets?.length ? l.widgets.map(normalize) : defaultLayout()));
+    api.dashboard.get().then((l) => {
+      if (l?.widgets?.length) {
+        const filtered = l.widgets.filter((w) => w.kind !== 'habits');
+        if (filtered.length !== l.widgets.length) {
+          api.dashboard.save({ widgets: filtered });
+        }
+        setWidgets(filtered.map(normalize));
+      } else {
+        setWidgets(defaultLayout());
+      }
+    });
     reloadStats();
   }, [reloadStats]);
 
@@ -478,7 +488,7 @@ export function Dashboard() {
   };
 
   const reset = async () => {
-    if (!(await ask('Reset the dashboard to its default widgets? Any custom layout will be restored.'))) return;
+    if (!(await ask('Put the home page back as it was? Your own layout will be lost.'))) return;
     await api.dashboard.reset();
     setWidgets(defaultLayout());
     setSettingsFor(null);
@@ -682,9 +692,9 @@ export function Dashboard() {
         <PageActions>
           {edit ? (
             <>
-              <span className="dash-tip">Drag to place anywhere · pull corner or bottom to resize</span>
+              <span className="dash-tip">Drag to place · pull a corner to resize</span>
               <button className="btn subtle" onClick={() => setPicking(true)}>
-                <Icon name="plus" size={13} /> Add widget
+                <Icon name="plus" size={13} /> Put something here
               </button>
               <button className="btn subtle" onClick={reset}>
                 Reset
@@ -695,7 +705,7 @@ export function Dashboard() {
             </>
           ) : (
             <button className="btn subtle dash-edit" onClick={() => setEdit(true)}>
-              <Icon name="pencil" size={13} /> Edit dashboard
+              <Icon name="pencil" size={13} /> Arrange home
             </button>
           )}
           <SplitControls />
@@ -728,7 +738,7 @@ export function Dashboard() {
 
         {edit && (
           <button className="dash-add-bar" onClick={() => setPicking(true)}>
-            <Icon name="plus" size={15} /> Add widget to dashboard
+            <Icon name="plus" size={15} /> Put something here
           </button>
         )}
       </DashDataCtx.Provider>

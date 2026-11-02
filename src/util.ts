@@ -202,7 +202,8 @@ export const MEDIA_TYPE = 'media';
  * process refuses these too — this is the same rule, so the UI doesn't offer a
  * move that would only come back as an error.
  */
-export const canChangeType = (typeId: string) => typeId !== 'daily' && typeId !== 'tag' && typeId !== PEOPLE_TYPE;
+export const canChangeType = (typeId: string) =>
+  typeId !== 'daily' && typeId !== 'entry' && typeId !== 'tag' && typeId !== PEOPLE_TYPE;
 
 /**
  * Properties that describe a link to someone else, so they never appear on the

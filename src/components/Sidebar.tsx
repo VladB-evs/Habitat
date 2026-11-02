@@ -123,9 +123,28 @@ export function Sidebar({
   const { narrow } = useLayout();
   const [showNewType, setShowNewType] = useState(false);
   const [habMenu, setHabMenu] = useState(false);
+  // Everything that is a kind of thing, rather than a place to be, sits behind
+  // one row. Search finds any of it; the front of the sidebar is for going
+  // somewhere in time.
+  const [browse, setBrowse] = useState(() => {
+    try {
+      return localStorage.getItem('habitat:browse') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleBrowse = () =>
+    setBrowse((v) => {
+      try {
+        localStorage.setItem('habitat:browse', v ? '0' : '1');
+      } catch {
+        /* a private window just forgets */
+      }
+      return !v;
+    });
   const [info, setInfo] = useState<SettingsInfo | null>(null);
   // Daily notes, tasks, people, media and tags all have their own nav entries above.
-  const upstairs = new Set(['daily', 'tag', 'task', 'event', PEOPLE_TYPE, MEDIA_TYPE]);
+  const upstairs = new Set(['daily', 'entry', 'tag', 'task', 'event', PEOPLE_TYPE, MEDIA_TYPE]);
   const visibleTypes = types.filter((t) => !upstairs.has(t.id));
 
   useEffect(() => {
@@ -269,14 +288,14 @@ export function Sidebar({
         <nav className="sidebar-nav">
           <NavItem
             icon="grid"
-            label="Dashboard"
+            label="Home"
             active={view.kind === 'dashboard'}
             onClick={() => navigate({ kind: 'dashboard' })}
             onSplit={() => openPageBeside({ kind: 'dashboard' })}
           />
           <NavItem
             icon="calendar"
-            label="Daily Notes"
+            label="Journal"
             active={view.kind === 'daily'}
             onClick={() => navigate({ kind: 'daily' })}
             onSplit={() => openPageBeside({ kind: 'daily' })}
@@ -288,87 +307,99 @@ export function Sidebar({
             onClick={() => navigate({ kind: 'tasks' })}
             onSplit={() => openPageBeside({ kind: 'tasks' })}
           />
+          <button className={'nav-browse' + (browse ? ' open' : '')} onClick={toggleBrowse} aria-expanded={browse}>
+            <Icon name="chevron-right" size={13} />
+            <span>Browse</span>
+          </button>
+          {browse && (
+            <div className="nav-folded">
           <NavItem
-            icon="people"
-            label="People"
-            active={view.kind === 'people'}
-            onClick={() => navigate({ kind: 'people' })}
-            onSplit={() => openPageBeside({ kind: 'people' })}
-          />
-          <NavItem
-            icon="film"
-            label="Media"
-            active={view.kind === 'media'}
-            onClick={() => navigate({ kind: 'media' })}
-            onSplit={() => openPageBeside({ kind: 'media' })}
-          />
-          <NavItem
-            icon="hash"
-            label="Tags"
-            active={view.kind === 'tags'}
-            onClick={() => navigate({ kind: 'tags' })}
-            onSplit={() => openPageBeside({ kind: 'tags' })}
-          />
-          {/* Boards are desktop-only — see the note in PaneView. */}
-          {!narrow && (
-            <NavItem
-              icon="canvas"
-              label="Canvas"
-              active={view.kind === 'canvas'}
-              onClick={() => navigate({ kind: 'canvas' })}
-              onSplit={() => openPageBeside({ kind: 'canvas' })}
-            />
+                icon="people"
+                label="People"
+                active={view.kind === 'people'}
+                onClick={() => navigate({ kind: 'people' })}
+                onSplit={() => openPageBeside({ kind: 'people' })}
+              />
+              <NavItem
+                icon="film"
+                label="Media"
+                active={view.kind === 'media'}
+                onClick={() => navigate({ kind: 'media' })}
+                onSplit={() => openPageBeside({ kind: 'media' })}
+              />
+              <NavItem
+                icon="hash"
+                label="Tags"
+                active={view.kind === 'tags'}
+                onClick={() => navigate({ kind: 'tags' })}
+                onSplit={() => openPageBeside({ kind: 'tags' })}
+              />
+              {/* Boards are desktop-only — see the note in PaneView. */}
+              {!narrow && (
+                <NavItem
+                  icon="canvas"
+                  label="Canvas"
+                  active={view.kind === 'canvas'}
+                  onClick={() => navigate({ kind: 'canvas' })}
+                  onSplit={() => openPageBeside({ kind: 'canvas' })}
+                />
+              )}
+              <NavItem
+                icon="study"
+                label="Study"
+                active={view.kind === 'study' || view.kind === 'deck'}
+                onClick={() => navigate({ kind: 'study' })}
+                onSplit={() => openPageBeside({ kind: 'study' })}
+              />
+              <NavItem
+                icon="target"
+                label="Goals"
+                active={view.kind === 'goals'}
+                onClick={() => navigate({ kind: 'goals' })}
+                onSplit={() => openPageBeside({ kind: 'goals' })}
+              />
+            </div>
           )}
-          <NavItem
-            icon="study"
-            label="Study"
-            active={view.kind === 'study' || view.kind === 'deck'}
-            onClick={() => navigate({ kind: 'study' })}
-            onSplit={() => openPageBeside({ kind: 'study' })}
-          />
-          <NavItem
-            icon="target"
-            label="Goals"
-            active={view.kind === 'goals'}
-            onClick={() => navigate({ kind: 'goals' })}
-            onSplit={() => openPageBeside({ kind: 'goals' })}
-          />
         </nav>
 
+        {browse && (
+          <>
         <div className="sidebar-section">
-          <span>Types</span>
-          <button className="icon-btn" onClick={() => setShowNewType((v) => !v)} aria-label="New type">
-            <Icon name="plus" size={14} />
-          </button>
-        </div>
+              <span>Types</span>
+              <button className="icon-btn" onClick={() => setShowNewType((v) => !v)} aria-label="New type">
+                <Icon name="plus" size={14} />
+              </button>
+            </div>
 
-        <AnimatePresence initial={false}>
-          {showNewType && (
-            <motion.div
-              key="new-type"
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              exit={{ opacity: 0, height: 0 }}
-              transition={softSpring}
-              style={{ overflow: 'hidden' }}
-            >
-              <NewTypeForm onDone={() => setShowNewType(false)} />
-            </motion.div>
-          )}
-        </AnimatePresence>
+            <AnimatePresence initial={false}>
+              {showNewType && (
+                <motion.div
+                  key="new-type"
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={softSpring}
+                  style={{ overflow: 'hidden' }}
+                >
+                  <NewTypeForm onDone={() => setShowNewType(false)} />
+                </motion.div>
+              )}
+            </AnimatePresence>
 
-        <div className="type-list">
-          {visibleTypes.map((t) => (
-            <NavItem
-              key={t.id}
-              leading={<TypeIcon icon={t.icon} color={typeColor(t.color, theme)} size={15} />}
-              label={t.name}
-              active={view.kind === 'type' && view.typeId === t.id}
-              onClick={() => navigate({ kind: 'type', typeId: t.id })}
-              onSplit={() => openPageBeside({ kind: 'type', typeId: t.id })}
-            />
-          ))}
-        </div>
+            <div className="type-list">
+              {visibleTypes.map((t) => (
+                <NavItem
+                  key={t.id}
+                  leading={<TypeIcon icon={t.icon} color={typeColor(t.color, theme)} size={15} />}
+                  label={t.name}
+                  active={view.kind === 'type' && view.typeId === t.id}
+                  onClick={() => navigate({ kind: 'type', typeId: t.id })}
+                  onSplit={() => openPageBeside({ kind: 'type', typeId: t.id })}
+                />
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="sidebar-footer">

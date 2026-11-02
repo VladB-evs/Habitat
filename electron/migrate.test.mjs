@@ -146,3 +146,50 @@ test('legacy map tables and stale data are purged on migration or sweep', () => 
   assert.ok(!tables.includes('study_categories'), 'study_categories table dropped');
 });
 
+test('legacy overall daily mood transfers to entries that lack one', () => {
+  dbmod.closeDb();
+  const raw = new DatabaseSync(file);
+
+  // Set up day 1: daily note with mood 4, two entries without mood
+  raw
+    .prepare("INSERT INTO objects (id, type_id, title, date_key, props, created_at, updated_at) VALUES (?, 'daily', ?, ?, ?, 1, 1)")
+    .run('day-1', 'September 8, 2026', '2026-09-08', JSON.stringify({ mood: 4 }));
+  raw
+    .prepare("INSERT INTO objects (id, type_id, title, props, created_at, updated_at) VALUES (?, 'entry', 'Morning note', ?, 1, 1)")
+    .run('ent-1a', JSON.stringify({ at: 1725786000000, day: '2026-09-08' }));
+  raw
+    .prepare("INSERT INTO objects (id, type_id, title, props, created_at, updated_at) VALUES (?, 'entry', 'Evening note', ?, 1, 1)")
+    .run('ent-1b', JSON.stringify({ at: 1725818400000, day: '2026-09-08' }));
+
+  // Set up day 2: daily note with mood 2, zero entries
+  raw
+    .prepare("INSERT INTO objects (id, type_id, title, date_key, props, created_at, updated_at) VALUES (?, 'daily', ?, ?, ?, 1, 1)")
+    .run('day-2', 'September 9, 2026', '2026-09-09', JSON.stringify({ mood: 2 }));
+
+  // Set up day 3: daily note with mood 5, entry that already has mood 1
+  raw
+    .prepare("INSERT INTO objects (id, type_id, title, date_key, props, created_at, updated_at) VALUES (?, 'daily', ?, ?, ?, 1, 1)")
+    .run('day-3', 'September 10, 2026', '2026-09-10', JSON.stringify({ mood: 5 }));
+  raw
+    .prepare("INSERT INTO objects (id, type_id, title, props, created_at, updated_at) VALUES (?, 'entry', 'Rated moment', ?, 1, 1)")
+    .run('ent-3', JSON.stringify({ at: 1725958800000, day: '2026-09-10', mood: 1 }));
+
+  // Reset migration flag so it executes on open
+  raw.prepare('DELETE FROM kv WHERE key = ?').run('migration:transfer-daily-mood-to-entries-v1');
+  raw.close();
+
+  dbmod.openVault(file);
+
+  const e1a = api['objects:get']('ent-1a');
+  const e1b = api['objects:get']('ent-1b');
+  assert.equal(e1a.props.mood, 4, 'first entry inherits overall mood');
+  assert.equal(e1b.props.mood, 4, 'second entry inherits overall mood');
+
+  const day2Entries = api['entries:day']({ dateKey: '2026-09-09' });
+  assert.equal(day2Entries.length, 1, 'day with mood but no entries gets a moment');
+  assert.equal(day2Entries[0].props.mood, 2, 'created moment carries the day mood');
+
+  const e3 = api['objects:get']('ent-3');
+  assert.equal(e3.props.mood, 1, 'entry with its own mood is not overwritten');
+});
+
